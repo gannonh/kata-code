@@ -17,7 +17,7 @@ import {
 import * as ServerSettings from "../serverSettings.ts";
 import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 
-export class SandboxCredentialUnavailableError extends Data.TaggedError(
+class SandboxCredentialUnavailableError extends Data.TaggedError(
   "SandboxCredentialUnavailableError",
 )<{
   readonly providerInstanceId: ProviderInstanceId;

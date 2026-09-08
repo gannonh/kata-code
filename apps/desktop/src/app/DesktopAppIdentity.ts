@@ -21,7 +21,7 @@ const AppPackageMetadata = Schema.Struct({
 });
 const decodeAppPackageMetadata = Schema.decodeEffect(Schema.fromJsonString(AppPackageMetadata));
 
-export class DesktopUserDataPathResolutionError extends Schema.TaggedErrorClass<DesktopUserDataPathResolutionError>()(
+export class DesktopUserDataPathResolutionError extends Schema.TaggedError<DesktopUserDataPathResolutionError>()(
   "DesktopUserDataPathResolutionError",
   {
     legacyPath: Schema.String,
@@ -80,6 +80,7 @@ export const resolveUserDataPath = Effect.gen(function* () {
   });
 }).pipe(Effect.withSpan("desktop.appIdentity.resolveUserDataPath"));
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const assets = yield* DesktopAssets.DesktopAssets;
   const electronApp = yield* ElectronApp.ElectronApp;
@@ -142,10 +143,6 @@ export const make = Effect.gen(function* () {
 
     if (environment.platform === "win32") {
       yield* electronApp.setAppUserModelId(environment.appUserModelId);
-    }
-
-    if (environment.platform === "linux") {
-      yield* electronApp.setDesktopName(environment.linuxDesktopEntryName);
     }
 
     // Unpackaged runs only. A packaged bundle already carries its icon in

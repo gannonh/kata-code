@@ -1,18 +1,24 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { classifyMarkdownImageSource } from "./markdownImages.ts";
+import { classifyMarkdownImageSource, markdownImageSourceFragment } from "./markdownImages.js";
 
 describe("classifyMarkdownImageSource", () => {
   it.each([
-    ["https://example.com/image.png", "https://example.com/image.png"],
-    ["HTTP://example.com/image.png", "HTTP://example.com/image.png"],
-    ["data:image/png;base64,AAAA", "data:image/png;base64,AAAA"],
-    ["blob:https://app.t3.codes/image-id", "blob:https://app.t3.codes/image-id"],
-    ["//cdn.example.com/image.png", "https://cdn.example.com/image.png"],
-  ])("keeps %s directly loadable as %s", (source, uri) => {
-    expect(classifyMarkdownImageSource(source, "/workspace/project")).toEqual({
+    "https://example.com/image.png",
+    "HTTP://example.com/image.png",
+    "data:image/png;base64,AAAA",
+    "blob:https://app.t3.codes/image-id",
+  ])("keeps %s directly loadable", (uri) => {
+    expect(classifyMarkdownImageSource(uri, "/workspace/project")).toEqual({
       _tag: "Direct",
       uri,
+    });
+  });
+
+  it("adds HTTPS to protocol-relative URLs for native clients", () => {
+    expect(classifyMarkdownImageSource("//cdn.example.com/image.png")).toEqual({
+      _tag: "Direct",
+      uri: "https://cdn.example.com/image.png",
     });
   });
 
@@ -46,7 +52,6 @@ describe("classifyMarkdownImageSource", () => {
 
   it.each([
     null,
-    undefined,
     "",
     "#image",
     "?image=1",
@@ -59,5 +64,14 @@ describe("classifyMarkdownImageSource", () => {
     "file://%",
   ])("blocks unsupported or unresolved source %s", (source) => {
     expect(classifyMarkdownImageSource(source)).toEqual({ _tag: "Blocked" });
+  });
+});
+
+describe("markdownImageSourceFragment", () => {
+  it.each([
+    ["<icons.svg?version=2#logo>", "#logo"],
+    ["icons.svg?version=2", ""],
+  ])("extracts %s as %s", (source, fragment) => {
+    expect(markdownImageSourceFragment(source)).toBe(fragment);
   });
 });

@@ -3,18 +3,23 @@
 Hard fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code) at
 [gannonh/kata-code](https://github.com/gannonh/kata-code).
 
-## Pins (Phase 1 cut)
+## Pins
 
 | Ref                            | SHA                                        | Notes                                           |
 | ------------------------------ | ------------------------------------------ | ----------------------------------------------- |
 | Archive of pre-cut Kata `main` | `3bd3df5beebdc5546ab5b86e95b4746de131035f` | `archive/kata-2026-08` branch and annotated tag |
 | T3 pin (new `main` root)       | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f` | `pingdotgg/t3code` `main` at Build start        |
+| Current T3 pin                 | `12391bd0d38eef6655b7a9f8945d0cb5febadc2b` | Clean-slate upstream pull, KAT-3297             |
 
-Vendor-pull runs **forward from this T3 pin**. Do not chase newer T3 commits after the pin inside Phase 1. The previous Kata scan baseline `708d5383` is obsolete.
+Vendor-pull runs **forward from the current T3 pin**. This clean-slate pull supersedes
+the Phase 1 "do not chase newer T3" freeze for this update only. The chosen tip is
+fixed for this run; a different tip requires a new intake. The previous Kata scan
+baseline `708d5383` is obsolete. See the [intake](docs/upstream/kat-3297-intake.md)
+and [conflict decisions](docs/upstream/kat-3297-decisions.tsv).
 
 ```bash
 git fetch upstream
-# next scan starts at 6a687ee43
+# next scan starts at 12391bd0d
 ```
 
 ## Remotes

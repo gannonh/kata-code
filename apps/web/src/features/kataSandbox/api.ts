@@ -43,7 +43,7 @@ export type SandboxDeploymentForm = {
   readonly providerInstanceId: string;
 };
 
-export class SandboxApiError extends Error {
+class SandboxApiError extends Error {
   readonly status: number;
 
   constructor(message: string, status: number) {
@@ -171,7 +171,7 @@ function jsonRequest(body: unknown): RequestInit {
   };
 }
 
-export function createSandboxRequestId(): string {
+function createSandboxRequestId(): string {
   return randomUUID();
 }
 

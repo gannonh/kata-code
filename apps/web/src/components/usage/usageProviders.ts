@@ -1,6 +1,6 @@
 import type { UsageProviderKind } from "@kata-sh/code-contracts";
 
-import { ClaudeAI, type Icon, OpenAI } from "../Icons";
+import { ClaudeAI, GrokIcon, type Icon, OpenAI } from "../Icons";
 
 type UsageProviderPresentation = {
   readonly label: string;
@@ -10,19 +10,25 @@ type UsageProviderPresentation = {
 
 /**
  * Exhaustive presentation for providers supported by the usage contract.
- * Declaration order is reused by every chart, table, legend, and skeleton, so
- * adding a provider only requires its contract support and one entry here.
+ * Declaration order is reused by every chart and table, so adding a provider
+ * only requires its contract support and one entry here.
  */
 export const PROVIDER_PRESENTATION = {
   codex: {
     label: "Codex",
-    color: "var(--foreground)",
+    color: "var(--contrast-foreground)",
     mark: OpenAI,
   },
   claude: {
     label: "Claude Code",
     color: "#d97757",
     mark: ClaudeAI,
+  },
+  grok: {
+    label: "Grok Build",
+    // Contrast-aware neutral between the Codex series and muted chart chrome.
+    color: "color-mix(in oklab, var(--contrast-foreground) 72%, var(--background))",
+    mark: GrokIcon,
   },
 } satisfies Record<UsageProviderKind, UsageProviderPresentation>;
 

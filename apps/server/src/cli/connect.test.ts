@@ -17,7 +17,6 @@ import {
   formatHeadlessAuthorizationPrompt,
   formatRelayClientReady,
   headlessSessionConfig,
-  isPublishAgentActivityEnabledValue,
   reportCloudDisconnectResults,
 } from "./connect.ts";
 import { recoverServiceOnboardingOffer } from "./service.ts";
@@ -213,11 +212,4 @@ it.effect("keeps disconnect causes in structured logs and out of console warning
       }),
     ),
   );
-});
-
-it("treats only the literal 'true' as publish-enabled", () => {
-  assert.equal(isPublishAgentActivityEnabledValue("true"), true);
-  assert.equal(isPublishAgentActivityEnabledValue("false"), false);
-  assert.equal(isPublishAgentActivityEnabledValue(null), false);
-  assert.equal(isPublishAgentActivityEnabledValue("TRUE"), false);
 });

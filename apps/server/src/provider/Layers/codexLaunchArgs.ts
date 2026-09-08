@@ -1,14 +1,13 @@
 import { tokenizeCliArgs } from "@kata-sh/code-shared/cliArgs";
 
-export const KATACODE_CODEX_LAUNCH_ARGS_ENV = "KATACODE_CODEX_LAUNCH_ARGS";
+const KATACODE_CODEX_LAUNCH_ARGS_ENV = "KATACODE_CODEX_LAUNCH_ARGS";
 
 export const resolveCodexLaunchArgs = (
   launchArgs?: string,
   environment: NodeJS.ProcessEnv = process.env,
 ) => environment[KATACODE_CODEX_LAUNCH_ARGS_ENV]?.trim() || launchArgs?.trim() || "";
 
-export const codexLaunchArgv = (launchArgs?: string): ReadonlyArray<string> =>
-  tokenizeCliArgs(launchArgs);
+const codexLaunchArgv = (launchArgs?: string): ReadonlyArray<string> => tokenizeCliArgs(launchArgs);
 
 export const codexAppServerArgs = (launchArgs?: string) => [
   "app-server",

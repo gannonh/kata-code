@@ -48,3 +48,13 @@ Verify every result is 1024×1024 and has the classic macOS safe area: an 824×8
 ```
 
 Do not edit the generated PNG or ICO files directly.
+
+## Android launcher and splash artwork
+
+Kata Android launcher foregrounds use the existing variant universal PNGs from `assets/dev`,
+`assets/nightly`, and `assets/prod`. Splash screens use each variant's iOS 1024 PNG.
+`apps/mobile/app.config.ts` selects these assets through `BRAND_ASSET_PATHS`.
+
+The upstream `icons:export:android` script renders T3 Icon Composer layers into separate files in
+`apps/mobile/assets`. Those outputs are not used by Kata's configuration or checked in.
+The existing `android-icon-mark.png` monochrome asset remains unchanged in this update.

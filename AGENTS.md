@@ -50,6 +50,7 @@
 - Verify the actual changed behavior or artifact and complete required project checks. Match the scope of verification to the impact of the change.
 - Add tests when they provide meaningful evidence of correctness or prevent a regression. Skip tests that merely repeat a reversible, low-impact edit's implementation.
 - Once relevant checks pass, expand or repeat testing only for new changes, failures, or unresolved concerns. State what was verified and any material verification limits.
+
 <!-- end global rules -->
 
 <!-- begin dev lifecycle -->

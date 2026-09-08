@@ -7,7 +7,7 @@ import {
 import type { EnvironmentId } from "@kata-sh/code-contracts";
 import type { RelayClientEnvironmentRecord } from "@kata-sh/code-contracts/relay";
 import * as Option from "effect/Option";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useEffectEvent, useState } from "react";
 
 import { connectRelayEnvironment as connectRelayEnvironmentAtom } from "~/connection/onboarding";
 import { cn } from "~/lib/utils";
@@ -16,17 +16,21 @@ import { useRelayEnvironmentDiscovery } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { ConnectionStatusDot } from "../ConnectionStatusDot";
 import { ITEM_ROW_CLASSNAME, ITEM_ROW_INNER_CLASSNAME } from "../settings/itemRows";
+import { Checkbox } from "../ui/checkbox";
 import { Button } from "../ui/button";
 import { Skeleton } from "../ui/skeleton";
 import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { presentSavedCloudEnvironmentConnection } from "./cloudEnvironmentConnectionPresentation";
+
+const EMPTY_DISCOVERY_REFRESH_INTERVAL_MS = 5_000;
 
 export interface SavedCloudEnvironmentConnection {
   readonly environmentId: EnvironmentId;
   readonly connection: EnvironmentConnectionPresentation;
 }
 
-export function RemoteEnvironmentRowsSkeleton() {
+function RemoteEnvironmentRowsSkeleton() {
   return (
     <div className={ITEM_ROW_CLASSNAME}>
       <div className={ITEM_ROW_INNER_CLASSNAME}>
@@ -51,12 +55,22 @@ export function CloudEnvironmentConnectRows({
   primaryEnvironmentId,
   savedEnvironments,
   showSavedEnvironments = false,
+  refreshWhileEmpty = false,
   empty = null,
+  selection,
+  onDiscoveryReady,
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
   readonly savedEnvironments: ReadonlyArray<SavedCloudEnvironmentConnection>;
   readonly showSavedEnvironments?: boolean;
+  readonly refreshWhileEmpty?: boolean;
   readonly empty?: ReactNode;
+  readonly onDiscoveryReady?: () => void;
+  readonly selection?: {
+    readonly autoSelectedComputers?: Set<EnvironmentId>;
+    readonly selectedIds: ReadonlySet<EnvironmentId>;
+    readonly onChange: (environmentId: EnvironmentId, selected: boolean) => void;
+  };
 }) {
   const environmentsState = useRelayEnvironmentDiscovery();
   const registerEnvironment = useAtomCommand(connectRelayEnvironmentAtom, {
@@ -64,6 +78,10 @@ export function CloudEnvironmentConnectRows({
   });
   const refreshRelayEnvironments = useAtomCommand(relayEnvironmentDiscovery.refresh, {
     reportFailure: false,
+  });
+  const refreshDiscoveryWhenIdle = useEffectEvent(async () => {
+    if (environmentsState.refreshing || environmentsState.offline) return;
+    await refreshRelayEnvironments();
   });
   const connectRelayEnvironment = useCallback(
     (environment: RelayClientEnvironmentRecord) =>
@@ -73,31 +91,43 @@ export function CloudEnvironmentConnectRows({
       }),
     [registerEnvironment],
   );
-  const [connectingEnvironmentId, setConnectingEnvironmentId] = useState<EnvironmentId | null>(
-    null,
-  );
+  const [connectingEnvironmentIds, setConnectingEnvironmentIds] = useState<
+    ReadonlySet<EnvironmentId>
+  >(new Set());
   const savedById = new Map(
     savedEnvironments.map((environment) => [environment.environmentId, environment]),
   );
 
   useEffect(() => {
-    void refreshRelayEnvironments();
-  }, [refreshRelayEnvironments]);
+    let active = true;
+    if (onDiscoveryReady || !refreshWhileEmpty || document.visibilityState === "visible") {
+      void refreshRelayEnvironments().then(() => {
+        if (active) onDiscoveryReady?.();
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [refreshRelayEnvironments, refreshWhileEmpty, onDiscoveryReady]);
 
   const connectEnvironment = async (environment: RelayClientEnvironmentRecord) => {
-    setConnectingEnvironmentId(environment.environmentId);
+    setConnectingEnvironmentIds((current) => new Set([...current, environment.environmentId]));
     const result = await connectRelayEnvironment(environment);
-    setConnectingEnvironmentId(null);
+    setConnectingEnvironmentIds((current) => {
+      const next = new Set(current);
+      next.delete(environment.environmentId);
+      return next;
+    });
     if (result._tag === "Success") {
       toastManager.add({
         type: "success",
         title: "Environment added",
         description: `Connecting to ${environment.label} through Kata Code Connect.`,
       });
-      return;
+      return true;
     }
     if (isAtomCommandInterrupted(result)) {
-      return;
+      return false;
     }
     const cause = squashAtomCommandFailure(result);
     const message =
@@ -119,6 +149,7 @@ export function CloudEnvironmentConnectRows({
           }
         : undefined,
     });
+    return false;
   };
 
   const visibleEnvironments = [...environmentsState.environments.values()].filter(
@@ -126,10 +157,73 @@ export function CloudEnvironmentConnectRows({
       environment.environmentId !== primaryEnvironmentId &&
       (showSavedEnvironments || !savedById.has(environment.environmentId)),
   );
+  const selectNewComputers = useEffectEvent(() => {
+    const seen = selection?.autoSelectedComputers;
+    if (!selection || !seen) return;
+    for (const { environment } of visibleEnvironments) {
+      const id = environment.environmentId;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      selection.onChange(id, true);
+      if (!savedById.has(id)) {
+        void connectEnvironment(environment).then((connected) => {
+          if (!connected) selection.onChange(id, false);
+        });
+      }
+    }
+  });
+  useEffect(() => {
+    selectNewComputers();
+  }, [environmentsState.environments]);
+
+  // Discovery clears its list on refresh, so poll only until a machine appears.
+  const shouldRefreshWhileEmpty =
+    refreshWhileEmpty && visibleEnvironments.length === 0 && !environmentsState.offline;
+
+  useEffect(() => {
+    if (!shouldRefreshWhileEmpty) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+    let pending = false;
+    const visible = () => document.visibilityState === "visible";
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!disposed && visible()) {
+        timer = setTimeout(() => void refresh(), EMPTY_DISCOVERY_REFRESH_INTERVAL_MS);
+      }
+    };
+    const refresh = async () => {
+      if (disposed || pending || !visible()) return;
+      clearTimeout(timer);
+      pending = true;
+      try {
+        await refreshDiscoveryWhenIdle();
+      } finally {
+        pending = false;
+        schedule();
+      }
+    };
+    const onFocus = () => void refresh();
+    const onVisibilityChange = () => {
+      clearTimeout(timer);
+      if (visible()) void refresh();
+    };
+
+    schedule();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [shouldRefreshWhileEmpty]);
 
   const standalone = showSavedEnvironments || savedEnvironments.length === 0;
 
   if (
+    !refreshWhileEmpty &&
     standalone &&
     visibleEnvironments.length === 0 &&
     environmentsState.refreshing &&
@@ -194,6 +288,48 @@ export function CloudEnvironmentConnectRows({
           : availability === "checking"
             ? "Available · Checking relay status…"
             : (Option.getOrNull(error)?.message ?? "Available · Relay status unavailable");
+    if (selection) {
+      return (
+        <label
+          key={environment.environmentId}
+          className="flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 has-disabled:cursor-default"
+        >
+          <Checkbox
+            checked={selection.selectedIds.has(environment.environmentId)}
+            disabled={connectingEnvironmentIds.has(environment.environmentId)}
+            onCheckedChange={async (checked) => {
+              selection.onChange(environment.environmentId, checked);
+              if (checked && !savedEnvironment) {
+                const connected = await connectEnvironment(environment);
+                if (!connected) selection.onChange(environment.environmentId, false);
+              }
+            }}
+          />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{environment.label}</span>
+          <Tooltip>
+            <TooltipTrigger
+              render={<span tabIndex={0} />}
+              className={cn(
+                "max-w-[45%] shrink-0 truncate text-xs",
+                savedConnection?.tone === "error" ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {connectingEnvironmentIds.has(environment.environmentId)
+                ? "Connecting…"
+                : (savedConnection?.buttonLabel ??
+                  (availability === "online"
+                    ? "Available"
+                    : availability === "offline"
+                      ? "Offline"
+                      : availability === "error"
+                        ? "Unavailable"
+                        : "Checking…"))}
+            </TooltipTrigger>
+            <TooltipPopup className="max-w-80 break-words">{statusText}</TooltipPopup>
+          </Tooltip>
+        </label>
+      );
+    }
     return (
       <div key={environment.environmentId} className={ITEM_ROW_CLASSNAME}>
         <div className={ITEM_ROW_INNER_CLASSNAME}>
@@ -241,10 +377,10 @@ export function CloudEnvironmentConnectRows({
           ) : (
             <Button
               size="sm"
-              disabled={connectingEnvironmentId !== null}
+              disabled={connectingEnvironmentIds.size > 0}
               onClick={() => void connectEnvironment(environment)}
             >
-              {connectingEnvironmentId === environment.environmentId ? "Connecting…" : "Connect"}
+              {connectingEnvironmentIds.has(environment.environmentId) ? "Connecting…" : "Connect"}
             </Button>
           )}
         </div>

@@ -25,11 +25,11 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // our own handler entry pointing at the current AppImage and claim the
 // scheme default via xdg-mime, exactly what the file manager's "set as
 // default" checkbox would record in mimeapps.list.
-export const URL_HANDLER_DESKTOP_ENTRY_NAME = DESKTOP_URL_HANDLER_ENTRY_NAME;
+const URL_HANDLER_DESKTOP_ENTRY_NAME = DESKTOP_URL_HANDLER_ENTRY_NAME;
 
 const { logInfo, logWarning } = makeComponentLogger("desktop-linux-url-handler");
 
-export class DesktopLinuxUrlHandlerRegistrationError extends Schema.TaggedErrorClass<DesktopLinuxUrlHandlerRegistrationError>()(
+export class DesktopLinuxUrlHandlerRegistrationError extends Schema.TaggedError<DesktopLinuxUrlHandlerRegistrationError>()(
   "DesktopLinuxUrlHandlerRegistrationError",
   {
     step: Schema.Literals(["write-desktop-entry", "set-default-handler"]),
@@ -97,6 +97,7 @@ export class DesktopLinuxUrlHandler extends Context.Service<
   }
 >()("@kata-sh/code-desktop/app/DesktopLinuxUrlHandler") {}
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -106,7 +107,7 @@ export const make = Effect.gen(function* () {
   const schemes = desktopUrlHandlerSchemes(environment.isDevelopment);
   const desktopEntryPath = environment.path.join(
     environment.linuxApplicationsDir,
-    URL_HANDLER_DESKTOP_ENTRY_NAME,
+    environment.isPackaged ? URL_HANDLER_DESKTOP_ENTRY_NAME : environment.linuxDesktopEntryName,
   );
   const legacyDesktopEntryPath = environment.path.join(
     environment.linuxApplicationsDir,
@@ -117,15 +118,19 @@ export const make = Effect.gen(function* () {
     // Inside the mounted AppImage, process.execPath points at a transient
     // /tmp/.mount_* path — the handler must launch the AppImage itself.
     const execTarget = Option.getOrElse(environment.appImagePath, () => process.execPath);
+    const content = renderUrlHandlerDesktopEntry({
+      displayName: environment.displayName,
+      execTarget,
+      schemes,
+    });
+    // Pre-ready setup normally wrote this already. Avoid truncating a valid
+    // entry while the portal may be reading it during startup.
+    const existing = yield* fileSystem
+      .readFileString(desktopEntryPath)
+      .pipe(Effect.orElseSucceed(() => null));
+    if (existing === content) return;
     yield* fileSystem.makeDirectory(environment.linuxApplicationsDir, { recursive: true });
-    yield* fileSystem.writeFileString(
-      desktopEntryPath,
-      renderUrlHandlerDesktopEntry({
-        displayName: environment.displayName,
-        execTarget,
-        schemes,
-      }),
-    );
+    yield* fileSystem.writeFileString(desktopEntryPath, content);
   }).pipe(
     Effect.mapError(
       (cause) =>
@@ -174,13 +179,14 @@ export const make = Effect.gen(function* () {
   );
 
   const register = Effect.gen(function* () {
-    if (environment.platform !== "linux" || !environment.isPackaged) {
+    if (environment.platform !== "linux") {
       return;
     }
     yield* writeDesktopEntry;
     // Best-effort: the previous slug's hidden entry must not keep claiming
     // the legacy URL scheme after this process has claimed both schemes.
     yield* fileSystem.remove(legacyDesktopEntryPath, { force: true }).pipe(Effect.ignore);
+    if (!environment.isPackaged) return;
     yield* setDefaultHandler;
     yield* logInfo("registered URL scheme handler", { schemes });
   }).pipe(

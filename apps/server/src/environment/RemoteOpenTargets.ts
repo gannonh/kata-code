@@ -26,6 +26,7 @@ export class RemoteOpenTargets extends Context.Service<
   }
 >()("@kata-sh/code-cli/environment/RemoteOpenTargets") {}
 
+/** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const net = yield* NetService.NetService;

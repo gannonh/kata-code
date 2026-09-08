@@ -66,7 +66,7 @@ const SandboxGitHubBranchQuery = {
   repository: GitHubRepository,
 };
 
-export class SandboxConflictError extends Schema.TaggedErrorClass<SandboxConflictError>()(
+export class SandboxConflictError extends Schema.TaggedError<SandboxConflictError>()(
   "SandboxConflictError",
   {
     message: Schema.String,
@@ -79,7 +79,7 @@ export class SandboxConflictError extends Schema.TaggedErrorClass<SandboxConflic
   }
 }
 
-export class SandboxAuthorizationError extends Schema.TaggedErrorClass<SandboxAuthorizationError>()(
+export class SandboxAuthorizationError extends Schema.TaggedError<SandboxAuthorizationError>()(
   "SandboxAuthorizationError",
   { message: Schema.String },
   { httpApiStatus: 403 },
@@ -89,7 +89,7 @@ export class SandboxAuthorizationError extends Schema.TaggedErrorClass<SandboxAu
   }
 }
 
-export class SandboxNotFoundError extends Schema.TaggedErrorClass<SandboxNotFoundError>()(
+export class SandboxNotFoundError extends Schema.TaggedError<SandboxNotFoundError>()(
   "SandboxNotFoundError",
   { message: Schema.String },
   { httpApiStatus: 404 },
@@ -99,7 +99,7 @@ export class SandboxNotFoundError extends Schema.TaggedErrorClass<SandboxNotFoun
   }
 }
 
-export class SandboxCommandError extends Schema.TaggedErrorClass<SandboxCommandError>()(
+export class SandboxCommandError extends Schema.TaggedError<SandboxCommandError>()(
   "SandboxCommandError",
   { message: Schema.String },
   { httpApiStatus: 502 },

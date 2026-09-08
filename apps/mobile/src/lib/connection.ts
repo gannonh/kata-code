@@ -1,8 +1,5 @@
 import { EnvironmentId } from "@kata-sh/code-contracts";
-import { stripPairingTokenFromUrl } from "@kata-sh/code-shared/remote";
 import { type EnvironmentConnectionPhase } from "@kata-sh/code-client-runtime/connection";
-
-export { authClientMetadata } from "./authClientMetadata";
 
 export interface SavedRemoteConnection {
   readonly environmentId: EnvironmentId;
@@ -18,15 +15,6 @@ export interface SavedRemoteConnection {
 }
 
 export type RemoteClientConnectionState = EnvironmentConnectionPhase;
-
-export function redactPairingCredential(pairingUrl: string): string {
-  const trimmed = pairingUrl.trim();
-  try {
-    return stripPairingTokenFromUrl(new URL(trimmed)).toString();
-  } catch {
-    return trimmed;
-  }
-}
 
 export function isRelayManagedConnection(
   connection: Pick<SavedRemoteConnection, "authenticationMethod" | "relayManaged">,

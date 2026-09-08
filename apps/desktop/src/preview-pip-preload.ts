@@ -1,4 +1,3 @@
-// @effect-diagnostics globalDate:off - This isolated Electron preload does not run inside an Effect runtime.
 import type { DesktopPreviewRecordingFrame } from "@kata-sh/code-contracts";
 import { contextBridge, ipcRenderer } from "electron";
 

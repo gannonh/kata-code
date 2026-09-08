@@ -13,7 +13,6 @@ import {
   createEnvironmentRpcQueryAtomFamily,
 } from "./runtime.ts";
 import { ensureWorkspaceProject } from "../operations/workspaceProject.ts";
-export { WorkspaceProjectError } from "../operations/workspaceProject.ts";
 import {
   type CreateProjectInput,
   type DeleteProjectInput,

@@ -88,23 +88,9 @@ const provideTestEnv = Effect.provide(
 
 const isAuthorizationError = Schema.is(CliTokenManager.CloudCliAuthorizationError);
 
-class PromptRejectedError extends Schema.TaggedErrorClass<PromptRejectedError>()(
-  "PromptRejectedError",
-  { message: Schema.String },
-) {}
-
-it("formats loopback authorization with a headless-host fallback", () => {
-  assert.equal(
-    CliTokenManager.formatLoopbackAuthorizationPrompt("https://clerk.example.test/authorize"),
-    [
-      "Open this URL to authorize Kata Code Connect:",
-      "  https://clerk.example.test/authorize",
-      "",
-      "Press \u001b[1mEnter\u001b[22m to open it in your browser.",
-      "No browser on this device? Press \u001b[1mH\u001b[22m to switch to headless mode.",
-    ].join("\n"),
-  );
-});
+class PromptRejectedError extends Schema.TaggedError<PromptRejectedError>()("PromptRejectedError", {
+  message: Schema.String,
+}) {}
 
 const makeTestTerminal = (queue: Queue.Queue<Terminal.UserInput>) =>
   Terminal.make({
@@ -137,6 +123,20 @@ it.effect("opens the browser on Enter and switches the active flow on H", () =>
     });
 
     assert.deepEqual(opened, ["https://clerk.example.test/authorize"]);
+    assert.deepEqual(result, { _tag: "HeadlessRequested" });
+  }),
+);
+
+it.effect("switches to headless authorization without launching a browser on a headless host", () =>
+  Effect.gen(function* () {
+    const queue = yield* Queue.make<Terminal.UserInput>();
+    yield* Queue.offer(queue, userInput("h"));
+    const result = yield* CliTokenManager.waitForLoopbackAuthorization({
+      authorizationUrl: "https://clerk.example.test/authorize",
+      callback: Effect.never,
+      terminal: makeTestTerminal(queue),
+      launchBrowser: () => Effect.die("Headless authorization must not launch a browser"),
+    });
     assert.deepEqual(result, { _tag: "HeadlessRequested" });
   }),
 );

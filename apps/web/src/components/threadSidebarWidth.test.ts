@@ -6,13 +6,12 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   resolveInitialThreadSidebarWidth,
   THREAD_MAIN_CONTENT_MIN_WIDTH,
-  THREAD_SIDEBAR_DEFAULT_WIDTH,
   THREAD_SIDEBAR_MIN_WIDTH,
 } from "./threadSidebarWidth";
 
 describe("thread sidebar width", () => {
   it("uses the default width when no preference is stored", () => {
-    expect(resolveInitialThreadSidebarWidth(null, 1200)).toBe(THREAD_SIDEBAR_DEFAULT_WIDTH);
+    expect(resolveInitialThreadSidebarWidth(null, 1200)).toBe(256);
   });
 
   it("uses a stored width in the initial render", () => {

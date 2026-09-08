@@ -21,7 +21,7 @@ import { RelayWebClientId } from "@kata-sh/code-contracts/relay";
 import {
   Connection,
   EnvironmentRegistry,
-  registerPairingConnection,
+  ConnectionOnboarding,
   Connectivity,
   Wakeups,
   ProfileStore,
@@ -449,7 +449,10 @@ function makeClientLayer() {
       scopes: AuthStandardClientScopes,
     }),
     Layer.succeed(Platform.PrimaryEnvironmentAuth, { bearerToken: Effect.succeed(Option.none()) }),
-    Layer.succeed(Platform.CloudSession, { clerkToken: unsupported }),
+    Layer.succeed(Platform.CloudSession, {
+      identity: Effect.succeed(Option.none()),
+      clerkToken: unsupported,
+    }),
     Layer.succeed(Platform.RelayDeviceIdentity, { deviceId: Effect.succeed(Option.none()) }),
     Layer.succeed(Platform.SshEnvironmentGateway, {
       provision: () => unsupported,
@@ -474,7 +477,7 @@ function makeClientLayer() {
           targets.delete(target.environmentId);
         }),
     }),
-    ProfileStore.layer({
+    Layer.succeed(ProfileStore.ConnectionProfileStore, {
       get: (id) => Effect.sync(() => Option.fromUndefinedOr(profiles.get(id))),
       put: (profile) =>
         Effect.sync(() => {
@@ -485,7 +488,7 @@ function makeClientLayer() {
           profiles.delete(id);
         }),
     }),
-    CredentialStore.layer({
+    Layer.succeed(CredentialStore.ConnectionCredentialStore, {
       get: (id) => Effect.sync(() => Option.fromUndefinedOr(credentials.get(id))),
       put: (id, credential) =>
         Effect.sync(() => {
@@ -674,7 +677,8 @@ describe.runIf(enabled)("Docker sandbox HTTP E2E", () => {
           handoffs,
           (handoff, index) =>
             Effect.gen(function* () {
-              const environmentId = yield* registerPairingConnection({
+              const onboarding = yield* ConnectionOnboarding;
+              const environmentId = yield* onboarding.registerPairing({
                 pairingUrl: handoff.body.pairingUrl,
               });
               const registry = yield* EnvironmentRegistry;

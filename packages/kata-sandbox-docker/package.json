@@ -31,7 +31,7 @@
   },
   "scripts": {
     "build:image": "node scripts/build-image.mjs",
-    "typecheck": "tsgo --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vp test run"
   },
   "dependencies": {

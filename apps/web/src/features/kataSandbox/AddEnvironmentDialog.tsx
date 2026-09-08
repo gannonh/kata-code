@@ -1049,13 +1049,13 @@ function AttachmentResult({
   );
 }
 
-export function sandboxProviderDescriptors(
+function sandboxProviderDescriptors(
   list: SandboxListResponse | null,
 ): ReadonlyArray<SandboxProviderDescriptor> {
   return list?.providers ?? [];
 }
 
-export function isSandboxListAuthenticated(
+function isSandboxListAuthenticated(
   authenticated: boolean,
   list: SandboxListResponse | null,
 ): boolean {
