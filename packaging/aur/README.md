@@ -6,8 +6,8 @@ repackage the official x86_64 AppImage from GitHub Releases.
 
 ## Publishing
 
-The release workflow calls `.github/workflows/publish-aur.yml` after publishing a GitHub release;
-the workflow can also be run manually for a specific tag. It selects the stable or nightly
+AUR publishing is parked at `.github/disabled/publish-aur.yml` until a later phase.
+The parked workflow can run manually for a specific tag. It selects the stable or nightly
 package, then updates its version and checksums, builds it, regenerates `.SRCINFO`, and pushes it
 to the AUR.
 

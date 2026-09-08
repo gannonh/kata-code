@@ -13,7 +13,7 @@ Command examples use POSIX shell syntax. On Windows, use PowerShell equivalents:
 
 Inspect the host and the affected code before launching processes:
 
-- On macOS with Xcode, prefer one representative iOS Simulator when the change is cross-platform so the user can watch through serve-sim. Load and follow [`ios-debugger-agent`](../ios-debugger-agent/SKILL.md), and load [`ios-simulator-browser`](../ios-simulator-browser/SKILL.md) when live streaming is available.
+- On macOS with Xcode, prefer one representative iOS Simulator when the change is cross-platform so the user can watch through serve-sim.
 - On macOS, Linux, or Windows with the Android SDK, use one Android Emulator when Android is the affected surface or iOS tooling is unavailable.
 - When the change is platform-specific, test that platform. When neither platform is viable, report the missing SDK, emulator, or dev-client prerequisite rather than claiming verification.
 
@@ -91,7 +91,7 @@ Run Metro from `apps/mobile`.
 
 ### iOS launch
 
-Use `ios-debugger-agent` to select one UDID and set these XcodeBuildMCP session defaults:
+Select one UDID and set these XcodeBuildMCP session defaults:
 
 - Workspace: `<repo>/apps/mobile/ios/KataCodeDev.xcworkspace`
 - Scheme: `KataCodeDev`
@@ -155,7 +155,7 @@ Pairing credentials are secret, short-lived, and single-use. Create a different 
 
 ### iOS
 
-Use `snapshot_ui` and current element references from XcodeBuildMCP for taps and typing. Stream the same UDID through `ios-simulator-browser` so the user can watch in Kata Code when the host supports it. Use the stream as a visual feed rather than a reason to switch to fragile browser coordinates.
+Use `snapshot_ui` and current element references from XcodeBuildMCP for taps and typing.
 
 ### Android
 
