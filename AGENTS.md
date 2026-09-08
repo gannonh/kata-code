@@ -132,13 +132,13 @@ If a PR closes without merging, comment on the issue with the reason and move it
 
 All projects using this lifecycle share these Linear settings, confirmed by Gannon's September 7, 2026 screenshot:
 
-| GitHub event | Linear action |
-| --- | --- |
-| Draft PR opened | Move to In Progress |
-| PR opened | Move to Agent Review |
-| PR review requested or review activity | No action |
-| PR ready for merge | No action |
-| PR merged | Move to Done |
+| GitHub event                           | Linear action        |
+| -------------------------------------- | -------------------- |
+| Draft PR opened                        | Move to In Progress  |
+| PR opened                              | Move to Agent Review |
+| PR review requested or review activity | No action            |
+| PR ready for merge                     | No action            |
+| PR merged                              | Move to Done         |
 
 No branch-specific rules are configured. Parent issues automatically close when their last sub-issue closes; closing a parent does not automatically close its sub-issues. Stale issues move to Canceled after six months. Closed items auto-archive after six months. Issues progressing to a new status are placed first.
 
