@@ -4,8 +4,6 @@ import type { CSSProperties, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "@effect/atom-react";
 import {
-  AuthAccessWriteScope,
-  AuthAdministrativeScopes,
   type BackgroundActivityProfile,
   type DesktopUpdateChannel,
   ProviderDriverKind,
@@ -135,8 +133,9 @@ import {
   readLastEnabledProjectGroupingMode,
   rememberEnabledProjectGroupingMode,
   resolveBackgroundActivityProfileOption,
-  EXPERIMENTAL_FEATURE_TARGET_IDS,
-  LEGACY_FEATURE_TARGET_IDS,
+  foldedSectionHeadingForSearchTarget,
+  GENERAL_FOLDED_SECTION_ORDER,
+  sessionCanAdministerSettings,
 } from "./SettingsPanels.logic";
 import {
   PolicyTooltip,
@@ -1670,14 +1669,12 @@ function AutoSettleDaysInput({
 }
 
 function ExperimentalFeaturesSection() {
-  const desktopBridge = window.desktopBridge;
   const primarySessionState = usePrimarySessionState();
-  const currentSessionScopes = desktopBridge
-    ? AuthAdministrativeScopes
-    : primarySessionState.data?.authenticated
-      ? (primarySessionState.data.scopes ?? null)
-      : null;
-  const canAdminister = currentSessionScopes?.includes(AuthAccessWriteScope) ?? false;
+  const canAdminister = sessionCanAdministerSettings({
+    hasDesktopBridge: Boolean(window.desktopBridge),
+    authenticated: primarySessionState.data?.authenticated === true,
+    scopes: primarySessionState.data?.scopes ?? null,
+  });
   const [open, setOpen] = useState(false);
   const searchTargetId = useSettingsSearchTargetId();
   // Unfold once per search jump so a still-set target cannot reopen a fold the user closed.
@@ -1687,7 +1684,9 @@ function ExperimentalFeaturesSection() {
       lastExpandedTargetRef.current = null;
       return;
     }
-    if (!EXPERIMENTAL_FEATURE_TARGET_IDS.has(searchTargetId)) return;
+    if (foldedSectionHeadingForSearchTarget(searchTargetId) !== GENERAL_FOLDED_SECTION_ORDER[0]) {
+      return;
+    }
     if (lastExpandedTargetRef.current === searchTargetId) return;
     lastExpandedTargetRef.current = searchTargetId;
     setOpen(true);
@@ -1700,7 +1699,7 @@ function ExperimentalFeaturesSection() {
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-3 sm:px-4">
           <h2 className="text-lg font-semibold tracking-[-0.025em] text-muted-foreground transition-colors group-hover:text-foreground">
-            Experimental
+            {GENERAL_FOLDED_SECTION_ORDER[0]}
           </h2>
           <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
         </CollapsibleTrigger>
@@ -1734,7 +1733,9 @@ function LegacyFeaturesSection() {
       lastExpandedTargetRef.current = null;
       return;
     }
-    if (!LEGACY_FEATURE_TARGET_IDS.has(searchTargetId)) return;
+    if (foldedSectionHeadingForSearchTarget(searchTargetId) !== GENERAL_FOLDED_SECTION_ORDER[1]) {
+      return;
+    }
     if (lastExpandedTargetRef.current === searchTargetId) return;
     lastExpandedTargetRef.current = searchTargetId;
     setOpen(true);
@@ -1745,7 +1746,7 @@ function LegacyFeaturesSection() {
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-3 sm:px-4">
           <h2 className="text-lg font-semibold tracking-[-0.025em] text-muted-foreground transition-colors group-hover:text-foreground">
-            Legacy features
+            {GENERAL_FOLDED_SECTION_ORDER[1]}
           </h2>
           <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
         </CollapsibleTrigger>

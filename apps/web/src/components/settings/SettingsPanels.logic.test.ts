@@ -1,4 +1,8 @@
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 import {
+  AuthAccessWriteScope,
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
   ProviderDriverKind,
@@ -23,7 +27,13 @@ import {
   LEGACY_FEATURE_TARGET_IDS,
   projectGroupingModeFromToggle,
   resolveBackgroundActivityProfileOption,
+  sessionCanAdministerSettings,
 } from "./SettingsPanels.logic";
+
+const generalPanelSource = NodeFS.readFileSync(
+  NodePath.join(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "SettingsPanels.tsx"),
+  "utf8",
+);
 
 describe("typography settings restore", () => {
   it("detects family and size changes by font row", () => {
@@ -322,5 +332,57 @@ describe("general folded sections", () => {
     expect(LEGACY_FEATURE_TARGET_IDS).toEqual(
       new Set(["legacy-plan-mode", "legacy-token-streaming", "legacy-sidebar"]),
     );
+  });
+
+  it("keeps the sandboxes row inside Experimental, above Legacy", () => {
+    const experimentalFn = generalPanelSource.indexOf("function ExperimentalFeaturesSection");
+    const row = generalPanelSource.indexOf("<SandboxesPreviewSetting />");
+    const everydayPanel = generalPanelSource.indexOf("export function GeneralSettingsPanel");
+    const mountExperimental = generalPanelSource.indexOf("<ExperimentalFeaturesSection />");
+    const mountLegacy = generalPanelSource.indexOf("<LegacyFeaturesSection />");
+    expect(experimentalFn).toBeGreaterThan(-1);
+    expect(row).toBeGreaterThan(experimentalFn);
+    expect(row).toBeLessThan(everydayPanel);
+    expect(generalPanelSource.slice(everydayPanel, mountExperimental)).not.toContain(
+      "<SandboxesPreviewSetting />",
+    );
+    expect(mountExperimental).toBeGreaterThan(-1);
+    expect(mountExperimental).toBeLessThan(mountLegacy);
+  });
+});
+
+describe("sessionCanAdministerSettings", () => {
+  it("treats a desktop bridge session as administrative", () => {
+    expect(
+      sessionCanAdministerSettings({
+        hasDesktopBridge: true,
+        authenticated: false,
+        scopes: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("requires access:write on a browser session", () => {
+    expect(
+      sessionCanAdministerSettings({
+        hasDesktopBridge: false,
+        authenticated: true,
+        scopes: [AuthAccessWriteScope],
+      }),
+    ).toBe(true);
+    expect(
+      sessionCanAdministerSettings({
+        hasDesktopBridge: false,
+        authenticated: true,
+        scopes: [],
+      }),
+    ).toBe(false);
+    expect(
+      sessionCanAdministerSettings({
+        hasDesktopBridge: false,
+        authenticated: false,
+        scopes: [AuthAccessWriteScope],
+      }),
+    ).toBe(false);
   });
 });

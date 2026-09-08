@@ -1,13 +1,15 @@
-import type {
-  BackgroundActivityProfile,
-  BackgroundActivitySettings,
-  ProviderDriverKind,
-  ProviderInstanceConfig,
-  PreviewViewportSetting,
-  ProviderInstanceId,
-  ServerSettings,
-  SidebarProjectGroupingMode,
-  UnifiedSettings,
+import {
+  AuthAccessWriteScope,
+  AuthAdministrativeScopes,
+  type BackgroundActivityProfile,
+  type BackgroundActivitySettings,
+  type ProviderDriverKind,
+  type ProviderInstanceConfig,
+  type PreviewViewportSetting,
+  type ProviderInstanceId,
+  type ServerSettings,
+  type SidebarProjectGroupingMode,
+  type UnifiedSettings,
 } from "@kata-sh/code-contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@kata-sh/code-contracts/settings";
 import {
@@ -355,4 +357,17 @@ export function foldedSectionHeadingForSearchTarget(targetId: string): string | 
     if (section.ids.has(targetId)) return section.heading;
   }
   return null;
+}
+
+export function sessionCanAdministerSettings(input: {
+  readonly hasDesktopBridge: boolean;
+  readonly authenticated: boolean;
+  readonly scopes: ReadonlyArray<string> | null;
+}): boolean {
+  const scopes = input.hasDesktopBridge
+    ? AuthAdministrativeScopes
+    : input.authenticated
+      ? input.scopes
+      : null;
+  return scopes?.includes(AuthAccessWriteScope) ?? false;
 }
