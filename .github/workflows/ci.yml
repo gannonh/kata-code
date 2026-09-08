@@ -338,3 +338,50 @@ jobs:
 
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
+
+  # The only job that runs DockerSandboxHttpE2E.test.ts: the test skips unless
+  # KATACODE_DOCKER_HTTP_E2E=1, so the server shards never cover the Docker path.
+  docker_sandbox_e2e:
+    name: Docker Sandbox E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Required for docker buildx `type=gha` cache import/export in the image build step.
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=@kata-sh/code-cli...
+              - --filter=@kata-sh/code-kata-sandbox-docker...
+              - --filter=@kata-sh/code-client-runtime...
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build host-platform sandbox image
+        run: |
+          node packages/kata-sandbox-docker/scripts/build-image.mjs \
+            --output-file "${{ runner.temp }}/kata-sandbox-dev-image.json"
+
+      - name: Run Docker sandbox HTTP E2E
+        env:
+          KATACODE_DOCKER_HTTP_E2E: "1"
+          KATACODE_SANDBOX_IMAGE_DIGEST_FILE: ${{ runner.temp }}/kata-sandbox-dev-image.json
+          # Scoped to this step only: create resolves the GitHub source via gh on the spawned serve process.
+          GH_TOKEN: ${{ github.token }}
+        run: vp test run apps/server/src/kataSandbox/DockerSandboxHttpE2E.test.ts
