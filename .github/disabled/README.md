@@ -5,3 +5,5 @@ GitHub only runs YAML under [`.github/workflows/`](../workflows/). Nothing here 
 Phase 2 release publishing is active at [`workflows/release.yml`](../workflows/release.yml).
 
 Active: `workflows/ci.yml` and `workflows/release.yml` (`ubuntu-24.04`, `macos-15`, `windows-2025`).
+
+Parked files are mobile EAS, AUR, PR size, issue labels, and web preview. `pr-vouch.yml` was deleted because it gated on removed `.github/VOUCHED.td`.
