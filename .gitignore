@@ -44,6 +44,7 @@ uat-evidence/
 
 # Installed / third-party skills. First-party Kata skills stay tracked.
 .agents/skills/*
+!.agents/skills/economize/
 !.agents/skills/test-t3-app/
 !.agents/skills/test-t3-mobile/
 !.agents/skills/verify-katacode/

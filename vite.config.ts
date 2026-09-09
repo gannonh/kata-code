@@ -29,7 +29,7 @@ export default defineConfig({
     // Formatter only. Oxfmt has no shell parser, so "*" is unsafe: a bash-only
     // commit forwards .sh paths and oxfmt exits when it has no target files.
     "*.{js,jsx,cjs,mjs,ts,tsx,cts,mts,json,jsonc,json5,yml,yaml,toml,html,css,scss,less,md,mdx}":
-      "vp fmt",
+      "vp fmt --no-error-on-unmatched-pattern",
   },
   fmt: {
     ignorePatterns: [
