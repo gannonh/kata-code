@@ -40,6 +40,7 @@ const source = "export const View = () => <div>Ready</div>;";
 let pool: WorkerPoolManager;
 let renderer: FileRenderer;
 let terminationPromises: Promise<number>[];
+const animationFrames = new Set<ReturnType<typeof setImmediate>>();
 
 class WorkerTransport {
   private readonly worker = new NodeWorkerThreads.Worker(
@@ -96,10 +97,18 @@ function firstEnter(highlighter: DiffsHighlighter, file: FileContents, language:
 
 beforeEach(async () => {
   terminationPromises = [];
-  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) =>
-    setImmediate(() => callback(0)),
-  );
-  vi.stubGlobal("cancelAnimationFrame", clearImmediate);
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    const frame = setImmediate(() => {
+      animationFrames.delete(frame);
+      callback(0);
+    });
+    animationFrames.add(frame);
+    return frame;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (frame: ReturnType<typeof setImmediate>) => {
+    animationFrames.delete(frame);
+    clearImmediate(frame);
+  });
   vi.stubGlobal("window", { matchMedia: () => ({ matches: true }) });
   await disposeHighlighter();
   pool = new WorkerPoolManager(
@@ -111,13 +120,18 @@ beforeEach(async () => {
   renderer = new FileRenderer(options, undefined, pool);
 });
 
-afterEach(async () => {
+async function cleanUpFixture() {
   renderer?.cleanUp();
   pool?.terminate();
   await Promise.all(terminationPromises);
   await disposeHighlighter();
+  // Pool termination can queue a final broadcast after its workers have exited.
+  for (const frame of animationFrames) clearImmediate(frame);
+  animationFrames.clear();
   vi.unstubAllGlobals();
-});
+}
+
+afterEach(cleanUpFixture);
 
 describe("editable file language readiness", () => {
   it.each(["hydrate", "renderFile"] as const)(
@@ -182,5 +196,26 @@ describe("editable file language readiness", () => {
     const highlighter = await renderer.initializeHighlighter();
     firstEnter(highlighter, file, "text");
     expect(highlighter.getLoadedLanguages()).not.toContain("tsx");
+  });
+
+  it("cleans up an already terminated worker pool", async () => {
+    const file = { name: "cold.tsx", contents: source, cacheKey: "terminate-tsx" };
+    await pool.primeFileHighlightCache(file);
+    renderer.renderFile(file);
+    pool.terminate();
+    await Promise.all(terminationPromises);
+    expect(pool.getStats().totalWorkers).toBe(0);
+
+    const requestFrame = globalThis.requestAnimationFrame;
+    const cancelFrame = globalThis.cancelAnimationFrame;
+    const window = globalThis.window;
+    try {
+      await cleanUpFixture();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      vi.stubGlobal("requestAnimationFrame", requestFrame);
+      vi.stubGlobal("cancelAnimationFrame", cancelFrame);
+      vi.stubGlobal("window", window);
+    }
   });
 });
