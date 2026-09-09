@@ -10,19 +10,19 @@ Provider-qualified per-role choices. Read the installed pstack provider-dispatch
 feature, refactoring: cursor:cursor-grok-4.6@xhigh
 bug-fix: cursor:cursor-grok-4.6@xhigh
 perf-issue: cursor:cursor-grok-4.6@xhigh
-hillclimb: cursor:claude-fable-5-1@medium
-judgment and prose: cursor:claude-fable-5-1@medium
+hillclimb: cursor:cursor-grok-4.6@xhig
+judgment and prose: cursor:cursor-grok-4.6@xhigh
 hardest tasks: codex:gpt-6-astra@max
 how explorer: cursor:cursor-grok-4.6@xhigh
 how explainer: cursor:cursor-grok-4.6@xhigh
-how critics: cursor:claude-fable-5-1@medium, codex:gpt-6-astra@medium, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@medium
+how critics: cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, ccursor:cursor-grok-4.6@xhigh
 why investigators: inherit-parent
 why synthesizer: inherit-parent
 reflect tooling: inherit-parent
 reflect judgment, divergent, synthesizer: inherit-parent
-arena runners: cursor:claude-fable-5-1@medium, codex:gpt-6-astra@medium, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@medium
-arena cross-judge pool: cursor:claude-fable-5-1@medium, codex:gpt-6-astra@medium, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@medium
+arena runners: cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, ccursor:cursor-grok-4.6@xhigh
+arena cross-judge pool: cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, ccursor:cursor-grok-4.6@xhigh
 swarm workers: cursor:cursor-grok-4.6@xhigh
-architect runners: cursor:claude-fable-5-1@medium, codex:gpt-6-astra@medium, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@medium
-interrogate reviewers: cursor:claude-fable-5-1@medium, codex:gpt-6-astra@medium, cursor:cursor-grok-4.6@xhigh, codex:gpt-5.6-sol@medium
+architect runners: cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, ccursor:cursor-grok-4.6@xhigh
+interrogate reviewers: cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, ccursor:cursor-grok-4.6@xhigh
 <!-- pstack:models:end -->
