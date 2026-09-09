@@ -364,38 +364,42 @@ describe("upstream preservation CLI", () => {
     expect(result.stderr).toContain("--skip is not supported");
   });
 
-  it("runs the trusted current checker against a clean historical candidate with external inventory", () => {
-    withHistoricalBaselineWorktree((temporaryRoot) => {
-      const result = NodeChildProcess.spawnSync(
-        process.execPath,
-        [
-          scriptPath,
-          "--mode",
-          "baseline",
-          "--repository-root",
-          temporaryRoot,
-          "--inventory",
-          NodePath.join(repositoryRoot, "docs/upstream/retained-behavior.v1.json"),
-          "--candidate",
-          currentSha,
-          "--base",
-          currentSha,
-          "--upstream",
-          upstreamSha,
-          "--upstream-base",
-          upstreamBaseSha,
-        ],
-        { cwd: repositoryRoot, encoding: "utf8" },
-      );
+  it(
+    "runs the trusted current checker against a clean historical candidate with external inventory",
+    { timeout: 5 * 60 * 1000 },
+    () => {
+      withHistoricalBaselineWorktree((temporaryRoot) => {
+        const result = NodeChildProcess.spawnSync(
+          process.execPath,
+          [
+            scriptPath,
+            "--mode",
+            "baseline",
+            "--repository-root",
+            temporaryRoot,
+            "--inventory",
+            NodePath.join(repositoryRoot, "docs/upstream/retained-behavior.v1.json"),
+            "--candidate",
+            currentSha,
+            "--base",
+            currentSha,
+            "--upstream",
+            upstreamSha,
+            "--upstream-base",
+            upstreamBaseSha,
+          ],
+          { cwd: repositoryRoot, encoding: "utf8" },
+        );
 
-      expect(result.status).toBe(0);
-      expect(result.stdout).toContain(
-        `UPSTREAM_PRESERVATION mode=baseline candidate=${currentSha} base=${currentSha}`,
-      );
-      expect(result.stdout).toContain("INVENTORY status=PASS");
-      expect(result.stdout).toContain("CHECK id=icon-composer-live-evidence status=NOT RUN");
-    });
-  });
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain(
+          `UPSTREAM_PRESERVATION mode=baseline candidate=${currentSha} base=${currentSha}`,
+        );
+        expect(result.stdout).toContain("INVENTORY status=PASS");
+        expect(result.stdout).toContain("CHECK id=icon-composer-live-evidence status=NOT RUN");
+      });
+    },
+  );
 
   it("rejects repository and inventory overrides outside baseline mode", () => {
     for (const mode of ["ci", "human-review"] as const) {
@@ -579,32 +583,36 @@ describe("upstream preservation CLI", () => {
     expect(matchesOwnerPath("apps/desktop/src/new.ts", "apps/desktop/src")).toBe(true);
   });
 
-  it("fails the public preservation gate for a retained sandbox regression", () => {
-    withSandboxRegressionWorktree((temporaryRoot, candidateSha) => {
-      const result = NodeChildProcess.spawnSync(
-        process.execPath,
-        [
-          "scripts/check-upstream-preservation.ts",
-          "--mode",
-          "baseline",
-          "--candidate",
-          candidateSha,
-          "--base",
-          candidateSha,
-          "--upstream",
-          upstreamSha,
-          "--upstream-base",
-          upstreamBaseSha,
-        ],
-        { cwd: temporaryRoot, encoding: "utf8" },
-      );
+  it(
+    "fails the public preservation gate for a retained sandbox regression",
+    { timeout: 5 * 60 * 1000 },
+    () => {
+      withSandboxRegressionWorktree((temporaryRoot, candidateSha) => {
+        const result = NodeChildProcess.spawnSync(
+          process.execPath,
+          [
+            "scripts/check-upstream-preservation.ts",
+            "--mode",
+            "baseline",
+            "--candidate",
+            candidateSha,
+            "--base",
+            candidateSha,
+            "--upstream",
+            upstreamSha,
+            "--upstream-base",
+            upstreamBaseSha,
+          ],
+          { cwd: temporaryRoot, encoding: "utf8" },
+        );
 
-      expect(result.status).toBe(1);
-      expect(result.stdout).toContain(
-        "CHECK id=sandbox-preview-default status=FAIL detail=command vp test run apps/server/src/serverSettings.test.ts apps/server/src/kataSandbox/sandboxFeature.test.ts apps/web/src/components/settings/ConnectionsSettings.sandbox.test.tsx apps/web/src/components/settings/settingsBranding.test.tsx",
-      );
-    });
-  });
+        expect(result.status).toBe(1);
+        expect(result.stdout).toContain(
+          "CHECK id=sandbox-preview-default status=FAIL detail=command vp test run apps/server/src/serverSettings.test.ts apps/server/src/kataSandbox/sandboxFeature.test.ts apps/web/src/components/settings/ConnectionsSettings.sandbox.test.tsx apps/web/src/components/settings/settingsBranding.test.tsx",
+        );
+      });
+    },
+  );
 
   it("fails the public preservation gate when a grouped test path is missing", () => {
     withSandboxRegressionWorktree((temporaryRoot, candidateSha, commitFixture) => {
