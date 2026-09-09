@@ -1,21 +1,8 @@
 # The build caller must provide an immutable OCI reference.
 ARG KATACODE_BASE_IMAGE
-FROM ${KATACODE_BASE_IMAGE}
+FROM ${KATACODE_BASE_IMAGE} AS base
 
-ARG KATACODE_CLI_VERSION
-ARG KATACODE_CLI_SHA256
 ARG DEBIAN_SNAPSHOT=20260824T000000Z
-ARG KATACODE_CLI_PACKAGE=@kata-sh/code-cli
-ARG CODEX_VERSION
-ARG CODEX_SHA256
-ARG CODEX_PACKAGE=@openai/codex
-
-LABEL org.opencontainers.image.source="https://github.com/gannonh/kata-code" \
-  com.katacode.sandbox.kata-version="${KATACODE_CLI_VERSION}" \
-  com.katacode.sandbox.server-version="${KATACODE_CLI_VERSION}" \
-  com.katacode.sandbox.server-artifact-sha256="${KATACODE_CLI_SHA256}" \
-  com.katacode.sandbox.codex-version="${CODEX_VERSION}" \
-  com.katacode.sandbox.codex-artifact-sha256="${CODEX_SHA256}"
 
 # node:24-bookworm-slim intentionally omits source-control and native build
 # tooling. Use the snapshot recorded by the pinned base image so package
@@ -43,19 +30,26 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
   && command -v make \
   && command -v python3
 
-RUN mkdir -p /usr/local/share/kata-sandbox-artifacts
+FROM base AS unpublished-npm
+
+ARG KATACODE_CLI_VERSION
+ARG KATACODE_CLI_SHA256
+ARG KATACODE_CLI_PACKAGE=@kata-sh/code-cli
+ARG CODEX_VERSION
+ARG CODEX_SHA256
+ARG CODEX_PACKAGE=@openai/codex
+
+RUN mkdir -p /usr/local/share/kata-sandbox-artifacts /opt/kata-sandbox-codex-native
 COPY artifacts/package.json /usr/local/share/kata-sandbox-artifacts/package.json
 COPY artifacts/package-lock.json /usr/local/share/kata-sandbox-artifacts/package-lock.json
 COPY artifacts/kata-code-cli.tgz /usr/local/share/kata-sandbox-artifacts/kata-code-cli.tgz
 COPY artifacts/codex.tgz /usr/local/share/kata-sandbox-artifacts/codex.tgz
 
-RUN printf '%s  %s\n' "${KATACODE_CLI_SHA256}" /usr/local/share/kata-sandbox-artifacts/kata-code-cli.tgz | sha256sum -c - \
-  && printf '%s  %s\n' "${CODEX_SHA256}" /usr/local/share/kata-sandbox-artifacts/codex.tgz | sha256sum -c -
-
 ENV PATH=/usr/local/share/kata-sandbox-artifacts/node_modules/.bin:$PATH
-ENV KATACODE_SANDBOX_INSTALL_ROOT=/usr/local/share/kata-sandbox-artifacts/node_modules
 
-RUN node --input-type=module -e ' \
+RUN printf '%s  %s\n' "${KATACODE_CLI_SHA256}" /usr/local/share/kata-sandbox-artifacts/kata-code-cli.tgz | sha256sum -c - \
+  && printf '%s  %s\n' "${CODEX_SHA256}" /usr/local/share/kata-sandbox-artifacts/codex.tgz | sha256sum -c - \
+  && node --input-type=module -e ' \
   import { execFileSync } from "node:child_process"; \
   const readPackage = (archive) => JSON.parse(execFileSync("tar", ["-xOf", archive, "package/package.json"], { encoding: "utf8" })); \
   const kata = readPackage("/usr/local/share/kata-sandbox-artifacts/kata-code-cli.tgz"); \
@@ -63,19 +57,34 @@ RUN node --input-type=module -e ' \
   if (kata.name !== process.env.KATACODE_CLI_PACKAGE || kata.version !== process.env.KATACODE_CLI_VERSION) process.exit(64); \
   if (codex.name !== process.env.CODEX_PACKAGE || codex.version !== process.env.CODEX_VERSION) process.exit(64); \
   ' \
-  # Both packages are local, digest-checked artifacts. No tag or dist-tag is \
-  # resolved by the image build. \
   && cd /usr/local/share/kata-sandbox-artifacts \
   && npm ci --omit=dev --no-audit --no-fund \
-  && mkdir -p /opt/kata-sandbox-codex-native \
   && find node_modules/@openai -mindepth 1 -maxdepth 1 -type d -name 'codex-linux-*' \
     -exec mv {} /opt/kata-sandbox-codex-native/ \; \
+  && test "$(find /opt/kata-sandbox-codex-native -mindepth 1 -maxdepth 1 -name 'codex-linux-*' | wc -l)" -ge 1 \
   && command -v katacode
 
-# Codex linux natives are their own layer so the npm ci blob stays under VCR's 500 MB cap.
-RUN find /opt/kata-sandbox-codex-native -mindepth 1 -maxdepth 1 -name 'codex-linux-*' \
-    -exec mv {} /usr/local/share/kata-sandbox-artifacts/node_modules/@openai/ \; \
-  && rmdir /opt/kata-sandbox-codex-native \
+FROM base
+
+ARG KATACODE_CLI_VERSION
+ARG KATACODE_CLI_SHA256
+ARG CODEX_VERSION
+ARG CODEX_SHA256
+
+LABEL org.opencontainers.image.source="https://github.com/gannonh/kata-code" \
+  com.katacode.sandbox.kata-version="${KATACODE_CLI_VERSION}" \
+  com.katacode.sandbox.server-version="${KATACODE_CLI_VERSION}" \
+  com.katacode.sandbox.server-artifact-sha256="${KATACODE_CLI_SHA256}" \
+  com.katacode.sandbox.codex-version="${CODEX_VERSION}" \
+  com.katacode.sandbox.codex-artifact-sha256="${CODEX_SHA256}"
+
+ENV PATH=/usr/local/share/kata-sandbox-artifacts/node_modules/.bin:$PATH
+ENV KATACODE_SANDBOX_INSTALL_ROOT=/usr/local/share/kata-sandbox-artifacts/node_modules
+
+COPY --from=unpublished-npm /usr/local/share/kata-sandbox-artifacts /usr/local/share/kata-sandbox-artifacts
+COPY --from=unpublished-npm /opt/kata-sandbox-codex-native/ /usr/local/share/kata-sandbox-artifacts/node_modules/@openai/
+
+RUN command -v katacode \
   && command -v codex
 
 RUN groupadd --gid 1001 katacode \

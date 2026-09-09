@@ -339,8 +339,7 @@ function lockPackage(lock: Record<string, unknown>, path: string): Record<string
   return packageEntry as Record<string, unknown>;
 }
 
-const claudeNativeLockPath =
-  /^node_modules\/@anthropic-ai\/claude-agent-sdk-(darwin|linux|win32)-/;
+const claudeNativeLockPath = /^node_modules\/@anthropic-ai\/claude-agent-sdk-(darwin|linux|win32)-/;
 
 export function prepareSandboxRuntimeLock(lock: unknown): Record<string, unknown> {
   if (lock === null || typeof lock !== "object") {

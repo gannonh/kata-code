@@ -221,19 +221,89 @@ describe("image build boundaries", () => {
     assert.deepEqual(claudeSdk?.optionalDependencies ?? {}, {});
   });
 
-  it("installs Codex linux natives in a separate image layer from npm ci", () => {
+  it("first publishes Codex linux natives via COPY --from a prior stage", () => {
     const dockerfile = NodeFS.readFileSync(
       NodePath.join(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "../Dockerfile"),
       "utf8",
-    ).replace(/\\\n/g, " ");
-    const runs = dockerfile.split("\n").filter((line) => line.startsWith("RUN "));
-    const npmCi = runs.find((run) => run.includes("npm ci"));
-    const restoreCodex = runs.find(
-      (run) => run.includes("codex-linux-") && !run.includes("npm ci"),
     );
-    assert.isDefined(npmCi);
-    assert.include(String(npmCi), "codex-linux-");
-    assert.isDefined(restoreCodex);
-    assert.notEqual(npmCi, restoreCodex);
+    const plan = publishedSandboxLayerPlan(dockerfile);
+    assert.notEqual(plan.npmCiStage, plan.finalStage);
+    assert.isFalse(plan.finalInstructions.some((line) => line.includes("npm ci")));
+    assert.isDefined(plan.artifactCopyFromNpm);
+    assert.isDefined(plan.codexNativeCopyFromNpm);
+    assert.isBelow(plan.artifactCopyIndex, plan.codexNativeCopyIndex);
+  });
+
+  it("rejects parking Codex natives in the published npm ci layer", () => {
+    assert.throws(
+      () =>
+        publishedSandboxLayerPlan(`
+ARG KATACODE_BASE_IMAGE
+FROM \${KATACODE_BASE_IMAGE}
+RUN npm ci && mv node_modules/@openai/codex-linux-* /opt/kata-sandbox-codex-native/
+RUN mv /opt/kata-sandbox-codex-native/codex-linux-* node_modules/@openai/
+`),
+      /published stage must not run npm ci/,
+    );
   });
 });
+
+function dockerfileLogicalLines(source: string): string[] {
+  return source
+    .replace(/\\\n/g, " ")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("#"));
+}
+
+function publishedSandboxLayerPlan(source: string): {
+  readonly npmCiStage: string;
+  readonly finalStage: string;
+  readonly finalInstructions: ReadonlyArray<string>;
+  readonly artifactCopyFromNpm: string | undefined;
+  readonly codexNativeCopyFromNpm: string | undefined;
+  readonly artifactCopyIndex: number;
+  readonly codexNativeCopyIndex: number;
+} {
+  const stages: Array<{ name: string; instructions: string[] }> = [];
+  let unnamed = 0;
+  for (const line of dockerfileLogicalLines(source)) {
+    const from = /^FROM\s+\S+(?:\s+AS\s+(\S+))?/i.exec(line);
+    if (from) {
+      stages.push({ name: from[1] ?? `unnamed-${String(unnamed++)}`, instructions: [] });
+      continue;
+    }
+    stages.at(-1)?.instructions.push(line);
+  }
+  const npmCiStage = stages.find((stage) =>
+    stage.instructions.some((line) => line.includes("npm ci")),
+  );
+  const final = stages.at(-1);
+  if (npmCiStage === undefined || final === undefined) {
+    throw new Error("Dockerfile must run npm ci and have a final stage.");
+  }
+  if (npmCiStage.name === final.name) {
+    throw new Error("published stage must not run npm ci");
+  }
+  const copies = final.instructions.filter((line) => line.startsWith("COPY --from="));
+  const artifactCopyFromNpm = copies.find(
+    (line) =>
+      line.includes(`--from=${npmCiStage.name}`) &&
+      line.includes("kata-sandbox-artifacts") &&
+      !line.includes("kata-sandbox-codex-native"),
+  );
+  const codexNativeCopyFromNpm = copies.find(
+    (line) =>
+      line.includes(`--from=${npmCiStage.name}`) && line.includes("kata-sandbox-codex-native"),
+  );
+  return {
+    npmCiStage: npmCiStage.name,
+    finalStage: final.name,
+    finalInstructions: final.instructions,
+    artifactCopyFromNpm,
+    codexNativeCopyFromNpm,
+    artifactCopyIndex: artifactCopyFromNpm === undefined ? -1 : copies.indexOf(artifactCopyFromNpm),
+    codexNativeCopyIndex:
+      codexNativeCopyFromNpm === undefined ? -1 : copies.indexOf(codexNativeCopyFromNpm),
+  };
+}
