@@ -18,7 +18,6 @@ function runSetup(worktree: string, env: Record<string, string>) {
   });
 }
 
-// Stub `vp` so the test only runs where that executable can run.
 // oxlint-disable-next-line kata-code/no-global-process-runtime -- Skip decision about the actual host; the script under test has no Effect runtime.
 it.skipIf(!symlinksSupported || NodeOS.platform() === "win32")(
   "links shared env files from KATACODE_PROJECT_ROOT",
