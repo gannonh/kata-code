@@ -1,0 +1,454 @@
+{
+  "schemaVersion": 1,
+  "inventoryVersion": "v1",
+  "entries": [
+    {
+      "id": "product-identity-release-ownership",
+      "title": "Kata product identity and release ownership",
+      "retainedOutcome": "Shipped product names, package scope, CLI, state ownership, release workflows, and hosted identity remain Kata-owned.",
+      "ownerPaths": [
+        "FORK.md",
+        "packages/shared/src/branding.ts",
+        "package.json",
+        ".github/workflows/release.yml"
+      ],
+      "specRefs": ["FORK.md", "docs/product-branding.md", "docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "product-identity-release-ownership"
+      }
+    },
+    {
+      "id": "portable-brand-assets",
+      "title": "Portable Kata brand assets",
+      "retainedOutcome": "Portable icon and web asset families resolve to Kata artwork and remain distinct by release channel.",
+      "ownerPaths": ["assets", "scripts/lib/brand-assets.ts", "scripts/lib/icon-export.ts"],
+      "specRefs": ["docs/product-branding.md", "docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "portable-brand-assets"
+      }
+    },
+    {
+      "id": "connect-wire-identity",
+      "title": "Kata Connect wire identity",
+      "retainedOutcome": "Connect protocol names, endpoints, and relay resource identifiers remain the Kata wire contract.",
+      "ownerPaths": [
+        "packages/contracts/src/wireIdentity.ts",
+        "scripts/check-connect-wire-identity.ts",
+        "FORK.md"
+      ],
+      "specRefs": ["FORK.md", "docs/internals/t3-connect.md"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "connect-wire-identity"
+      }
+    },
+    {
+      "id": "state-isolation",
+      "title": "Kata state and environment isolation",
+      "retainedOutcome": "Desktop state paths and environment selection remain isolated under Kata-owned directories and protocols.",
+      "ownerPaths": [
+        "apps/desktop/src/app/DesktopStatePaths.ts",
+        "apps/desktop/src/app/DesktopEnvironment.ts",
+        "FORK.md"
+      ],
+      "specRefs": ["FORK.md", "apps/desktop/src/app/DesktopStatePaths.test.ts"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "state-isolation"
+      }
+    },
+    {
+      "id": "sandbox-preview-default",
+      "title": "Sandbox preview default and settings registration",
+      "retainedOutcome": "Sandbox preview remains registered in settings while disabled by default and available through the explicit Kata override.",
+      "ownerPaths": [
+        "apps/server/src/serverSettings.ts",
+        "apps/server/src/kataSandbox/sandboxFeature.ts",
+        "apps/web/src/components/settings/ConnectionsSettings.sandbox.test.tsx",
+        "apps/web/src/components/settings/settingsBranding.test.tsx"
+      ],
+      "specRefs": ["docs/upstream/kat-3297-intake.md", "docs/upstream/kat-3297-verification.md"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "sandbox-preview-default"
+      }
+    },
+    {
+      "id": "sandbox-route-driver-registration",
+      "title": "Sandbox route and provider driver registration",
+      "retainedOutcome": "Sandbox routes and provider instance drivers remain registered together without enabling the default preview.",
+      "ownerPaths": [
+        "apps/server/src/kataSandbox",
+        "apps/server/src/server.ts",
+        "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts"
+      ],
+      "specRefs": ["docs/internals/kata-sandbox.md", "docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "sandbox-route-driver-registration"
+      }
+    },
+    {
+      "id": "provider-sandbox-environment-isolation",
+      "title": "Provider and sandbox environment isolation",
+      "retainedOutcome": "Sandbox bootstrap credentials are stripped before provider launch and provider home configuration remains isolated.",
+      "ownerPaths": ["apps/server/src/provider/ProviderInstanceEnvironment.ts"],
+      "specRefs": [
+        "docs/upstream/kat-3297-decisions.tsv",
+        "apps/server/src/provider/ProviderInstanceEnvironment.test.ts"
+      ],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "provider-sandbox-environment-isolation"
+      }
+    },
+    {
+      "id": "migration-identity",
+      "title": "Kata migration identity and upstream upgrade ordering",
+      "retainedOutcome": "Applied Kata migration IDs remain stable and incoming upstream operations run once at unoccupied IDs.",
+      "ownerPaths": [
+        "apps/server/src/persistence/Migrations.ts",
+        "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
+        "apps/server/src/kataSandbox/migrations.ts"
+      ],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv", "docs/upstream/kat-3297-intake.md"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "migration-identity"
+      }
+    },
+    {
+      "id": "retained-process-credential-behavior",
+      "title": "Retained process and VCS behavior",
+      "retainedOutcome": "Kata process execution and VCS binary handling remain stable while provider environment boundaries are checked separately.",
+      "ownerPaths": ["apps/server/src/processRunner.ts", "apps/server/src/vcs/VcsProcess.ts"],
+      "specRefs": ["docs/upstream/kat-3297-intake.md", "docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "retained-process-credential-behavior"
+      }
+    },
+    {
+      "id": "retained-web-mobile-behavior",
+      "title": "Retained web and mobile Kata behaviors",
+      "retainedOutcome": "Retained web settings identity and mobile branding behavior remain Kata-specific after upstream UI changes.",
+      "ownerPaths": [
+        "apps/web/src/components/settings/settingsBranding.test.tsx",
+        "apps/mobile/src/lib/mobileBranding.ts",
+        "apps/mobile/src/lib/mobileBranding.test.ts"
+      ],
+      "specRefs": [
+        "docs/upstream/kat-3297-decisions.tsv",
+        "docs/upstream/kat-3297-verification.md"
+      ],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "retained-web-mobile-behavior"
+      }
+    },
+    {
+      "id": "mobile-shelf-preferences",
+      "title": "Mobile shelf preference identity and defaults",
+      "retainedOutcome": "Kata shelf preference keys and settled-expanded defaults remain stable without compatibility reads.",
+      "ownerPaths": ["apps/mobile/src/features/threads/use-thread-list-v2-shelf-preferences.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "mobile-shelf-preferences"
+      }
+    },
+    {
+      "id": "mobile-markdown-image-lifecycle",
+      "title": "Mobile Markdown image lifecycle and bounds",
+      "retainedOutcome": "Kata image lifecycle guards, dimensions, captions, and media behavior survive the upstream extraction.",
+      "ownerPaths": [
+        "apps/mobile/src/features/threads/ThreadMarkdownImage.tsx",
+        "apps/mobile/src/lib/markdownMedia.ts"
+      ],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "mobile-markdown-image-lifecycle"
+      }
+    },
+    {
+      "id": "mobile-pairing-redaction",
+      "title": "Mobile pairing credential redaction",
+      "retainedOutcome": "Pairing credentials remain redacted while mobile pairing retains Kata schemes and hosts.",
+      "ownerPaths": ["apps/mobile/src/features/connection/pairing.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "mobile-pairing-redaction"
+      }
+    },
+    {
+      "id": "desktop-clerk-environment-identity",
+      "title": "Desktop Clerk and environment identity",
+      "retainedOutcome": "Desktop Clerk bootstrap and Kata state/environment identity survive upstream lifecycle changes.",
+      "ownerPaths": [
+        "apps/desktop/src/app/DesktopClerk.ts",
+        "apps/desktop/src/app/DesktopEnvironment.ts"
+      ],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "desktop-clerk-environment-identity"
+      }
+    },
+    {
+      "id": "desktop-protocol-bundle-identity",
+      "title": "Desktop protocol and bundle identity",
+      "retainedOutcome": "Desktop bundle, display, protocol, and scheme identities remain Kata-owned.",
+      "ownerPaths": [
+        "apps/desktop/src/app/DesktopAppIdentity.ts",
+        "apps/desktop/src/app/DesktopEarlyElectronStartup.ts",
+        "apps/desktop/src/electron/ElectronProtocol.ts"
+      ],
+      "specRefs": ["FORK.md", "docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "desktop-protocol-bundle-identity"
+      }
+    },
+    {
+      "id": "desktop-url-handler-backend-routes",
+      "title": "Desktop URL handler and backend environment routes",
+      "retainedOutcome": "Kata URL handlers and /.well-known/kata/environment backend routes remain registered.",
+      "ownerPaths": [
+        "apps/desktop/src/app/DesktopLinuxUrlHandler.ts",
+        "apps/desktop/src/backend/DesktopBackendManager.ts"
+      ],
+      "specRefs": ["FORK.md", "docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "desktop-url-handler-backend-routes"
+      }
+    },
+    {
+      "id": "desktop-browser-session-isolation",
+      "title": "Desktop browser session namespace isolation",
+      "retainedOutcome": "Persistent Kata browser storage remains separate from ephemeral preview sessions.",
+      "ownerPaths": ["apps/desktop/src/preview/BrowserSession.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "desktop-browser-session-isolation"
+      }
+    },
+    {
+      "id": "desktop-update-recovery",
+      "title": "Desktop update recovery and reservation behavior",
+      "retainedOutcome": "Desktop update installation and recovery retain restart and reservation guarantees.",
+      "ownerPaths": ["apps/desktop/src/updates/DesktopUpdates.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "desktop-update-recovery"
+      }
+    },
+    {
+      "id": "desktop-window-behavior",
+      "title": "Desktop window lifecycle and reveal behavior",
+      "retainedOutcome": "Window event listeners, reveal state, and lifecycle cleanup remain retained Kata behavior.",
+      "ownerPaths": [
+        "apps/desktop/src/window/DesktopWindow.ts",
+        "apps/desktop/src/app/DesktopLifecycle.ts"
+      ],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "desktop-window-behavior"
+      }
+    },
+    {
+      "id": "desktop-packaging-asset-identity",
+      "title": "Desktop packaging, signing, and retained asset identity",
+      "retainedOutcome": "Signed desktop packaging keeps Kata assets, scoped release identity, and signing safeguards.",
+      "ownerPaths": ["scripts/build-desktop-artifact.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv", "docs/product-branding.md"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "desktop-packaging-asset-identity"
+      }
+    },
+    {
+      "id": "release-package-ownership",
+      "title": "Kata release package and asset ownership",
+      "retainedOutcome": "Release package metadata, installer names, and update-version tooling remain scoped to Kata-owned package and workflow identities.",
+      "ownerPaths": [
+        "package.json",
+        "scripts/release-asset-names.ts",
+        "scripts/update-release-package-versions.ts",
+        ".github/workflows/release.yml"
+      ],
+      "specRefs": ["FORK.md", "docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "release-package-ownership"
+      }
+    },
+    {
+      "id": "desktop-launcher-identity",
+      "title": "Desktop launcher identity and development environment",
+      "retainedOutcome": "Desktop launcher bundle, display, protocol, scheme, and development-root identities remain Kata-owned.",
+      "ownerPaths": ["apps/desktop/scripts/electron-launcher.mjs"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "desktop-launcher-identity"
+      }
+    },
+    {
+      "id": "desktop-assets-identity",
+      "title": "Desktop Kata asset resolution",
+      "retainedOutcome": "Desktop asset resolution keeps Kata icon resources and does not silently select upstream source-tree artwork.",
+      "ownerPaths": ["apps/desktop/src/app/DesktopAssets.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv", "docs/product-branding.md"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "desktop-assets-identity"
+      }
+    },
+    {
+      "id": "desktop-linux-keyring-behavior",
+      "title": "Desktop Linux keyring wording and behavior",
+      "retainedOutcome": "Linux keyring remediation and its visible Kata wording remain stable for supported desktop secret-storage paths.",
+      "ownerPaths": ["apps/desktop/src/linuxSecretStorage.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "desktop-linux-keyring-behavior"
+      }
+    },
+    {
+      "id": "mobile-android-asset-config-identity",
+      "title": "Mobile Android asset and config identity",
+      "retainedOutcome": "Android config variants keep Kata package and configured asset paths; artwork acceptance remains a separate live check.",
+      "ownerPaths": ["apps/mobile/app.config.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv", "docs/product-branding.md"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "mobile-android-asset-config-identity"
+      }
+    },
+    {
+      "id": "mobile-android-asset-live-evidence",
+      "title": "Mobile Android asset artwork evidence",
+      "retainedOutcome": "Android artwork is inspected on a supported device or asset review surface; the pre-existing monochrome asset defect remains linked to KAT-3301.",
+      "ownerPaths": [
+        "apps/mobile/assets/android-icon-mark.png",
+        "apps/mobile/assets/android-notification-icon.png"
+      ],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv", "docs/product-branding.md"],
+      "evidence": {
+        "kind": "manual",
+        "profile": "live",
+        "verification": "mobile-android-asset-live-evidence"
+      }
+    },
+    {
+      "id": "mobile-android-fab-inset",
+      "title": "Mobile Android FAB and measured inset behavior",
+      "retainedOutcome": "Android home FAB clearance and measured inset reset preserve the final sidebar row and safe-area spacing.",
+      "ownerPaths": ["apps/mobile/src/features/home/android-home-fab-layout.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "mobile-android-fab-inset"
+      }
+    },
+    {
+      "id": "mobile-project-clone-url",
+      "title": "Mobile project clone URL behavior",
+      "retainedOutcome": "Mobile project thread creation keeps the Kata project clone URL selection and selected-workspace behavior.",
+      "ownerPaths": ["apps/mobile/src/lib/projectThreadStartTurn.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "mobile-project-clone-url"
+      }
+    },
+    {
+      "id": "mobile-agent-awareness-teardown",
+      "title": "Mobile remote agent-awareness teardown",
+      "retainedOutcome": "Mobile remote agent-awareness registration is released when its connection and live activity lifecycle ends.",
+      "ownerPaths": ["apps/mobile/src/features/agent-awareness/remoteRegistration.ts"],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "mobile-agent-awareness-teardown"
+      }
+    },
+    {
+      "id": "mobile-theme-native-identity",
+      "title": "Mobile theme and native identity",
+      "retainedOutcome": "Generated mobile themes and Android Material You overrides retain Kata theme labels and palette semantics.",
+      "ownerPaths": [
+        "apps/mobile/src/lib/mobileTheme.ts",
+        "apps/mobile/src/lib/materialYouTheme.ts",
+        "apps/mobile/src/lib/mobileThemeVariables.ts"
+      ],
+      "specRefs": ["docs/upstream/kat-3297-decisions.tsv"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "mobile-theme-native-identity"
+      }
+    },
+    {
+      "id": "icon-composer-live-evidence",
+      "title": "macOS Icon Composer output",
+      "retainedOutcome": "Icon Composer output is inspected on macOS and remains Kata artwork with the required dimensions and safe area.",
+      "ownerPaths": ["assets", "scripts/export-brand-icons.ts"],
+      "specRefs": ["docs/product-branding.md", "docs/upstream/kat-3307-runbook.md"],
+      "evidence": {
+        "kind": "manual",
+        "profile": "live",
+        "verification": "icon-composer-live-evidence"
+      }
+    },
+    {
+      "id": "human-device-provider-evidence",
+      "title": "Human review of device and provider behavior",
+      "retainedOutcome": "Human Review confirms the live browser, device, and provider surfaces that static checks cannot exercise.",
+      "ownerPaths": ["docs/upstream/kat-3297-verification.md", ".agents/skills/verify-katacode"],
+      "specRefs": ["docs/upstream/kat-3297-verification.md", "docs/upstream/kat-3307-runbook.md"],
+      "evidence": {
+        "kind": "manual",
+        "profile": "live",
+        "verification": "human-device-provider-evidence"
+      }
+    }
+  ]
+}
