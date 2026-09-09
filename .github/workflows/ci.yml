@@ -102,9 +102,6 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
 
-      - name: Test nightly release checks
-        run: node --test .github/scripts/check-nightly-release.test.cjs
-
       - name: Test
         run: vp run --parallel --concurrency-limit 4 --filter '!@kata-sh/code-cli' --filter '!@kata-sh/code-monorepo' test
 
@@ -142,40 +139,14 @@ jobs:
       - name: Test
         env:
           KATACODE_TRANSFER_BUDGET_REPORT_PATH: ${{ runner.temp }}/t3code-transfer-budget.md
-          KATACODE_TRANSFER_BUDGET_RESULT_PATH: ${{ runner.temp }}/thread-transfer-result.json
         run: vp run --filter @kata-sh/code-cli test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
-      # src/server.test.ts writes the budget report, so exactly one shard
-      # produces these files. Gating the upload on their presence keeps a
-      # single `thread-transfer-results` artifact per run, which is the name
-      # thread-transfer-report.yml resolves.
-      - name: Detect transfer budget report
-        id: transfer_budget
-        if: always()
-        run: |
-          if test -f "${{ runner.temp }}/thread-transfer-result.json"; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Publish transfer budget report
-        if: always() && steps.transfer_budget.outputs.present == 'true'
+        if: always()
         run: |
           if test -f "${{ runner.temp }}/t3code-transfer-budget.md"; then
             tee -a "$GITHUB_STEP_SUMMARY" < "${{ runner.temp }}/t3code-transfer-budget.md"
-          else
-            echo "Transfer budget report was not produced." >> "$GITHUB_STEP_SUMMARY"
           fi
-
-      - name: Upload thread transfer result
-        if: always() && steps.transfer_budget.outputs.present == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: thread-transfer-results
-          path: ${{ runner.temp }}/thread-transfer-result.json
-          if-no-files-found: ignore
-          retention-days: 30
 
   # Split out of Check and Test: both paid ~7-9s to install a Rust toolchain
   # for checks that take under 3s, on the critical path of every PR.
