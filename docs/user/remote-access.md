@@ -207,7 +207,7 @@ Paste the printed pairing URL into **Settings** → **Connections** → **Add en
 On the headless machine, register the environment:
 
 ```bash
-npx @kata-sh/code-cli@latest connect link --headless
+npx @kata-sh/code-cli@nightly connect link --headless
 ```
 
 Approve the managed relay-client installation when prompted. Then open the printed URL on a device
@@ -215,7 +215,9 @@ with a browser, sign in, and paste the authorization code back into the terminal
 with the same package channel and data directory:
 
 ```bash
-npx @kata-sh/code-cli@latest serve
+npx @kata-sh/code-cli@latest serve 
+# or to release the terminal 
+setsid npx --yes @kata-sh/code-cli@nightly serve </dev/null >kata-serve.log 2>&1 &
 ```
 
 Kata Code Connect supplies the tunnel, so this flow does not require `--host 0.0.0.0` or an open
