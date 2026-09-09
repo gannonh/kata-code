@@ -12,6 +12,7 @@ import {
   ghaCacheFlags,
   normalizeDockerPlatforms,
   parseImageBuildArgs,
+  prepareSandboxRuntimeLock,
   sandboxImageBuildCacheScope,
   validatePushedImageTags,
 } from "./imageBuild.ts";
@@ -191,5 +192,48 @@ describe("image build boundaries", () => {
   it("deduplicates and validates supported target platforms", () => {
     assert.deepEqual(normalizeDockerPlatforms("linux/arm64,linux/arm64"), ["linux/arm64"]);
     assert.throws(() => normalizeDockerPlatforms("linux/386"), /Unsupported Docker platform/);
+  });
+
+  it("omits unused Claude platform packages from the lock npm ci installs", () => {
+    const lock = JSON.parse(
+      NodeFS.readFileSync(
+        NodePath.join(
+          NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
+          "../runtime-package-lock.json",
+        ),
+        "utf8",
+      ),
+    ) as { packages?: Record<string, { optionalDependencies?: Record<string, string> }> };
+    const prepared = prepareSandboxRuntimeLock(lock);
+    const packages = prepared.packages;
+    assert.isTrue(packages !== null && typeof packages === "object");
+    const packagePaths = Object.keys(packages as object);
+    assert.equal(
+      packagePaths.filter((path) =>
+        /node_modules\/@anthropic-ai\/claude-agent-sdk-(darwin|linux|win32)-/.test(path),
+      ).length,
+      0,
+    );
+    const claudeSdk = Reflect.get(
+      packages as object,
+      "node_modules/@anthropic-ai/claude-agent-sdk",
+    ) as { optionalDependencies?: Record<string, string> } | undefined;
+    assert.deepEqual(claudeSdk?.optionalDependencies ?? {}, {});
+  });
+
+  it("installs Codex linux natives in a separate image layer from npm ci", () => {
+    const dockerfile = NodeFS.readFileSync(
+      NodePath.join(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "../Dockerfile"),
+      "utf8",
+    ).replace(/\\\n/g, " ");
+    const runs = dockerfile.split("\n").filter((line) => line.startsWith("RUN "));
+    const npmCi = runs.find((run) => run.includes("npm ci"));
+    const restoreCodex = runs.find(
+      (run) => run.includes("codex-linux-") && !run.includes("npm ci"),
+    );
+    assert.isDefined(npmCi);
+    assert.include(String(npmCi), "codex-linux-");
+    assert.isDefined(restoreCodex);
+    assert.notEqual(npmCi, restoreCodex);
   });
 });
