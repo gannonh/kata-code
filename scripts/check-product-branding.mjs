@@ -21,6 +21,7 @@ const sourceExtensions = new Set([
   ".swift",
   ".kt",
   ".kts",
+  ".qml",
   ".html",
   ".css",
   ".json",
@@ -40,6 +41,8 @@ const excludedDirectories = new Set([
   ".vite-plus",
   "Pods",
   ".gradle",
+  "test",
+  "tests",
   "__tests__",
   "__fixtures__",
   "fixtures",
@@ -55,7 +58,8 @@ function scan(directory) {
       continue;
     }
     if (!entry.isFile() || !sourceExtensions.has(NodePath.extname(entry.name))) continue;
-    if (/\.(?:test|spec)\./.test(entry.name) || /(?:^|-)lock\.json$/.test(entry.name)) continue;
+    if (/(?:^|\.)(?:test|spec)\./.test(entry.name) || /(?:^|-)lock\.json$/.test(entry.name))
+      continue;
     const path = NodePath.relative(root, file).split("\\").join("/");
     const contents = NodeFS.readFileSync(file, "utf8");
     for (const match of contents.matchAll(

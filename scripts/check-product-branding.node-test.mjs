@@ -90,3 +90,29 @@ NodeTest.test("does not exempt new copy elsewhere in an excepted file", () => {
     NodeFS.rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const [path, expectedStatus] of [
+  ["native/kde-snap-shot/src/feedback.qml", 1],
+  ["apps/web/src/test/reactElementTree.ts", 0],
+  ["apps/web/test/environmentHttpTest.ts", 0],
+  ["native/kde-snap-shot/tests/qml/feedback.qml", 0],
+  ["native/browser-secret/test.c", 0],
+  ["apps/web/src/test-product.ts", 1],
+  ["apps/web/src/latest/copy.ts", 1],
+]) {
+  NodeTest.test(`branding scan scope: ${path}`, () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kata-branding-"));
+    try {
+      const file = NodePath.join(root, path);
+      NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
+      NodeFS.writeFileSync(file, 'const title = "T3 Code";');
+      const result = NodeChildProcess.spawnSync(process.execPath, [script, root], {
+        encoding: "utf8",
+      });
+      NodeAssert.equal(result.status, expectedStatus, result.stderr);
+      if (expectedStatus === 1) NodeAssert.ok(result.stderr.includes(`${path}:1:`));
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
