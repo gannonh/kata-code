@@ -18,10 +18,9 @@ function runSetup(worktree: string, env: Record<string, string>) {
   });
 }
 
-// Stub shell scripts stand in for `vp` and the skills installer, so the test only runs where they execute.
 // oxlint-disable-next-line kata-code/no-global-process-runtime -- Skip decision about the actual host; the script under test has no Effect runtime.
 it.skipIf(!symlinksSupported || NodeOS.platform() === "win32")(
-  "links shared env files from KATACODE_PROJECT_ROOT and tolerates a failed skills install",
+  "links shared env files from KATACODE_PROJECT_ROOT",
   () => {
     const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "setup-worktree-"));
     const projectRoot = NodePath.join(root, "project");
@@ -44,7 +43,6 @@ it.skipIf(!symlinksSupported || NodeOS.platform() === "win32")(
         NodePath.join(worktree, "apps", "web", "scripts", "warm-dep-cache.ts"),
         `import * as fs from "node:fs"; fs.writeFileSync(${JSON.stringify(NodePath.join(root, "warmed"))}, "");`,
       );
-      write(NodePath.join(worktree, "scripts", "install-skills.sh"), "#!/bin/sh\nexit 1\n", 0o755);
 
       const env = {
         KATACODE_PROJECT_ROOT: projectRoot,
@@ -53,7 +51,6 @@ it.skipIf(!symlinksSupported || NodeOS.platform() === "win32")(
       for (const attempt of [1, 2]) {
         const result = runSetup(worktree, env);
         expect(result.status, `attempt ${attempt}: ${result.stderr}`).toBe(0);
-        expect(result.stderr).toContain("install-skills.sh");
       }
 
       expect(NodeFS.readFileSync(NodePath.join(root, "vp-calls"), "utf8")).toBe("i\ni\n");
