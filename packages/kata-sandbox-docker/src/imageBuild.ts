@@ -339,6 +339,27 @@ function lockPackage(lock: Record<string, unknown>, path: string): Record<string
   return packageEntry as Record<string, unknown>;
 }
 
+const claudeNativeLockPath = /^node_modules\/@anthropic-ai\/claude-agent-sdk-(darwin|linux|win32)-/;
+
+export function prepareSandboxRuntimeLock(lock: unknown): Record<string, unknown> {
+  if (lock === null || typeof lock !== "object") {
+    throw new Error("The sandbox runtime lockfile is not an object.");
+  }
+  const prepared = structuredClone(lock) as Record<string, unknown>;
+  const packages = prepared.packages;
+  if (packages === null || typeof packages !== "object") {
+    throw new Error("The sandbox runtime lockfile has no packages section.");
+  }
+  for (const path of Object.keys(packages)) {
+    if (claudeNativeLockPath.test(path)) Reflect.deleteProperty(packages, path);
+  }
+  const claudeSdk = Reflect.get(packages, "node_modules/@anthropic-ai/claude-agent-sdk");
+  if (claudeSdk !== null && typeof claudeSdk === "object") {
+    Reflect.set(claudeSdk, "optionalDependencies", {});
+  }
+  return prepared;
+}
+
 async function writeRuntimeInstallLock(
   artifacts: string,
   kataArchive: string,
@@ -356,9 +377,11 @@ async function writeRuntimeInstallLock(
     NodePath.join(artifacts, "package.json"),
     `${JSON.stringify(runtimePackage, null, 2)}\n`,
   );
-  const lock = JSON.parse(
-    await NodeFSP.readFile(NodePath.join(packageDirectory, "runtime-package-lock.json"), "utf8"),
-  ) as Record<string, unknown>;
+  const lock = prepareSandboxRuntimeLock(
+    JSON.parse(
+      await NodeFSP.readFile(NodePath.join(packageDirectory, "runtime-package-lock.json"), "utf8"),
+    ),
+  );
   const kataPackage = await packageJsonFromArchive(kataArchive);
   const codexPackage = await packageJsonFromArchive(codexArchive);
   const kataLock = lockPackage(lock, "node_modules/@kata-sh/code-cli");
