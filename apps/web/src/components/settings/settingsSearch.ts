@@ -1,3 +1,4 @@
+import { CLOUD_PRODUCT_NAME } from "@kata-sh/code-shared/branding";
 import { isElectron } from "~/env";
 import { isMacPlatform, isWindowsPlatform, normalizeSearchText } from "~/lib/utils";
 
@@ -529,7 +530,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "t3-connect",
-    title: "T3 Connect",
+    title: CLOUD_PRODUCT_NAME,
     to: "/settings/connections",
     targetId: "connections-environment",
     searchTerms: ["managed tunnel cloud other devices remote"],
@@ -556,7 +557,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "remote-environments",
     title: "Remote environments",
     to: "/settings/connections",
-    searchTerms: ["add pair backend host code ssh config agent tunnel saved t3 connect"],
+    searchTerms: ["add pair backend host code ssh config agent tunnel saved kata code connect"],
   },
   {
     id: "load-balancing",

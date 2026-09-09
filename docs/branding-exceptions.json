@@ -1,0 +1,62 @@
+[
+  {
+    "path": "apps/web/src/components/Sidebar.tsx",
+    "line": "// Threads on non-primary environments (T3 Connect, hosted) resolve their",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "apps/web/src/hooks/useEnvironmentTheme.ts",
+    "line": "// desktop theme arrives as a coherent T3 Code palette rather than a foreign",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "apps/desktop/src/snapShot/DesktopSnapShot.ts",
+    "line": "/** Capture the foreground window in place, including T3 Code itself. */",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "apps/desktop/src/preview/BrowserImport/BrowserImport.ts",
+    "line": "* into a T3 Code browser profile's Electron partition.",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "apps/mobile/src/features/connection/environmentSections.ts",
+    "line": "* Ids of the environments that already occupy a T3 Connect slot. A backend saved directly is",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "apps/server/src/provider/providerMaintenance.ts",
+    "line": "* owns that path; anything unproven stays manual-only so T3 Code never runs",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "apps/server/src/project/AgentSessionScanner.ts",
+    "line": "* T3 Code runs its own agent sessions inside disposable worktrees. Their",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "packages/contracts/src/browserImport.ts",
+    "line": "* machine into a T3 Code browser profile.",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "packages/contracts/src/browserImport.ts",
+    "line": "/** T3 Code profile the cookies are written into. */",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "packages/contracts/src/agentSessions.ts",
+    "line": "* T3 Code project. `alreadyImported` marks candidates that already have an",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "packages/contracts/src/server.ts",
+    "line": "* A palette the environment's machine publishes for T3 Code to follow, read",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
+    "path": "packages/contracts/src/server.ts",
+    "line": "* over as a coherent T3 Code palette instead of a foreign one.",
+    "reason": "Internal source comment; no rendered product copy."
+  }
+]

@@ -45,6 +45,11 @@ jobs:
       - name: Ensure Electron runtime is installed
         run: vp run --filter @kata-sh/code-desktop ensure:electron
 
+      - name: Check product branding
+        run: |
+          node --test scripts/check-product-branding.node-test.mjs
+          node scripts/check-product-branding.mjs
+
       # Files/dependencies are repo-wide; export checks cover clean workspaces only.
       - name: Check unused code
         run: vp run knip:check

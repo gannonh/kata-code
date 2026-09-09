@@ -127,7 +127,9 @@ export const make = Effect.fn("makeProcessDiagnostics")(function* () {
           pid: input.pid,
           signal: input.signal,
           signaled: false,
-          message: Option.some(`Process ${input.pid} is not a signalable T3 backend descendant.`),
+          message: Option.some(
+            `Process ${input.pid} is not a signalable Kata Code backend descendant.`,
+          ),
         };
       }
       return yield* Effect.try({
