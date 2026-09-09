@@ -19,15 +19,12 @@ const SHARED_ENV_FILES = [".env", NodePath.join("infra", "relay", ".env")] as co
 // oxlint-disable-next-line kata-code/no-global-process-runtime -- Bootstrap targets the actual host; no Effect runtime exists yet.
 const shell = process.platform === "win32";
 
-function run(command: string, args: ReadonlyArray<string>, options?: { bestEffort: true }) {
+function run(command: string, args: ReadonlyArray<string>) {
   const result = NodeChildProcess.spawnSync(command, args, { stdio: "inherit", shell });
   if (result.status === 0) return;
-  const message = `[setup-worktree] '${[command, ...args].join(" ")}' exited with ${result.status ?? result.signal}`;
-  if (options?.bestEffort) {
-    process.stderr.write(`${message}; continuing.\n`);
-    return;
-  }
-  throw new Error(message);
+  throw new Error(
+    `[setup-worktree] '${[command, ...args].join(" ")}' exited with ${result.status ?? result.signal}`,
+  );
 }
 
 run("vp", ["i"]);
@@ -40,4 +37,3 @@ for (const relativePath of SHARED_ENV_FILES) {
 }
 
 run("node", [NodePath.join("apps", "web", "scripts", "warm-dep-cache.ts")]);
-run("bash", [NodePath.join("scripts", "install-skills.sh")], { bestEffort: true });
