@@ -33,8 +33,11 @@ const upstreamBaseSha = "6a687ee43bf222672ab8d3f4c0bab3d8d174f79f";
 const relativeRepositoryPath = (absolutePath: string): string =>
   NodePath.relative(repositoryRoot, absolutePath).split(NodePath.sep).join("/");
 
-const makeEvidenceDirectory = (): string =>
-  NodeFS.mkdtempSync(NodePath.join(repositoryRoot, "uat-evidence/.kat-3307-evidence-"));
+const makeEvidenceDirectory = (): string => {
+  const evidenceRoot = NodePath.join(repositoryRoot, "uat-evidence");
+  NodeFS.mkdirSync(evidenceRoot, { recursive: true });
+  return NodeFS.mkdtempSync(NodePath.join(evidenceRoot, ".kat-3307-evidence-"));
+};
 
 const writeEvidenceBinding = (
   directory: string,
