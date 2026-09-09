@@ -193,6 +193,10 @@ jobs:
       - name: Typecheck
         run: vp run typecheck
 
+      - name: Install browser secret helper build libraries
+        run: |
+          sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+
       - name: Test
         run: vp run test
 
@@ -480,6 +484,11 @@ jobs:
           else
               convert -version
           fi
+
+      - name: Install browser secret helper build libraries
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
 
       - name: Prepare Azure Trusted Signing
         if: matrix.platform == 'win'
