@@ -67,8 +67,15 @@ RUN node --input-type=module -e ' \
   # resolved by the image build. \
   && cd /usr/local/share/kata-sandbox-artifacts \
   && npm ci --omit=dev --no-audit --no-fund \
-  && rm -rf node_modules/@anthropic-ai/claude-agent-sdk-linux-* \
-  && command -v katacode \
+  && mkdir -p /opt/kata-sandbox-codex-native \
+  && find node_modules/@openai -mindepth 1 -maxdepth 1 -type d -name 'codex-linux-*' \
+    -exec mv {} /opt/kata-sandbox-codex-native/ \; \
+  && command -v katacode
+
+# Codex linux natives are their own layer so the npm ci blob stays under VCR's 500 MB cap.
+RUN find /opt/kata-sandbox-codex-native -mindepth 1 -maxdepth 1 -name 'codex-linux-*' \
+    -exec mv {} /usr/local/share/kata-sandbox-artifacts/node_modules/@openai/ \; \
+  && rmdir /opt/kata-sandbox-codex-native \
   && command -v codex
 
 RUN groupadd --gid 1001 katacode \
