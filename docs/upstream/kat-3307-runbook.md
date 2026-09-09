@@ -16,6 +16,9 @@ upstream-base  6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
 
 Resolve candidate and base to full lowercase commit IDs before review. Keep the
 same four IDs in the report, the integration record, and any manual evidence.
+Create those records after the candidate commit under the ignored
+`uat-evidence/<run-id>/` directory. This keeps the final candidate SHA stable
+while the records bind to it, and ignored evidence does not dirty the checkout.
 The public command requires every ref explicitly:
 
 ```bash
@@ -25,8 +28,8 @@ vp run check:upstream-preservation -- \
   --base <base-ref> \
   --upstream 12391bd0d38eef6655b7a9f8945d0cb5febadc2b \
   --upstream-base 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f \
-  --integration-record docs/upstream/kat-3307-integration-record.json \
-  --manual-evidence docs/upstream/kat-3307-manual-evidence.json
+  --integration-record uat-evidence/<run-id>/integration-record.json \
+  --manual-evidence uat-evidence/<run-id>/manual-evidence.json
 ```
 
 The command resolves each ref with `git rev-parse --verify --end-of-options
@@ -65,6 +68,9 @@ dispositions; deleting the inventory from the working tree still fails the
 inventory contract.
 
 `evidence.path` must name an existing repository-relative JSON evidence binding.
+Use `uat-evidence/<run-id>/` for live records and their artifacts. Do not write
+post-commit records under tracked `docs/upstream/` files. The checked-in
+`.example.json` files are templates only.
 The binding uses schema version `1`, repeats the exact four refs, names the
 `checkId`, includes a concrete `result`, and lists one or more concrete
 `artifactPaths` under the repository root. Integration bindings additionally

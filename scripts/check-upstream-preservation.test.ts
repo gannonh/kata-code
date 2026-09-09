@@ -34,7 +34,7 @@ const relativeRepositoryPath = (absolutePath: string): string =>
   NodePath.relative(repositoryRoot, absolutePath).split(NodePath.sep).join("/");
 
 const makeEvidenceDirectory = (): string =>
-  NodeFS.mkdtempSync(NodePath.join(repositoryRoot, "docs/upstream/.kat-3307-evidence-"));
+  NodeFS.mkdtempSync(NodePath.join(repositoryRoot, "uat-evidence/.kat-3307-evidence-"));
 
 const writeEvidenceBinding = (
   directory: string,
@@ -646,6 +646,16 @@ describe("upstream preservation CLI", () => {
   });
 
   it("requires evidence to be an existing repository artifact", () => {
+    const evidenceDirectory = makeEvidenceDirectory();
+    const ignoredArtifact = NodePath.join(evidenceDirectory, "ignored-artifact.json");
+    NodeFS.writeFileSync(ignoredArtifact, "{}");
+    try {
+      expect(resolveEvidenceArtifact(repositoryRoot, relativeRepositoryPath(ignoredArtifact))).toBe(
+        ignoredArtifact,
+      );
+    } finally {
+      NodeFS.rmSync(evidenceDirectory, { recursive: true, force: true });
+    }
     expect(
       resolveEvidenceArtifact(repositoryRoot, "docs/upstream/kat-3297-decisions.tsv"),
     ).toContain("kat-3297-decisions.tsv");
@@ -759,6 +769,31 @@ describe("upstream preservation CLI", () => {
     } finally {
       NodeFS.rmSync(evidenceDirectory, { recursive: true, force: true });
     }
+  });
+
+  it("rejects a retained assertion changed in the candidate checkout", () => {
+    withSandboxRegressionWorktree((temporaryRoot, candidateSha) => {
+      const assertionPath = NodePath.join(
+        temporaryRoot,
+        "apps/server/src/kataSandbox/sandboxFeature.test.ts",
+      );
+      NodeFS.appendFileSync(assertionPath, "\nexport const weakened = true;\n");
+      const report = runPreservation({
+        mode: "baseline",
+        repositoryRoot: temporaryRoot,
+        candidate: candidateSha,
+        base: currentSha,
+        upstream: upstreamSha,
+        upstreamBase: upstreamBaseSha,
+        commandExecutor: () => "PASS",
+        executionTreeCheck: () => undefined,
+      });
+      expect(report.results).toContainEqual({
+        id: "sandbox-preview-default",
+        status: "FAIL",
+        reason: "trusted assertion changed apps/server/src/kataSandbox/sandboxFeature.test.ts",
+      });
+    });
   });
 
   it("requires exact machine-verifiable evidence bindings", () => {
@@ -1238,6 +1273,23 @@ describe("upstream preservation CLI", () => {
           repositoryRoot,
         ),
       ).toThrow("template");
+      expect(() =>
+        validateManualEvidence(
+          {
+            ...manualEvidence,
+            checks: [
+              {
+                ...manualEvidence.checks[0],
+                observer: "   ",
+              },
+              manualEvidence.checks[1],
+            ],
+          },
+          refs,
+          ["icon-composer-live-evidence", "human-device-provider-evidence"],
+          repositoryRoot,
+        ),
+      ).toThrow("observer");
       expect(() =>
         validateManualEvidence(
           {

@@ -26,6 +26,34 @@ export function runCommandPlan(repositoryRoot: string, command: CommandPlan): Ch
   return result.status === 0 ? "PASS" : "FAIL";
 }
 
+const readGitFile = (
+  repositoryRoot: string,
+  commit: string,
+  relativePath: string,
+): Buffer | null => {
+  const result = NodeChildProcess.spawnSync("git", ["show", `${commit}:${relativePath}`], {
+    cwd: repositoryRoot,
+    encoding: null,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.error !== undefined || result.status !== 0) return null;
+  return result.stdout;
+};
+
+export function validateTrustedAssertions(
+  repositoryRoot: string,
+  base: string,
+  command: Pick<CommandPlan, "trustedPaths">,
+): string | undefined {
+  for (const relativePath of command.trustedPaths ?? []) {
+    const trusted = readGitFile(repositoryRoot, base, relativePath);
+    if (trusted === null) return `trusted assertion path is missing at base ${relativePath}`;
+    const candidate = NodeFS.readFileSync(NodePath.resolve(repositoryRoot, relativePath));
+    if (!candidate.equals(trusted)) return `trusted assertion changed ${relativePath}`;
+  }
+  return undefined;
+}
+
 export function missingRequiredPaths(
   repositoryRoot: string,
   command: Pick<CommandPlan, "requiredPaths">,

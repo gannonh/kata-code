@@ -16,6 +16,7 @@ import { resolveRefs, validateFrozenUpstreamRefs } from "./upstream-preservation
 import {
   missingRequiredPaths,
   runCommandPlan,
+  validateTrustedAssertions,
   validateExecutionTree,
 } from "./upstream-preservation-runner.ts";
 
@@ -64,6 +65,7 @@ export {
 export {
   missingRequiredPaths,
   runCommandPlan,
+  validateTrustedAssertions,
   validateExecutionTree,
 } from "./upstream-preservation-runner.ts";
 
@@ -106,6 +108,7 @@ const runCheck = (
   repositoryRoot: string,
   check: PreservationCheck,
   commandExecutor: PreservationCommandExecutor,
+  base: CommitSha,
 ): CheckResult => {
   if (check.evidenceKind === "manual") {
     const reason =
@@ -124,6 +127,10 @@ const runCheck = (
         status: "FAIL",
         reason: `missing required path ${missingPaths.join(",")}`,
       };
+    }
+    const trustedAssertionError = validateTrustedAssertions(repositoryRoot, base, command);
+    if (trustedAssertionError !== undefined) {
+      return { id: check.id, status: "FAIL", reason: trustedAssertionError };
     }
     const status = commandExecutor(repositoryRoot, command);
     if (status !== "PASS") return { id: check.id, status, reason: `command ${command.display}` };
@@ -177,7 +184,7 @@ export function runPreservation(options: RunPreservationOptions): PreservationRe
 
   const commandExecutor = options.commandExecutor ?? runCommandPlan;
   const results = PRESERVATION_CHECKS.map((check) =>
-    runCheck(options.repositoryRoot, check, commandExecutor),
+    runCheck(options.repositoryRoot, check, commandExecutor, refs.base),
   );
   const changedDetails = changedRetainedOutcomeDetailsWithInventory(
     options.repositoryRoot,

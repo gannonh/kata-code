@@ -6,6 +6,7 @@ export interface CommandPlan {
   readonly executable: string;
   readonly args: ReadonlyArray<string>;
   readonly requiredPaths: ReadonlyArray<string>;
+  readonly trustedPaths?: ReadonlyArray<string>;
 }
 
 export interface PreservationCheck {
@@ -22,11 +23,13 @@ const nodeCommand = (
   display: string,
   args: ReadonlyArray<string>,
   requiredPaths: ReadonlyArray<string>,
+  trustedPaths: ReadonlyArray<string> = [],
 ): CommandPlan => ({
   display,
   executable: process.execPath,
   args,
   requiredPaths,
+  ...(trustedPaths.length === 0 ? {} : { trustedPaths }),
 });
 
 const vpTestCommand = (paths: ReadonlyArray<string>): CommandPlan => ({
@@ -34,6 +37,7 @@ const vpTestCommand = (paths: ReadonlyArray<string>): CommandPlan => ({
   executable: "vp",
   args: ["test", "run", ...paths, "--reporter=dot"],
   requiredPaths: paths,
+  trustedPaths: paths,
 });
 
 export const PRESERVATION_CHECKS = [
@@ -54,11 +58,13 @@ export const PRESERVATION_CHECKS = [
         "node scripts/check-product-branding.mjs",
         ["scripts/check-product-branding.mjs"],
         ["scripts/check-product-branding.mjs", "docs/branding-exceptions.json"],
+        ["scripts/check-product-branding.mjs"],
       ),
       nodeCommand(
         "node --test scripts/check-product-branding.node-test.mjs",
         ["--test", "scripts/check-product-branding.node-test.mjs"],
         ["scripts/check-product-branding.node-test.mjs", "scripts/check-product-branding.mjs"],
+        ["scripts/check-product-branding.node-test.mjs"],
       ),
     ],
   },
@@ -87,6 +93,7 @@ export const PRESERVATION_CHECKS = [
     commands: [
       nodeCommand(
         "node scripts/check-connect-wire-identity.ts",
+        ["scripts/check-connect-wire-identity.ts"],
         ["scripts/check-connect-wire-identity.ts"],
         ["scripts/check-connect-wire-identity.ts"],
       ),
@@ -408,6 +415,7 @@ export const PRESERVATION_CHECKS = [
         "node scripts/check-product-branding.mjs",
         ["scripts/check-product-branding.mjs"],
         ["scripts/check-product-branding.mjs", "apps/mobile/app.config.ts"],
+        ["scripts/check-product-branding.mjs"],
       ),
     ],
   },

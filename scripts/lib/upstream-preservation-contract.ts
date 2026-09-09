@@ -9,7 +9,7 @@ export const sameStrings = (left: ReadonlyArray<string>, right: ReadonlyArray<st
   sorted(left).every((value, index) => value === sorted(right)[index]);
 
 export const validateConcreteText = (value: string, label: string): void => {
-  if (/(?:<[^>]+>|placeholder|TODO|\.\.\.)/i.test(value)) {
+  if (value.trim() === "" || /(?:<[^>]+>|placeholder|TODO|\.\.\.)/i.test(value)) {
     throw new Error(`${label} contains a template or placeholder.`);
   }
 };
