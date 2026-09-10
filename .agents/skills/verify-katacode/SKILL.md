@@ -42,7 +42,7 @@ After pairing, a first-run client opens `/welcome` and the Connect / Agents / Pr
 
 Teardown is `bin/cleanup`. It is required after a failed launch too, so a half-started runner is not left holding ports.
 
-If `node_modules` is missing, run `vp i` and launch again. Do not invent a different start command.
+If `node_modules` is missing, run `vp i` and launch again. `bin/launch` puts `$REPO_ROOT/node_modules/.bin` on `PATH` so `vp` is found without a global install. Do not invent a different start command.
 
 ## Doctor
 
