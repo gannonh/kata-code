@@ -36,7 +36,9 @@ The disposable home is `${TMPDIR:-/tmp}/katacode-verify-<RUN_ID>/home`. Runtime 
 
 `bin/launch` starts the runner in a new process session and then exits. That is intentional: the stack must outlive the helper. `bin/cleanup` is what stops it, using the pid in `run.json`.
 
-Do not pass `--auto-bootstrap-project-from-cwd`. A fresh home has no projects. After pairing you should see the empty landing, not a thread in this repo.
+`bin/launch` starts the runner with `--no-auto-bootstrap-project-from-cwd` and `KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD=0`. Web mode otherwise creates a project from the worktree cwd (often titled `server`). A fresh launched home must have no auto-created project after onboarding.
+
+After pairing, a first-run client opens `/welcome` and the Connect / Agents / Projects wizard. Finish that wizard without importing projects, then you should see the empty landing, not a thread in this repo.
 
 Teardown is `bin/cleanup`. It is required after a failed launch too, so a half-started runner is not left holding ports.
 
@@ -82,17 +84,26 @@ Use one named session for the run. Do not pass `--session-name` (that persists c
 PAIRING_OPEN_URL="${WEB_ORIGIN}/pair#${PAIRING_URL#*#}"
 agent-browser --session katacode-verify open "$PAIRING_OPEN_URL"
 agent-browser --session katacode-verify set viewport 1400 900
-agent-browser --session katacode-verify wait --text "What should we work on?"
+agent-browser --session katacode-verify wait --text "Connect your computers"
 agent-browser --session katacode-verify snapshot -i
 # If `/pair` was already mounted (token-free before-shot), fill Pairing token and Continue instead.
 ```
 
 `$PAIRING_URL` is the value from `eval "$(bin/launch)"` or `source "$ENV_FILE"`. It ends in `/pair#token=...` and still uses `localhost`. `$PAIRING_OPEN_URL` keeps that fragment on `$WEB_ORIGIN` (so `[::1]` when Vite is IPv6-only). Open `$PAIRING_OPEN_URL` exactly once as the first navigation that consumes the token (after any token-free `$WEB_ORIGIN/` before-shot in the pairing recipe). Opening it twice, or opening it in a second browser, burns the token. If the before-shot already mounted `/pair`, hash auto-submit will not run; use the form or reload.
 
-After pairing, the app strips the token from the URL and redirects to `/`. Wait until you see either:
+After pairing, the app strips the token from the URL and redirects to `/`. `FirstRunGate` then replace-navigates to `/welcome`. Wait until you see the setup dialog **Set up Kata Code** and heading **Connect your computers**. Do not treat **What should we work on?** as pairing proof yet. `/welcome` paints that empty hero behind the wizard.
 
-- the text **What should we work on?** (a styled div, not a heading role) and a button **Add project** (fresh home, no projects), or
-- a draft at `/draft/...` with a composer textbox (only if this home already has a project, which a correct launch should not)
+Finish the wizard without importing:
+
+1. **Connect.** The local computer row shows **Connected**. Click **Continue**. Do not open **Add a computer**.
+2. **Agents.** Heading **Your agents**. Click **Continue**. Do not require an agent to be Ready.
+3. **Projects.** Heading **Your projects** or **Choose your projects**. Click **Do not import projects**.
+
+Then wait until the setup dialog is gone and the URL is `/`. A correct launch then shows:
+
+- the text **What should we work on?** (a styled div, not a heading role) and a button **Add project**
+
+A draft at `/draft/...` after that skip means a project already exists (cwd auto-bootstrap or an import). That is a launch failure for this skill, not a pairing failure.
 
 Then follow the matching file under `features/`. Prefer ARIA names, `data-testid`, and route paths over coordinates. `wait --text` matches visible text only: icon buttons such as `Usage` and `Refresh usage` are named by `aria-label`, so wait on a heading or use `find role button --name`.
 
@@ -101,12 +112,13 @@ Stable handles in this app:
 | What | Handle |
 | --- | --- |
 | Pairing form | heading `Pair with this environment`, textbox `Pairing token`, buttons `Continue` and `Reload app` |
+| Welcome wizard | dialog `Set up Kata Code`, progress `Setup progress`, steps `Connect` / `Agents` / `Projects`, headings `Connect your computers` / `Your agents` / `Your projects` or `Choose your projects`, skip-import button `Do not import projects` |
 | Empty landing | text `What should we work on?` (no heading role), button `Add project` |
 | Sidebar settings | button `Settings` |
 | Sidebar usage | button `Usage` |
 | Command palette | `data-testid="command-palette"` with `data-palette-mode="command"`, name `Command palette`, shortcut `mod+k` (⌘K on macOS, Ctrl+K elsewhere). The same testid serves File picker (`files`) and Search project contents (`content`) |
-| Usage page | heading `Usage`, groups `Usage metric` / `Usage period` / `Usage breakdown`, button `Refresh usage` |
-| Settings | breadcrumb `Settings breadcrumb`, combobox `Search settings`, nav labels `General`, `Appearance`, `Keybindings`, `Providers`, `Integrations`, `Source Control`, `Connections`, `Archive` |
+| Usage page | heading `Usage`, nav `Usage breadcrumb`, menu `All environments`, groups `Usage metric` (`Cost` / `Tokens` / `Limits`) / `Usage period` / `Usage breakdown`, button `Refresh usage` or `Refresh limits` |
+| Settings | breadcrumb `Settings breadcrumb`, combobox `Search settings`, nav labels `General`, `Appearance`, `Projects`, `Keybindings`, `SnapShots`, `Providers`, `Integrations`, `Source Control`, `Connections`, `Archive` |
 
 Do not call internal atoms, test-only endpoints, or `t3-sqlite-state.ts exec` to claim a user path works. SQLite inspection is a side-effect check after a real UI action, and only against the disposable home.
 
