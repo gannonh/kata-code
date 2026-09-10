@@ -22,6 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           sparse-checkout: |
             /*
             !/.repos/
@@ -34,6 +35,19 @@ jobs:
             printf 'PR evidence must be uploaded to GitHub, not committed:\n%s\n' "$files" >&2
             exit 1
           fi
+
+      - name: Fetch and verify frozen upstream tip
+        env:
+          UPSTREAM_URL: https://github.com/pingdotgg/t3code.git
+          UPSTREAM_TIP: 12391bd0d38eef6655b7a9f8945d0cb5febadc2b
+          UPSTREAM_BASE: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
+        run: |
+          set -euo pipefail
+          for sha in "$UPSTREAM_TIP" "$UPSTREAM_BASE"; do
+            git fetch --no-tags --depth=1 "$UPSTREAM_URL" "$sha"
+            actual="$(git rev-parse FETCH_HEAD^{commit})"
+            test "$actual" = "$sha"
+          done
 
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
@@ -49,6 +63,36 @@ jobs:
         run: |
           node --test scripts/check-product-branding.node-test.mjs
           node scripts/check-product-branding.mjs
+
+      - name: Check upstream preservation contract
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          UPSTREAM_SHA: 12391bd0d38eef6655b7a9f8945d0cb5febadc2b
+          UPSTREAM_BASE_SHA: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
+        run: |
+          set -euo pipefail
+          trusted_root="$(mktemp -d)"
+          trap 'rm -rf "$trusted_root"' EXIT
+          if git cat-file -e "$BASE_SHA:scripts/check-upstream-preservation.ts" 2>/dev/null; then
+            git archive --format=tar "$BASE_SHA" scripts/check-upstream-preservation.ts scripts/lib/ \
+              | tar -xf - -C "$trusted_root"
+            ln -s "$PWD/scripts/node_modules" "$trusted_root/scripts/node_modules"
+            node "$trusted_root/scripts/check-upstream-preservation.ts" \
+              --mode ci \
+              --candidate "$CANDIDATE_SHA" \
+              --base "$BASE_SHA" \
+              --upstream "$UPSTREAM_SHA" \
+              --upstream-base "$UPSTREAM_BASE_SHA"
+          else
+            echo "Preservation checker bootstrap: base predates scripts/check-upstream-preservation.ts; candidate checker is used once."
+            vp run check:upstream-preservation -- \
+              --mode ci \
+              --candidate "$CANDIDATE_SHA" \
+              --base "$BASE_SHA" \
+              --upstream "$UPSTREAM_SHA" \
+              --upstream-base "$UPSTREAM_BASE_SHA"
+          fi
 
       # Files/dependencies are repo-wide; export checks cover clean workspaces only.
       - name: Check unused code
@@ -83,6 +127,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
+          fetch-depth: 0
           sparse-checkout: |
             /*
             !/.repos/

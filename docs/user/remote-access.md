@@ -215,8 +215,8 @@ with a browser, sign in, and paste the authorization code back into the terminal
 with the same package channel and data directory:
 
 ```bash
-npx @kata-sh/code-cli@latest serve 
-# or to release the terminal 
+npx @kata-sh/code-cli@latest serve
+# or to release the terminal
 setsid npx --yes @kata-sh/code-cli@nightly serve </dev/null >kata-serve.log 2>&1 &
 ```
 

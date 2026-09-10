@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "candidate": "<candidate-sha>",
+  "base": "<base-sha>",
+  "upstream": "12391bd0d38eef6655b7a9f8945d0cb5febadc2b",
+  "upstreamBase": "6a687ee43bf222672ab8d3f4c0bab3d8d174f79f",
+  "checkId": "<check-id>",
+  "result": "<concrete observed result>",
+  "producer": "<command-or-observer>",
+  "provenance": "<command, device, or provider context>",
+  "digest": "<sha256-of-the-fields-above-in-schema-order>"
+}

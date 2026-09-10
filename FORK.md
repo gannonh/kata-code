@@ -72,3 +72,11 @@ No compatibility shims for the previous upstream env prefix, home directory, or 
 Active: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, and `.github/workflows/deploy-relay.yml` (`ubuntu-24.04`, `macos-15`, `windows-2025`; `@kata-sh/code-*` filters).
 
 Parked under `.github/disabled/` until a later phase: mobile EAS, AUR, PR size, issue labels, web preview.
+
+## Upstream preservation
+
+Run the [KAT-3307 upstream preservation runbook](docs/upstream/kat-3307-runbook.md)
+before an upstream integration advances to Human Review. The versioned
+[retained behavior inventory](docs/upstream/retained-behavior.v1.json) records
+the Kata outcomes, owners, and evidence profile; the TypeScript gate owns the
+mandatory checks and command plans.
