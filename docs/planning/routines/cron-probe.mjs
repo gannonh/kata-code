@@ -1,5 +1,7 @@
-import { createRequire } from "node:module";
-const require = createRequire(new URL("../../../apps/server/package.json", import.meta.url));
+import * as NodeModule from "node:module";
+const require = NodeModule.createRequire(
+  new URL("../../../apps/server/package.json", import.meta.url),
+);
 const { Cron, Result } = await import(require.resolve("effect"));
 const samples = [
   ["spring", "30 2 * * *", "2027-03-14T00:00:00-08:00"],

@@ -12,7 +12,8 @@
     "scripts": {
       // Knip loads its preprocessor through a CLI option, not a source import.
       // Worktree setup invokes setup-worktree.ts directly from t3.json.
-      "entry": ["knip-schemas.ts", "setup-worktree.ts"],
+      // Release verify is the only consumer of @vercel/sandbox.
+      "entry": ["knip-schemas.ts", "setup-worktree.ts", "verify-kata-sandbox-image-vercel.test.ts"],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.

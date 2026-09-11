@@ -38,8 +38,7 @@ type SandboxSdk = {
 };
 
 async function loadSandboxSdk(): Promise<SandboxSdk> {
-  const moduleName = "@vercel/sandbox";
-  return (await import(moduleName)) as unknown as SandboxSdk;
+  return (await import("@vercel/sandbox")) as unknown as SandboxSdk;
 }
 
 function readArtifact(): {
