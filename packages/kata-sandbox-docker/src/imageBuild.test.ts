@@ -194,6 +194,25 @@ describe("image build boundaries", () => {
     assert.throws(() => normalizeDockerPlatforms("linux/386"), /Unsupported Docker platform/);
   });
 
+  it("keeps the runtime lock CLI graph aligned with the packed server package", () => {
+    const here = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
+    const server = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(here, "../../../apps/server/package.json"), "utf8"),
+    ) as { dependencies?: Record<string, string> };
+    const lock = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(here, "../runtime-package-lock.json"), "utf8"),
+    ) as {
+      packages?: Record<string, { dependencies?: Record<string, string> }>;
+    };
+    const cliDeps = lock.packages?.["node_modules/@kata-sh/code-cli"]?.dependencies ?? {};
+    assert.deepEqual(
+      Object.keys(server.dependencies ?? {})
+        .filter((name) => !(name in cliDeps))
+        .sort(),
+      [],
+    );
+  });
+
   it("omits unused Claude platform packages from the lock npm ci installs", () => {
     const lock = JSON.parse(
       NodeFS.readFileSync(
