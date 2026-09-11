@@ -24,7 +24,12 @@
         "src/provider/testFixtures/*.mjs",
       ],
       // Native msgpack acceleration and the Vite+ web build prerequisite.
-      "ignoreDependencies": ["msgpackr-extract", "@kata-sh/code-web"],
+      "ignoreDependencies": [
+        "msgpackr-extract",
+        "@kata-sh/code-web",
+        // Keep npm from selecting a newer Effect RC for this transitive dependency.
+        "@effect/platform-node-shared",
+      ],
     },
     "apps/desktop": {
       // Electron loads these bundles by filename rather than importing them.
