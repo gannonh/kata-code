@@ -13,9 +13,9 @@ export interface PostgresIdentity {
 
 export interface PostgresReplaceCensus {
   readonly actors: readonly PostgresReplaceActor[];
-  readonly status?: string;
-  readonly providerMode?: string;
-  readonly planMode?: string;
+  readonly status?: string | undefined;
+  readonly providerMode?: string | undefined;
+  readonly planMode?: string | undefined;
   readonly news: PostgresIdentity;
   readonly olds: PostgresIdentity;
   readonly output: PostgresIdentity;
@@ -66,9 +66,9 @@ export function alchemyPostgresReplaceActors(input: {
   readonly news: unknown;
   readonly olds: unknown;
   readonly output: unknown;
-  readonly status?: string;
-  readonly providerMode?: string;
-  readonly planMode?: string;
+  readonly status?: string | undefined;
+  readonly providerMode?: string | undefined;
+  readonly planMode?: string | undefined;
 }): PostgresReplaceActor[] {
   const news =
     typeof input.news === "object" && input.news !== null
@@ -119,8 +119,8 @@ export function postgresStateIdentity(row: unknown): {
   readonly props: PostgresIdentity;
   readonly attr: PostgresIdentity;
   readonly oldStatus?: unknown;
-  readonly oldProps?: PostgresIdentity;
-  readonly oldAttr?: PostgresIdentity;
+  readonly oldProps?: PostgresIdentity | undefined;
+  readonly oldAttr?: PostgresIdentity | undefined;
 } | null {
   if (typeof row !== "object" || row === null) {
     return null;
@@ -187,8 +187,11 @@ export function abortInFlightPostgresReplace(
     return { kind: "refuse", reason: "old generation is not a completed database row" };
   }
   const attr = asRecord(old.attr);
-  const id = typeof attr?.id === "string" ? attr.id : undefined;
-  const name = typeof attr?.name === "string" ? attr.name : undefined;
+  if (attr === undefined) {
+    return { kind: "refuse", reason: "old generation has no database identity" };
+  }
+  const id = typeof attr.id === "string" ? attr.id : undefined;
+  const name = typeof attr.name === "string" ? attr.name : undefined;
   if (id === undefined || name === undefined) {
     return { kind: "refuse", reason: "old generation has no database identity" };
   }
@@ -202,8 +205,4 @@ export function abortInFlightPostgresReplace(
     return { kind: "refuse", reason: `old generation state is ${String(attr.state)}` };
   }
   return { kind: "restored", row: old, restoredId: id, restoredName: name };
-}
-
-export function formatPostgresReplaceCensus(census: PostgresReplaceCensus): string {
-  return JSON.stringify(census);
 }

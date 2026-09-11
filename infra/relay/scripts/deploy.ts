@@ -150,6 +150,11 @@ export function postgresReplaceCensusFromPlan(plan: Plan.Plan): PostgresReplaceC
   return undefined;
 }
 
+const encodeUnknownJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+const logJson = (value: unknown) =>
+  encodeUnknownJson(value).pipe(Effect.flatMap((json) => Console.log(json)));
+
 export function hasDeployChanges(plan: Plan.Plan): boolean {
   return (
     Object.keys(plan.deletions).length > 0 ||
@@ -344,7 +349,7 @@ const abortRelayPostgresReplace = Effect.fn("relay.deploy.abortPostgresReplace")
     return yield* new RelayPostgresReplaceAbortError({ reason: result.reason });
   }
   if (result.kind === "restored") {
-    if (row === undefined || isActionState(row) || !("old" in row)) {
+    if (row === undefined || isActionState(row) || row.status !== "replacing") {
       return yield* new RelayPostgresReplaceAbortError({
         reason: "old generation disappeared",
       });
@@ -357,14 +362,12 @@ const abortRelayPostgresReplace = Effect.fn("relay.deploy.abortPostgresReplace")
     });
   }
   const after = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
-  yield* Console.log(
-    JSON.stringify({
-      abort: result.kind,
-      reason: result.kind === "noop" ? result.reason : undefined,
-      restoredId: result.kind === "restored" ? result.restoredId : undefined,
-      after: postgresStateIdentity(after),
-    }),
-  );
+  yield* logJson({
+    abort: result.kind,
+    reason: result.kind === "noop" ? result.reason : undefined,
+    restoredId: result.kind === "restored" ? result.restoredId : undefined,
+    after: postgresStateIdentity(after),
+  });
   return {
     result: "state",
     changed: result.kind === "restored",
@@ -397,7 +400,8 @@ const inspectRelayPostgresState = Effect.fn("relay.deploy.inspectPostgresState")
       resourceType: row.resourceType,
       status: row.status,
       providerMode: row.providerMode,
-      oldStatus: "old" in row ? row.old.status : undefined,
+      oldStatus:
+        row.status === "replacing" || row.status === "replaced" ? row.old.status : undefined,
     });
     if (
       row.resourceType === "Planetscale.PostgresDatabase" ||
@@ -407,20 +411,18 @@ const inspectRelayPostgresState = Effect.fn("relay.deploy.inspectPostgresState")
       databases.push(postgresStateIdentity(row));
     }
   }
-  yield* Console.log(
-    JSON.stringify({
-      stack: "T3CodeRelay",
-      stage,
-      postgresFqns: fqns.filter((fqn) => fqn.includes("Postgres") || fqn.includes("RelayPostgres")),
-      replaced: replaced.map((row) => ({
-        fqn: row.fqn,
-        logicalId: row.logicalId,
-        status: row.status,
-      })),
-      resources,
-      databases,
-    }),
-  );
+  yield* logJson({
+    stack: "T3CodeRelay",
+    stage,
+    postgresFqns: fqns.filter((fqn) => fqn.includes("Postgres") || fqn.includes("RelayPostgres")),
+    replaced: replaced.map((row) => ({
+      fqn: row.fqn,
+      logicalId: row.logicalId,
+      status: row.status,
+    })),
+    resources,
+    databases,
+  });
   return {
     result: "state",
     changed: false,
@@ -463,7 +465,8 @@ const runRelayDeploy = Effect.fn("relay.deploy.run")(
       yield* cli.displayPlan(plan);
       const census = postgresReplaceCensusFromPlan(plan);
       if (census !== undefined) {
-        yield* Console.log(`RelayPostgresDatabase replace census ${JSON.stringify(census)}`);
+        const json = yield* encodeUnknownJson(census);
+        yield* Console.log(`RelayPostgresDatabase replace census ${json}`);
       }
       return {
         result: "dry-run",
