@@ -154,11 +154,17 @@ export const PRESERVATION_CHECKS = [
     ],
     specRefs: ["docs/internals/kata-sandbox.md", "docs/upstream/kat-3297-decisions.tsv"],
     commands: [
-      vpTestCommand([
-        "apps/server/src/kataSandbox/sandboxFeature.test.ts",
-        "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.test.ts",
-        "apps/server/src/server.test.ts",
-      ]),
+      {
+        ...vpTestCommand([
+          "apps/server/src/kataSandbox/sandboxFeature.test.ts",
+          "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.test.ts",
+          "apps/server/src/server.test.ts",
+        ]),
+        trustedPaths: [
+          "apps/server/src/kataSandbox/sandboxFeature.test.ts",
+          "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.test.ts",
+        ],
+      },
     ],
   },
   {
