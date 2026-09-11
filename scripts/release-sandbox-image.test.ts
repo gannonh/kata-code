@@ -134,6 +134,15 @@ describe("release sandbox image boundaries", () => {
     assert.include(workflow, "VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}");
   });
 
+  it("declares @vercel/sandbox so Release verify can load the SDK", () => {
+    const manifest = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(repoRoot, "scripts/package.json"), "utf8"),
+    ) as {
+      readonly devDependencies?: Readonly<Record<string, string>>;
+    };
+    assert.isString(manifest.devDependencies?.["@vercel/sandbox"]);
+  });
+
   it("derives exact and discovery tags without parsing release logs", () => {
     assert.deepEqual(
       parseReleaseImageArgs(
