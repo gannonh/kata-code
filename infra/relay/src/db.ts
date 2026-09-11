@@ -53,9 +53,9 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
           arch: "arm",
           replicas: 0,
           migrations: { dir: schema.out, table: "relay_migrations" },
-          // ponytail: pin live prod identity (PS_20_AWS_ARM, replicas 0).
-          // Alchemy replaces the retained database when arch or replicas
-          // differ from stored state. Default arch is x86. HA is KAT-3335.
+          // ponytail: match the last completed Alchemy generation
+          // (replicas 0, arch arm). HA scale is KAT-3335. Cluster size
+          // PS_20 updates in place after a stuck replace is aborted.
         }).pipe(RemovalPolicy.retain())
       : yield* Planetscale.PostgresDatabase.ref("RelayPostgresDatabase", {
           stage: "prod",
