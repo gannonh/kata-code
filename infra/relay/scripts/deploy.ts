@@ -128,8 +128,12 @@ export function postgresReplaceCensusFromPlan(plan: Plan.Plan): PostgresReplaceC
     if (node.action !== "replace") {
       continue;
     }
-    const olds = node.state.status === "updating" ? node.state.old.props : node.state.props;
-    const output = "attr" in node.state ? node.state.attr : undefined;
+    const live =
+      node.state.status === "updating" || node.state.status === "replacing"
+        ? node.state.old
+        : node.state;
+    const olds = live.props;
+    const output = "attr" in live ? live.attr : undefined;
     return {
       actors: alchemyPostgresReplaceActors({
         news: node.props,

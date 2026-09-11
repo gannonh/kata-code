@@ -86,6 +86,53 @@ describe("postgresReplaceCensusFromPlan", () => {
       output: { name: "katacoderelay", region: { slug: "us-east" } },
     });
   });
+
+  it("names a stuck replace from the live old generation, not the in-flight props", () => {
+    expect(
+      postgresReplaceCensusFromPlan({
+        resources: {
+          RelayPostgresDatabase: {
+            resource: { LogicalId: "RelayPostgresDatabase" },
+            action: "replace",
+            mode: "live",
+            props: { name: "katacoderelay", replicas: 0, arch: "arm" },
+            state: {
+              status: "replacing",
+              providerMode: "live",
+              props: { name: "katacoderelay", replicas: 2, clusterSize: "PS_20" },
+              attr: {},
+              old: {
+                status: "updated",
+                props: { name: "katacoderelay", replicas: 0, arch: "arm", clusterSize: "PS_5" },
+                attr: {
+                  id: "s5mpblbu2m4s",
+                  name: "katacoderelay",
+                  state: "ready",
+                  arch: "arm",
+                  region: { slug: "us-west" },
+                },
+              },
+            },
+          },
+        },
+        deletions: {},
+      } as never),
+    ).toEqual({
+      actors: ["status"],
+      status: "replacing",
+      providerMode: "live",
+      planMode: "live",
+      news: { name: "katacoderelay", replicas: 0, arch: "arm" },
+      olds: { name: "katacoderelay", replicas: 0, arch: "arm", clusterSize: "PS_5" },
+      output: {
+        id: "s5mpblbu2m4s",
+        name: "katacoderelay",
+        state: "ready",
+        arch: "arm",
+        region: { slug: "us-west" },
+      },
+    });
+  });
 });
 
 describe("hasDeployChanges", () => {
