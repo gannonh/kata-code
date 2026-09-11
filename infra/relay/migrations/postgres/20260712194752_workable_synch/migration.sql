@@ -1,0 +1,1 @@
+ALTER TABLE "relay_environment_links" ADD COLUMN "cleanup_claimed_at" varchar(64);
