@@ -184,6 +184,7 @@ Source builds load secrets from 1Password. There are no `.env` files. Do not cre
 upload dotenv files. Do not copy `.env.example` to `.env`.
 
 Setup and run: [docs/operations/environment-variables.md](docs/operations/environment-variables.md).
+Agent procedure: `.agents/skills/1password`.
 
 1. Install 1Password CLI beta `2.33.0-beta.02` or later (`brew install --cask 1password-cli@beta`).
 2. Export `OP_SERVICE_ACCOUNT_TOKEN` for a service account that can read Environment
