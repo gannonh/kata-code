@@ -1,7 +1,5 @@
-// @effect-diagnostics nodeBuiltinImport:off - Build bootstrap reads optional root env files before an Effect runtime exists.
-import * as NodeFS from "node:fs";
-import * as NodePath from "node:path";
-import * as NodeURL from "node:url";
+// @effect-diagnostics nodeBuiltinImport:off - Build bootstrap loads 1Password before an Effect runtime exists.
+import * as NodeChildProcess from "node:child_process";
 import * as NodeUtil from "node:util";
 
 export interface KatacodePublicConfig {
@@ -19,24 +17,75 @@ export interface KatacodePublicConfig {
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
-const REPO_ROOT = NodePath.dirname(
-  NodePath.dirname(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url))),
-);
+export const DEFAULT_OP_ENVIRONMENT_ID = "tlgyne6mxr5iejiwvshbxsnxde";
+
+export type OpEnvironmentReader = (input: {
+  readonly environmentId: string;
+  readonly env: NodeJS.ProcessEnv;
+}) => Record<string, string | undefined>;
+
+const opEnvironmentCache = new Map<string, Record<string, string | undefined>>();
+
+export class OnePasswordEnvironmentReadError extends Error {
+  readonly environmentId: string;
+  readonly detail: string;
+
+  constructor(environmentId: string, detail: string) {
+    super(
+      `Failed to read 1Password Environment ${environmentId}. Install 1Password CLI beta 2.33.0-beta.02 or later, set OP_SERVICE_ACCOUNT_TOKEN, and confirm the service account can read that Environment. ${detail}`,
+    );
+    this.name = "OnePasswordEnvironmentReadError";
+    this.environmentId = environmentId;
+    this.detail = detail;
+  }
+}
+
+export function readOpEnvironment(input: {
+  readonly environmentId: string;
+  readonly env: NodeJS.ProcessEnv;
+}): Record<string, string | undefined> {
+  const cached = opEnvironmentCache.get(input.environmentId);
+  if (cached) {
+    return cached;
+  }
+
+  const result = NodeChildProcess.spawnSync("op", ["environment", "read", input.environmentId], {
+    encoding: "utf8",
+    env: input.env,
+  });
+  if (result.error) {
+    throw new OnePasswordEnvironmentReadError(input.environmentId, result.error.message);
+  }
+  if (result.status !== 0) {
+    const detail =
+      (result.stderr ?? "").trim().split("\n")[0] || `op exited ${String(result.status)}`;
+    throw new OnePasswordEnvironmentReadError(input.environmentId, detail);
+  }
+
+  const parsed = NodeUtil.parseEnv(result.stdout ?? "");
+  opEnvironmentCache.set(input.environmentId, parsed);
+  return parsed;
+}
 
 export function loadRepoEnv({
   baseEnv = process.env,
-  repoRoot = REPO_ROOT,
+  readOpEnvironment: readEnvironment = readOpEnvironment,
 }: {
   readonly baseEnv?: Environment;
-  readonly repoRoot?: string;
+  readonly readOpEnvironment?: OpEnvironmentReader;
 } = {}): Record<string, string | undefined> {
-  const rootEnv = readEnvFile(NodePath.join(repoRoot, ".env"));
-  const localEnv = readEnvFile(NodePath.join(repoRoot, ".env.local"));
-  const config = resolvePublicConfig(baseEnv, localEnv, rootEnv);
+  const token = baseEnv.OP_SERVICE_ACCOUNT_TOKEN?.trim();
+  const opEnv =
+    token === undefined || token.length === 0
+      ? {}
+      : readEnvironment({
+          environmentId: baseEnv.OP_ENVIRONMENT_ID?.trim() || DEFAULT_OP_ENVIRONMENT_ID,
+          env: environmentToProcessEnv(baseEnv),
+        });
+  const config = resolvePublicConfig(baseEnv, opEnv);
 
   return {
-    ...rootEnv,
-    ...localEnv,
+    ...opEnv,
     ...baseEnv,
     ...(config.clerkPublishableKey
       ? {
@@ -168,6 +217,12 @@ function firstNonEmpty(sources: readonly Environment[], ...names: readonly strin
   return undefined;
 }
 
-function readEnvFile(path: string): Record<string, string | undefined> {
-  return NodeFS.existsSync(path) ? NodeUtil.parseEnv(NodeFS.readFileSync(path, "utf8")) : {};
+function environmentToProcessEnv(baseEnv: Environment): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const [name, value] of Object.entries(baseEnv)) {
+    if (value !== undefined) {
+      env[name] = value;
+    }
+  }
+  return env;
 }

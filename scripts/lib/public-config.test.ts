@@ -1,22 +1,21 @@
-// @effect-diagnostics nodeBuiltinImport:off - Tests exercise root env file precedence directly.
-import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+// @effect-diagnostics nodeBuiltinImport:off - Tests exercise 1Password env loading without an Effect runtime.
+import { describe, expect, it } from "vite-plus/test";
 
-import { loadRepoEnv, resolvePublicConfig } from "./public-config.ts";
-
-const temporaryDirectories: string[] = [];
-
-afterEach(() => {
-  for (const directory of temporaryDirectories.splice(0)) {
-    NodeFS.rmSync(directory, { recursive: true, force: true });
-  }
-});
+import {
+  DEFAULT_OP_ENVIRONMENT_ID,
+  loadRepoEnv,
+  OnePasswordEnvironmentReadError,
+  resolvePublicConfig,
+} from "./public-config.ts";
 
 describe("loadRepoEnv", () => {
   it("does not project cloud configuration for an unconfigured clone", () => {
-    const env = loadRepoEnv({ baseEnv: {}, repoRoot: makeTemporaryDirectory() });
+    const env = loadRepoEnv({
+      baseEnv: {},
+      readOpEnvironment: () => {
+        throw new Error("should not read 1Password without a service account token");
+      },
+    });
 
     expect(env.KATACODE_CLERK_PUBLISHABLE_KEY).toBeUndefined();
     expect(env.KATACODE_CLERK_CLI_OAUTH_CLIENT_ID).toBeUndefined();
@@ -41,31 +40,29 @@ describe("loadRepoEnv", () => {
     expect(env.VITE_RELAY_OTLP_TRACES_TOKEN).toBeUndefined();
   });
 
-  it("applies process, root local, and root precedence in that order", () => {
-    const repoRoot = makeTemporaryDirectory();
-    NodeFS.writeFileSync(
-      NodePath.join(repoRoot, ".env"),
-      "KATACODE_CLERK_PUBLISHABLE_KEY=pk_root\nKATACODE_CLERK_JWT_TEMPLATE=template_root\nKATACODE_CLERK_CLI_OAUTH_CLIENT_ID=oauth_root\nKATACODE_RELAY_URL=https://root.example.test\n",
-    );
-    NodeFS.writeFileSync(
-      NodePath.join(repoRoot, ".env.local"),
-      "KATACODE_CLERK_PUBLISHABLE_KEY=pk_local\nKATACODE_CLERK_JWT_TEMPLATE=template_local\nKATACODE_CLERK_CLI_OAUTH_CLIENT_ID=oauth_local\nKATACODE_RELAY_URL=https://local.example.test\n",
-    );
+  it("applies process env over 1Password Environment values", () => {
+    let requestedId = "";
+    const env = loadRepoEnv({
+      baseEnv: {
+        OP_SERVICE_ACCOUNT_TOKEN: "ops_test",
+        KATACODE_CLERK_PUBLISHABLE_KEY: "pk_ci",
+        KATACODE_CLERK_JWT_TEMPLATE: "template_ci",
+        KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
+        KATACODE_RELAY_URL: "https://ci.example.test",
+      },
+      readOpEnvironment: ({ environmentId }) => {
+        requestedId = environmentId;
+        return {
+          KATACODE_CLERK_PUBLISHABLE_KEY: "pk_op",
+          KATACODE_CLERK_JWT_TEMPLATE: "template_op",
+          KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_op",
+          KATACODE_RELAY_URL: "https://op.example.test",
+        };
+      },
+    });
 
-    expect(loadRepoEnv({ baseEnv: {}, repoRoot }).KATACODE_RELAY_URL).toBe(
-      "https://local.example.test",
-    );
-    expect(
-      loadRepoEnv({
-        baseEnv: {
-          KATACODE_CLERK_PUBLISHABLE_KEY: "pk_ci",
-          KATACODE_CLERK_JWT_TEMPLATE: "template_ci",
-          KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
-          KATACODE_RELAY_URL: "https://ci.example.test",
-        },
-        repoRoot,
-      }),
-    ).toMatchObject({
+    expect(requestedId).toBe(DEFAULT_OP_ENVIRONMENT_ID);
+    expect(env).toMatchObject({
       KATACODE_CLERK_PUBLISHABLE_KEY: "pk_ci",
       KATACODE_CLERK_CLI_OAUTH_CLIENT_ID: "oauth_ci",
       VITE_CLERK_PUBLISHABLE_KEY: "pk_ci",
@@ -76,6 +73,47 @@ describe("loadRepoEnv", () => {
       KATACODE_RELAY_URL: "https://ci.example.test",
       VITE_KATACODE_RELAY_URL: "https://ci.example.test",
     });
+  });
+
+  it("uses 1Password values when process env does not set them", () => {
+    const env = loadRepoEnv({
+      baseEnv: { OP_SERVICE_ACCOUNT_TOKEN: "ops_test" },
+      readOpEnvironment: () => ({
+        KATACODE_RELAY_URL: "https://op.example.test",
+        KATACODE_CLERK_PUBLISHABLE_KEY: "pk_op",
+      }),
+    });
+
+    expect(env.KATACODE_RELAY_URL).toBe("https://op.example.test");
+    expect(env.VITE_KATACODE_RELAY_URL).toBe("https://op.example.test");
+    expect(env.KATACODE_CLERK_PUBLISHABLE_KEY).toBe("pk_op");
+    expect(env.VITE_CLERK_PUBLISHABLE_KEY).toBe("pk_op");
+  });
+
+  it("honors OP_ENVIRONMENT_ID", () => {
+    let requestedId = "";
+    loadRepoEnv({
+      baseEnv: {
+        OP_SERVICE_ACCOUNT_TOKEN: "ops_test",
+        OP_ENVIRONMENT_ID: "custom-environment-id",
+      },
+      readOpEnvironment: ({ environmentId }) => {
+        requestedId = environmentId;
+        return {};
+      },
+    });
+    expect(requestedId).toBe("custom-environment-id");
+  });
+
+  it("fails closed when 1Password read fails", () => {
+    expect(() =>
+      loadRepoEnv({
+        baseEnv: { OP_SERVICE_ACCOUNT_TOKEN: "ops_test" },
+        readOpEnvironment: () => {
+          throw new OnePasswordEnvironmentReadError("env-id", "not signed in");
+        },
+      }),
+    ).toThrow(/1Password Environment env-id/);
   });
 
   it("accepts legacy framework aliases as root overrides", () => {
@@ -111,7 +149,9 @@ describe("loadRepoEnv", () => {
           KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET: "relay-client-traces",
           KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: "relay-client-token",
         },
-        repoRoot: makeTemporaryDirectory(),
+        readOpEnvironment: () => {
+          throw new Error("should not read 1Password without a service account token");
+        },
       }),
     ).toEqual({
       KATACODE_RELAY_CLIENT_OTLP_TRACES_URL: "https://api.axiom.co/v1/traces",
@@ -132,7 +172,9 @@ describe("loadRepoEnv", () => {
           KATACODE_MOBILE_OTLP_TRACES_DATASET: "mobile-traces",
           KATACODE_MOBILE_OTLP_TRACES_TOKEN: "mobile-token",
         },
-        repoRoot: makeTemporaryDirectory(),
+        readOpEnvironment: () => {
+          throw new Error("should not read 1Password without a service account token");
+        },
       }),
     ).toEqual({
       KATACODE_RELAY_URL: "https://relay.example.test",
@@ -146,9 +188,3 @@ describe("loadRepoEnv", () => {
     });
   });
 });
-
-function makeTemporaryDirectory() {
-  const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-public-config-"));
-  temporaryDirectories.push(directory);
-  return directory;
-}

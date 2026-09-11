@@ -29,6 +29,7 @@ import * as Schema from "effect/Schema";
 import { Command, Flag, Prompt } from "effect/unstable/cli";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 
+import { loadRepoEnv } from "../../../scripts/lib/public-config.ts";
 import RelayStack from "../alchemy.run.ts";
 
 const relayDeployOutputFields = [
@@ -98,51 +99,6 @@ export interface RelayPublicConfig {
   readonly clientTracingToken: string;
 }
 
-const publicConfigEnvEntries = (config: RelayPublicConfig) =>
-  ({
-    KATACODE_RELAY_URL: config.relayUrl,
-    KATACODE_MOBILE_OTLP_TRACES_URL: config.mobileTracingUrl,
-    KATACODE_MOBILE_OTLP_TRACES_DATASET: config.mobileTracingDataset,
-    KATACODE_MOBILE_OTLP_TRACES_TOKEN: config.mobileTracingToken,
-    KATACODE_RELAY_CLIENT_OTLP_TRACES_URL: config.clientTracingUrl,
-    KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET: config.clientTracingDataset,
-    KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN: config.clientTracingToken,
-  }) as const;
-
-export function reconcileRootEnvPublicConfig(contents: string, config: RelayPublicConfig): string {
-  let next = contents;
-  for (const [name, value] of Object.entries(publicConfigEnvEntries(config))) {
-    const entry = `${name}=${value}`;
-    const pattern = new RegExp(`^${name}=.*$`, "mu");
-    if (pattern.test(next)) {
-      next = next.replace(pattern, entry);
-      continue;
-    }
-    if (!next) {
-      next = `${entry}\n`;
-      continue;
-    }
-    next = `${next}${next.endsWith("\n") ? "" : "\n"}${entry}\n`;
-  }
-  return next;
-}
-
-export function reconcileRootEnvRelayUrl(contents: string, relayUrl: string): string {
-  return reconcileRootEnvPublicConfig(contents, {
-    relayUrl,
-    mobileTracingUrl: "",
-    mobileTracingDataset: "",
-    mobileTracingToken: "",
-    clientTracingUrl: "",
-    clientTracingDataset: "",
-    clientTracingToken: "",
-  })
-    .split("\n")
-    .filter((line) => !line.startsWith("KATACODE_MOBILE_OTLP_TRACES_"))
-    .filter((line) => !line.startsWith("KATACODE_RELAY_CLIENT_OTLP_TRACES_"))
-    .join("\n");
-}
-
 export function hasDeployChanges(plan: Plan.Plan): boolean {
   return (
     Object.keys(plan.deletions).length > 0 ||
@@ -176,9 +132,6 @@ export function serializeRelayClientTracingEnvironment(config: RelayPublicConfig
 const relayRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
 );
-const repoRoot = Effect.service(Path.Path).pipe(
-  Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
-);
 
 const loadDeployConfigProvider = Effect.fn("relay.deploy.loadConfigProvider")(function* (
   envFileOverride: Option.Option<string>,
@@ -190,9 +143,8 @@ const loadDeployConfigProvider = Effect.fn("relay.deploy.loadConfigProvider")(fu
     return yield* ConfigProvider.fromDotEnv({ path: path.resolve(root, envFileOverride.value) });
   }
 
-  return yield* ConfigProvider.fromDotEnv({ path: path.join(root, ".env") }).pipe(
-    Effect.orElseSucceed(() => ConfigProvider.fromEnv()),
-  );
+  Object.assign(process.env, loadRepoEnv());
+  return ConfigProvider.fromEnv();
 });
 
 const relayDeployStage = Config.nonEmptyString("stage").pipe(
@@ -202,17 +154,12 @@ const relayDeployStage = Config.nonEmptyString("stage").pipe(
   ),
 );
 
-const reconcileRootEnv = Effect.fn("relay.deploy.reconcileRootEnv")(function* (
+const reportDeployedRelayUrl = Effect.fn("relay.deploy.reportRelayUrl")(function* (
   config: RelayPublicConfig,
 ) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const root = yield* repoRoot;
-  const rootEnvPath = path.join(root, ".env");
-  const contents = (yield* fs.exists(rootEnvPath)) ? yield* fs.readFileString(rootEnvPath) : "";
-
-  yield* fs.writeFileString(rootEnvPath, reconcileRootEnvPublicConfig(contents, config));
-  yield* Console.log(`Updated ${rootEnvPath} with relay public client configuration`);
+  yield* Console.log(
+    `Relay URL ${config.relayUrl}. Set KATACODE_RELAY_URL in the 1Password Environment if this stage should be the source-build default.`,
+  );
 });
 
 const writeGithubOutput = Effect.fn("relay.deploy.writeGithubOutput")(function* (
@@ -432,7 +379,7 @@ export const deploy = Effect.fn("relay.deploy")(function* (options: RelayDeployO
     ? yield* readRelayPublicConfig(stage).pipe(Effect.provide(Cloudflare.state()))
     : yield* runRelayDeploy(options, configProvider, stage);
   if (Option.isSome(outcome.publicConfig)) {
-    yield* reconcileRootEnv(outcome.publicConfig.value);
+    yield* reportDeployedRelayUrl(outcome.publicConfig.value);
   }
   if (options.githubOutput) {
     yield* writeGithubOutput(outcome);
@@ -455,7 +402,7 @@ export const relayDeployCommand = Command.make(
     ),
     envFile: Flag.string("env-file").pipe(
       Flag.withDescription(
-        "Environment file to load. Defaults to infra/relay/.env with process env fallback.",
+        "Optional dotenv file. Omit this and set OP_SERVICE_ACCOUNT_TOKEN so deploy loads the 1Password Environment.",
       ),
       Flag.optional,
     ),

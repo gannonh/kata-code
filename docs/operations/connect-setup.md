@@ -6,14 +6,11 @@ provisioning instructions.
 
 ## Public application configuration
 
-Kata Code Connect is disabled in a fresh clone. To build against the production deployment, copy the
-repository-root example:
+Kata Code Connect is disabled in a fresh clone until `OP_SERVICE_ACCOUNT_TOKEN` is set. Source
+builds then load Clerk and relay identifiers from the 1Password Environment. See
+[environment variables](./environment-variables.md). Do not create a repository-root `.env`.
 
-```sh
-cp .env.example .env
-```
-
-For another deployment, set these values in the repository-root `.env` or `.env.local`:
+Canonical names (process env overrides 1Password):
 
 ```dotenv
 KATACODE_CLERK_PUBLISHABLE_KEY=<publishable key>
@@ -22,17 +19,18 @@ KATACODE_CLERK_CLI_OAUTH_CLIENT_ID=<public OAuth application client ID>
 KATACODE_RELAY_URL=https://relay.example.com
 ```
 
-Process variables take precedence over `.env.local`, then `.env`. Use these canonical names;
-the build loader supplies framework-specific aliases. These values are public identifiers.
-`CLERK_SECRET_KEY` belongs only in the relay's secrets, never in client configuration.
+The build loader supplies framework-specific aliases. These values are public identifiers.
+`CLERK_SECRET_KEY` belongs only in the 1Password Environment (and GitHub Actions for production
+relay), never in client configuration.
 
-Client and bundled-server builds embed the public values, so set them before building.
+Client and bundled-server builds embed the public values, so the token must be set before building.
 EAS preview and production environments need the publishable key, JWT template name, and relay URL.
 Bundled servers also accept runtime overrides for operator-managed deployments.
 
-Copy `infra/relay/.env.example` to `infra/relay/.env` for relay deployment settings.
-Deploy `prod` before personal stages because it owns the retained database that their branches
-depend on. The deploy wrapper writes the resulting relay URL back to the root `.env`.
+Relay deployment settings are the same 1Password Environment. Deploy `prod` before personal stages
+because it owns the retained database that their branches depend on. The deploy command prints the
+relay URL; put it in the Environment as `KATACODE_RELAY_URL` when that stage should be the
+source-build default.
 
 ## CLI OAuth application
 
@@ -86,7 +84,7 @@ For a production macOS app with bundle ID `com.katacode.app`:
    `webcredentials.apps` must include `<TEAM_ID>.com.katacode.app`.
 5. Configure signing as described in the [release runbook](./release.md#2-apple-signing--notarization-setup-macos).
 
-Local signed builds additionally use:
+Local signed builds additionally use these names in the 1Password Environment:
 
 ```dotenv
 KATACODE_APPLE_TEAM_ID=ABC1234567

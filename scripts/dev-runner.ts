@@ -372,10 +372,10 @@ export function createDevRunnerEnv({
         delete output.VITE_HTTP_URL;
         delete output.VITE_WS_URL;
         // Deleting is not enough on its own: vite.config.ts calls loadRepoEnv,
-        // which merges `.env`/`.env.local` *under* this env, so a developer
-        // with either URL in their `.env` would get it back and silently lose
-        // single-origin mode. This states the intent positively so Vite can
-        // ignore those values rather than infer from their absence.
+        // which merges 1Password Environment values *under* this env, so a
+        // developer with either URL in that Environment would get it back and
+        // silently lose single-origin mode. This states the intent positively
+        // so Vite can ignore those values rather than infer from their absence.
         output.KATACODE_SINGLE_ORIGIN_DEV = "1";
       } else {
         output.VITE_HTTP_URL = `http://localhost:${serverPort}`;

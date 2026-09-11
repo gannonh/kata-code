@@ -177,3 +177,19 @@ swarm workers: codex:gpt-5.6-luna@max
 architect runners: inherit-parent, codex:gpt-5.6-luna@max, codex:gpt-5.6-terra@hard, codex:gpt-5.6-sol@hard
 interrogate reviewers: inherit-parent, codex:gpt-5.6-luna@max, codex:gpt-5.6-terra@hard, codex:gpt-5.6-sol@hard
 <!-- pstack:models:end -->
+
+## Environment variables
+
+Source builds load secrets from 1Password. There are no `.env` files. Do not create, read, or
+upload dotenv files. Do not copy `.env.example` to `.env`.
+
+Setup and run: [docs/operations/environment-variables.md](docs/operations/environment-variables.md).
+
+1. Install 1Password CLI beta `2.33.0-beta.02` or later (`brew install --cask 1password-cli@beta`).
+2. Export `OP_SERVICE_ACCOUNT_TOKEN` for a service account that can read Environment
+   `tlgyne6mxr5iejiwvshbxsnxde`.
+3. Run `vp run dev` (or any other `vp` task). `loadRepoEnv` calls `op environment read`.
+
+`OP_ENVIRONMENT_ID` overrides the Environment id. Process env overrides 1Password. A missing
+token leaves Connect disabled. A failed `op` call is a hard error. Do not wrap commands in
+`op run`. Do not mount a 1Password local `.env`.

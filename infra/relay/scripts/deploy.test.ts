@@ -8,7 +8,6 @@ import {
   hasDeployChanges,
   missingRelayPublicConfigFields,
   publicConfigFromOutput,
-  reconcileRootEnvPublicConfig,
   RelayDeployError,
   RelayDeployPublicConfigUnavailableError,
   serializeGithubOutput,
@@ -83,64 +82,6 @@ describe("hasDeployChanges", () => {
         },
       } as never),
     ).toBe(true);
-  });
-});
-
-describe("reconcileRootEnvPublicConfig", () => {
-  const config = {
-    relayUrl: "https://relay.example.test",
-    mobileTracingUrl: "https://api.axiom.co/v1/traces",
-    mobileTracingDataset: "kata-code-mobile-traces-dev",
-    mobileTracingToken: "xaat-public-ingest",
-    clientTracingUrl: "https://api.axiom.co/v1/traces",
-    clientTracingDataset: "kata-code-relay-client-traces-dev",
-    clientTracingToken: "xaat-relay-client-ingest",
-  } as const;
-
-  it("adds the complete local client config", () => {
-    expect(reconcileRootEnvPublicConfig("", config)).toBe(
-      [
-        "KATACODE_RELAY_URL=https://relay.example.test",
-        "KATACODE_MOBILE_OTLP_TRACES_URL=https://api.axiom.co/v1/traces",
-        "KATACODE_MOBILE_OTLP_TRACES_DATASET=kata-code-mobile-traces-dev",
-        "KATACODE_MOBILE_OTLP_TRACES_TOKEN=xaat-public-ingest",
-        "KATACODE_RELAY_CLIENT_OTLP_TRACES_URL=https://api.axiom.co/v1/traces",
-        "KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET=kata-code-relay-client-traces-dev",
-        "KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=xaat-relay-client-ingest",
-        "",
-      ].join("\n"),
-    );
-  });
-
-  it("replaces stale values while preserving unrelated entries", () => {
-    expect(
-      reconcileRootEnvPublicConfig(
-        [
-          "KATACODE_CLERK_PUBLISHABLE_KEY=pk_test_example",
-          "KATACODE_RELAY_URL=https://old.example.test",
-          "KATACODE_MOBILE_OTLP_TRACES_URL=https://old.example.test/v1/traces",
-          "KATACODE_MOBILE_OTLP_TRACES_DATASET=old-dataset",
-          "KATACODE_MOBILE_OTLP_TRACES_TOKEN=old-token",
-          "KATACODE_RELAY_CLIENT_OTLP_TRACES_URL=https://old.example.test/v1/traces",
-          "KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET=old-client-dataset",
-          "KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=old-client-token",
-          "",
-        ].join("\n"),
-        config,
-      ),
-    ).toBe(
-      [
-        "KATACODE_CLERK_PUBLISHABLE_KEY=pk_test_example",
-        "KATACODE_RELAY_URL=https://relay.example.test",
-        "KATACODE_MOBILE_OTLP_TRACES_URL=https://api.axiom.co/v1/traces",
-        "KATACODE_MOBILE_OTLP_TRACES_DATASET=kata-code-mobile-traces-dev",
-        "KATACODE_MOBILE_OTLP_TRACES_TOKEN=xaat-public-ingest",
-        "KATACODE_RELAY_CLIENT_OTLP_TRACES_URL=https://api.axiom.co/v1/traces",
-        "KATACODE_RELAY_CLIENT_OTLP_TRACES_DATASET=kata-code-relay-client-traces-dev",
-        "KATACODE_RELAY_CLIENT_OTLP_TRACES_TOKEN=xaat-relay-client-ingest",
-        "",
-      ].join("\n"),
-    );
   });
 });
 

@@ -83,9 +83,10 @@ vp run --filter kata-code-relay deploy
 ```
 
 The stack provisions the Cloudflare Worker and queues, managed endpoint resources, database
-connectivity, and relay tracing resources. Copy [`infra/relay/.env.example`](./.env.example) to
-`infra/relay/.env` and fill in the deployment-specific values before deploying. Alchemy loads that
-file from the relay directory. Runtime secrets include Clerk and APNs credentials. Production adopts
+connectivity, and relay tracing resources. Local deploys load those values from the 1Password
+Environment. See [environment variables](../../docs/operations/environment-variables.md).
+`infra/relay/.env.example` lists the names. Do not copy it to `infra/relay/.env`.
+Runtime secrets include Clerk and APNs credentials. Production adopts
 the configured API and tunnel DNS zones as retained Cloudflare resources. Personal stages reference
 the production-owned zones.
 
@@ -96,7 +97,7 @@ developer stages:
 
 ```sh
 vp run --filter kata-code-relay deploy -- --stage prod
-vp run --filter kata-code-relay deploy -- --env-file .env.local
+vp run --filter kata-code-relay deploy
 ```
 
 Alchemy defaults personal deployments to the `dev_$USER` stage. Relay custom domains apply the same
@@ -108,9 +109,8 @@ DNS-safe sanitization as Alchemy physical resource names, so `prod` uses
 `<stage>-<digest>.<RELAY_TUNNEL_ZONE_NAME>`. `RELAY_DOMAIN` remains available as an explicit API
 domain override.
 
-After a successful deploy, the wrapper updates the repository-root `.env` file with the derived relay
-URL. That makes subsequent source builds point at the relay that was just deployed without copying
-the URL manually.
+After a successful deploy, the command prints the derived relay URL. Put `KATACODE_RELAY_URL` in
+the 1Password Environment when that stage should be the source-build default.
 
 ### Deployment CI
 
