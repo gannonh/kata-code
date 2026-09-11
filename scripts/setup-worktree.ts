@@ -9,12 +9,11 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-const projectRoot = process.env.KATACODE_PROJECT_ROOT;
-if (!projectRoot) {
+if (!process.env.KATACODE_PROJECT_ROOT) {
   throw new Error("KATACODE_PROJECT_ROOT is not set; run this from a Kata Code worktree setup.");
 }
 
-const SHARED_ENV_FILES = [".env", NodePath.join("infra", "relay", ".env")] as const;
+const DOTENV_LEFTOVERS = [".env", ".env.local", NodePath.join("infra", "relay", ".env")] as const;
 
 // oxlint-disable-next-line kata-code/no-global-process-runtime -- Bootstrap targets the actual host; no Effect runtime exists yet.
 const shell = process.platform === "win32";
@@ -29,11 +28,8 @@ function run(command: string, args: ReadonlyArray<string>) {
 
 run("vp", ["i"]);
 
-for (const relativePath of SHARED_ENV_FILES) {
-  const link = NodePath.resolve(relativePath);
-  NodeFS.mkdirSync(NodePath.dirname(link), { recursive: true });
-  NodeFS.rmSync(link, { force: true });
-  NodeFS.symlinkSync(NodePath.join(projectRoot, relativePath), link, "file");
+for (const relativePath of DOTENV_LEFTOVERS) {
+  NodeFS.rmSync(NodePath.resolve(relativePath), { force: true });
 }
 
 run("node", [NodePath.join("apps", "web", "scripts", "warm-dep-cache.ts")]);

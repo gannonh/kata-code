@@ -99,7 +99,7 @@ Personal stages reference the production-owned zones.
 Developers deploy personal stages locally rather than through pull-request automation:
 
 ```sh
-vp run --filter kata-code-relay deploy -- --stage "$USER" --env-file .env.local
+vp run --filter kata-code-relay deploy -- --stage "$USER"
 ```
 
 ## Vercel release projects

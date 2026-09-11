@@ -19,11 +19,10 @@ Object.assign(process.env, repoEnv);
 
 // Single-origin dev is signalled positively, because it cannot be inferred
 // from the absence of VITE_HTTP_URL/VITE_WS_URL: the runner deletes those keys
-// but `loadRepoEnv` merges `.env`/`.env.local` *underneath* the process env, so
-// a developer with either URL in their `.env` gets it back here. Baking it then
-// pins the client to localhost and breaks every non-localhost origin — the
-// exact failure single-origin mode exists to prevent, and an invisible one
-// since the page still loads.
+// but `loadRepoEnv` merges 1Password Environment values *underneath* the
+// process env, so a developer with either URL in that Environment gets it back
+// here. Baking it then pins the client to localhost and breaks every
+// non-localhost origin. The page still loads, so the failure is invisible.
 const isSingleOriginDev = process.env.KATACODE_SINGLE_ORIGIN_DEV === "1";
 
 const port = Number(process.env.PORT ?? 5733);

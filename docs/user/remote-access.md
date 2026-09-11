@@ -253,7 +253,13 @@ opens the headless Connect authorization flow. It stops and replaces only the Sp
 and unrelated services remain intact. Setup forces Cloudflare HTTP/2 to avoid QUIC timeouts on
 Sprites. Rerun setup to update Kata Code or replace its service environment.
 
-Put service environment variables and secrets in a `.env` file:
+Put service environment variables and secrets in a `.env` file **only when installing the
+published Kata Code CLI as a Sprite service**. That path writes `~/.katacode/service-env.json`.
+It is not how you develop this repository. For a source checkout, export
+`OP_SERVICE_ACCOUNT_TOKEN` and follow [environment variables](../operations/environment-variables.md).
+Do not copy a repo dotenv file onto the Sprite.
+
+If you are installing the CLI service, pass variables with `--env`:
 
 ```dotenv
 OPENAI_API_KEY=replace-me

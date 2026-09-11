@@ -13,9 +13,9 @@ This app has three variants:
 
 Run commands from `apps/mobile`.
 
-Kata Code Connect is optional and disabled in a fresh clone. Public configuration belongs in the
-repository-root `.env` or `.env.local`, not an `apps/mobile/.env` file. See
-[`../../.env.example`](../../.env.example).
+Kata Code Connect is optional and disabled in a fresh clone. Public configuration comes from the
+1Password Environment via `loadRepoEnv`. Do not add an `apps/mobile/.env` file. See
+[environment variables](../../docs/operations/environment-variables.md).
 
 ## Development
 

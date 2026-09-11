@@ -20,7 +20,7 @@ function runSetup(worktree: string, env: Record<string, string>) {
 
 // oxlint-disable-next-line kata-code/no-global-process-runtime -- Skip decision about the actual host; the script under test has no Effect runtime.
 it.skipIf(!symlinksSupported || NodeOS.platform() === "win32")(
-  "links shared env files from KATACODE_PROJECT_ROOT",
+  "installs the worktree without linking dotenv files",
   () => {
     const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "setup-worktree-"));
     const projectRoot = NodePath.join(root, "project");
@@ -31,9 +31,9 @@ it.skipIf(!symlinksSupported || NodeOS.platform() === "win32")(
       NodeFS.writeFileSync(file, content, mode === undefined ? {} : { mode });
     };
     try {
-      write(NodePath.join(projectRoot, ".env"), "ROOT=1\n");
-      write(NodePath.join(projectRoot, "infra", "relay", ".env"), "RELAY=1\n");
       write(NodePath.join(worktree, ".env"), "stale\n");
+      write(NodePath.join(worktree, ".env.local"), "stale-local\n");
+      write(NodePath.join(worktree, "infra", "relay", ".env"), "stale-relay\n");
       write(
         NodePath.join(bin, "vp"),
         `#!/bin/sh\nprintf '%s\\n' "$*" >> "${NodePath.join(root, "vp-calls")}"\n`,
@@ -55,10 +55,8 @@ it.skipIf(!symlinksSupported || NodeOS.platform() === "win32")(
 
       expect(NodeFS.readFileSync(NodePath.join(root, "vp-calls"), "utf8")).toBe("i\ni\n");
       expect(NodeFS.existsSync(NodePath.join(root, "warmed"))).toBe(true);
-      for (const relativePath of [".env", NodePath.join("infra", "relay", ".env")]) {
-        const link = NodePath.join(worktree, relativePath);
-        expect(NodeFS.lstatSync(link).isSymbolicLink()).toBe(true);
-        expect(NodeFS.readlinkSync(link)).toBe(NodePath.join(projectRoot, relativePath));
+      for (const relativePath of [".env", ".env.local", NodePath.join("infra", "relay", ".env")]) {
+        expect(NodeFS.existsSync(NodePath.join(worktree, relativePath))).toBe(false);
       }
 
       const unset = runSetup(worktree, { ...env, KATACODE_PROJECT_ROOT: "" });

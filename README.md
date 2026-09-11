@@ -97,6 +97,9 @@ Checkout their getting started guide for more information: https://viteplus.dev/
 
 ### Install dependencies
 
+Secrets come from 1Password. See [environment variables](./docs/operations/environment-variables.md).
+Export `OP_SERVICE_ACCOUNT_TOKEN`, then:
+
 ```bash
 vp i
 ```

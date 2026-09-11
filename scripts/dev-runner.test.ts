@@ -417,8 +417,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           assert.equal(env.VITE_WS_URL, undefined);
           assert.equal(env.KATACODE_PORT, "13773");
           // Deleting the keys is not sufficient — vite.config.ts merges
-          // `.env`/`.env.local` underneath this env and would revive them, so
-          // the intent has to be stated positively.
+          // 1Password Environment values underneath this env and would revive
+          // them, so the intent has to be stated positively.
           assert.equal(env.KATACODE_SINGLE_ORIGIN_DEV, "1");
         }),
       );

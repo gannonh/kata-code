@@ -3,7 +3,9 @@
 ## First checkout
 
 Install `vp` using the [root README](../../README.md#install-vp). The checkout requires Node 24;
-Bun is optional. From the repository root:
+Bun is optional. Secrets come from 1Password. Follow
+[environment variables](./environment-variables.md) before the first `vp` command: install CLI beta,
+export `OP_SERVICE_ACCOUNT_TOKEN`, then from the repository root:
 
 ```sh
 vp i
