@@ -1,9 +1,5 @@
 export const APP_BASE_NAME = "Kata Code" as const;
 
-/** Compact product abbreviation for space-constrained surfaces. */
-/** @public Kata identity contract documented in FORK.md. */
-export const PRODUCT_ABBREVIATION = "KC" as const;
-
 /** @public Kata identity contract documented in FORK.md. */
 export const CLOUD_PRODUCT_NAME = "Kata Code Connect" as const;
 

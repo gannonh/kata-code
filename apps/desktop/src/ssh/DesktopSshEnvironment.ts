@@ -69,7 +69,6 @@ export class DesktopSshEnvironment extends Context.Service<
 >()("@kata-sh/code-desktop/ssh/DesktopSshEnvironment") {}
 
 export interface DesktopSshEnvironmentLayerOptions {
-  readonly resolveCliPackageSpec?: () => string;
   readonly resolveCliRunner?: Effect.Effect<SshTunnel.RemoteT3RunnerOptions>;
 }
 
@@ -169,9 +168,6 @@ export const layer = (options: DesktopSshEnvironmentLayerOptions = {}) =>
   Layer.effect(DesktopSshEnvironment, make).pipe(
     Layer.provide(
       SshTunnel.SshEnvironmentManager.layer({
-        ...(options.resolveCliPackageSpec === undefined
-          ? {}
-          : { resolveCliPackageSpec: options.resolveCliPackageSpec }),
         ...(options.resolveCliRunner === undefined
           ? {}
           : { resolveCliRunner: options.resolveCliRunner }),

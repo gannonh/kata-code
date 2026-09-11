@@ -231,7 +231,7 @@ export function sandboxImageLabels(facts: SandboxBootstrapFacts): Record<string,
   };
 }
 
-export function parseSandboxImageLabels(
+function parseSandboxImageLabels(
   labels: Record<string, string> | null | undefined,
 ): SandboxBootstrapFacts | undefined {
   if (labels === null || labels === undefined) return undefined;
@@ -1128,7 +1128,7 @@ function validateProfile(
   });
 }
 
-export function probeDockerDaemon(
+function probeDockerDaemon(
   engine: DockerEngine,
 ): Effect.Effect<{ readonly daemonVersion: string }, SandboxDriverError> {
   return Effect.gen(function* () {
@@ -1715,4 +1715,4 @@ function shellQuote(value: string): string {
   return "'" + value.replaceAll("'", "'\\''") + "'";
 }
 
-export { DOCKER_KIND, DEFAULT_SANDBOX_CONTAINER_PORT, DEFAULT_SANDBOX_KATA_HOME, shellQuote };
+export { DOCKER_KIND };

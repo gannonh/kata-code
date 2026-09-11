@@ -47,10 +47,6 @@
       "types": "./src/mediaActions.ts",
       "default": "./src/mediaActions.ts"
     },
-    "./codex-file-citations": {
-      "types": "./src/codexFileCitations.ts",
-      "default": "./src/codexFileCitations.ts"
-    },
     "./codex-artifact-templates": {
       "types": "./src/codexArtifactTemplates.ts",
       "default": "./src/codexArtifactTemplates.ts"
@@ -106,10 +102,6 @@
     "./state/connections": {
       "types": "./src/state/connections.ts",
       "default": "./src/state/connections.ts"
-    },
-    "./state/entities": {
-      "types": "./src/state/entities.ts",
-      "default": "./src/state/entities.ts"
     },
     "./state/filesystem": {
       "types": "./src/state/filesystem.ts",

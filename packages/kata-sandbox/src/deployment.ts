@@ -68,7 +68,7 @@ export type SandboxDeploymentTransitionCode =
   | "stale-revision"
   | "conflicting-retry";
 
-export class SandboxDeploymentTransitionError extends Data.TaggedError(
+class SandboxDeploymentTransitionError extends Data.TaggedError(
   "SandboxDeploymentTransitionError",
 )<{
   readonly code: SandboxDeploymentTransitionCode;

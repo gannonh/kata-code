@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { describeReadinessCause } from "@kata-sh/code-shared/httpReadiness";
 import * as NetService from "@kata-sh/code-shared/Net";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -20,7 +21,6 @@ import {
   buildRemotePairingScript,
   buildRemoteStopScript,
   buildRemoteT3RunnerScript,
-  describeReadinessCause,
   issueRemotePairingToken,
   launchOrReuseRemoteServer,
   REMOTE_PICK_PORT_SCRIPT,
