@@ -120,9 +120,7 @@ export interface RelayPublicConfig {
   readonly clientTracingToken: string;
 }
 
-export function postgresReplaceCensusFromPlan(
-  plan: Plan.Plan,
-): PostgresReplaceCensus | undefined {
+export function postgresReplaceCensusFromPlan(plan: Plan.Plan): PostgresReplaceCensus | undefined {
   for (const node of Object.values(plan.resources)) {
     if (!("resource" in node) || node.resource.LogicalId !== "RelayPostgresDatabase") {
       continue;
@@ -130,8 +128,7 @@ export function postgresReplaceCensusFromPlan(
     if (node.action !== "replace") {
       continue;
     }
-    const olds =
-      node.state.status === "updating" ? node.state.old.props : node.state.props;
+    const olds = node.state.status === "updating" ? node.state.old.props : node.state.props;
     const output = "attr" in node.state ? node.state.attr : undefined;
     return {
       actors: alchemyPostgresReplaceActors({
@@ -335,103 +332,101 @@ export function publicConfigFromOutput(output: unknown): RelayPublicConfig | nul
   };
 }
 
-const abortRelayPostgresReplace = Effect.fn("relay.deploy.abortPostgresReplace")(
-  function* (stage: string) {
-    const state = yield* State.State;
-    const service = yield* state;
-    const fqn = "RelayPostgresDatabase";
-    const row = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
-    const result = abortInFlightPostgresReplace(row);
-    if (result.kind === "refuse") {
-      return yield* new RelayPostgresReplaceAbortError({ reason: result.reason });
-    }
-    if (result.kind === "restored") {
-      if (row === undefined || isActionState(row) || !("old" in row)) {
-        return yield* new RelayPostgresReplaceAbortError({
-          reason: "old generation disappeared",
-        });
-      }
-      yield* service.set({
-        stack: "T3CodeRelay",
-        stage,
-        fqn,
-        value: row.old,
+const abortRelayPostgresReplace = Effect.fn("relay.deploy.abortPostgresReplace")(function* (
+  stage: string,
+) {
+  const state = yield* State.State;
+  const service = yield* state;
+  const fqn = "RelayPostgresDatabase";
+  const row = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
+  const result = abortInFlightPostgresReplace(row);
+  if (result.kind === "refuse") {
+    return yield* new RelayPostgresReplaceAbortError({ reason: result.reason });
+  }
+  if (result.kind === "restored") {
+    if (row === undefined || isActionState(row) || !("old" in row)) {
+      return yield* new RelayPostgresReplaceAbortError({
+        reason: "old generation disappeared",
       });
     }
-    const after = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
-    yield* Console.log(
-      JSON.stringify({
-        abort: result.kind,
-        reason: result.kind === "noop" ? result.reason : undefined,
-        restoredId: result.kind === "restored" ? result.restoredId : undefined,
-        after: postgresStateIdentity(after),
-      }),
-    );
-    return {
-      result: "state",
-      changed: result.kind === "restored",
-      publicConfig: Option.none<RelayPublicConfig>(),
-    } satisfies RelayDeployOutcome;
-  },
-);
+    yield* service.set({
+      stack: "T3CodeRelay",
+      stage,
+      fqn,
+      value: row.old,
+    });
+  }
+  const after = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
+  yield* Console.log(
+    JSON.stringify({
+      abort: result.kind,
+      reason: result.kind === "noop" ? result.reason : undefined,
+      restoredId: result.kind === "restored" ? result.restoredId : undefined,
+      after: postgresStateIdentity(after),
+    }),
+  );
+  return {
+    result: "state",
+    changed: result.kind === "restored",
+    publicConfig: Option.none<RelayPublicConfig>(),
+  } satisfies RelayDeployOutcome;
+});
 
-const inspectRelayPostgresState = Effect.fn("relay.deploy.inspectPostgresState")(
-  function* (stage: string) {
-    const state = yield* State.State;
-    const service = yield* state;
-    const fqns = yield* service.list({ stack: "T3CodeRelay", stage });
-    const replaced = yield* service.getReplacedResources({ stack: "T3CodeRelay", stage });
-    const resources = [];
-    const databases = [];
-    for (const fqn of fqns) {
-      const row = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
-      if (row === undefined) {
-        resources.push({ fqn, missing: true });
-        continue;
-      }
-      if (isActionState(row)) {
-        resources.push({ fqn, kind: "action", status: row.status });
-        continue;
-      }
-      resources.push({
-        fqn,
-        logicalId: row.logicalId,
-        resourceType: row.resourceType,
-        status: row.status,
-        providerMode: row.providerMode,
-        oldStatus: "old" in row ? row.old.status : undefined,
-      });
-      if (
-        row.resourceType === "Planetscale.PostgresDatabase" ||
-        row.logicalId === "RelayPostgresDatabase" ||
-        fqn.includes("RelayPostgresDatabase")
-      ) {
-        databases.push(postgresStateIdentity(row));
-      }
+const inspectRelayPostgresState = Effect.fn("relay.deploy.inspectPostgresState")(function* (
+  stage: string,
+) {
+  const state = yield* State.State;
+  const service = yield* state;
+  const fqns = yield* service.list({ stack: "T3CodeRelay", stage });
+  const replaced = yield* service.getReplacedResources({ stack: "T3CodeRelay", stage });
+  const resources = [];
+  const databases = [];
+  for (const fqn of fqns) {
+    const row = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
+    if (row === undefined) {
+      resources.push({ fqn, missing: true });
+      continue;
     }
-    yield* Console.log(
-      JSON.stringify({
-        stack: "T3CodeRelay",
-        stage,
-        postgresFqns: fqns.filter(
-          (fqn) => fqn.includes("Postgres") || fqn.includes("RelayPostgres"),
-        ),
-        replaced: replaced.map((row) => ({
-          fqn: row.fqn,
-          logicalId: row.logicalId,
-          status: row.status,
-        })),
-        resources,
-        databases,
-      }),
-    );
-    return {
-      result: "state",
-      changed: false,
-      publicConfig: Option.none<RelayPublicConfig>(),
-    } satisfies RelayDeployOutcome;
-  },
-);
+    if (isActionState(row)) {
+      resources.push({ fqn, kind: "action", status: row.status });
+      continue;
+    }
+    resources.push({
+      fqn,
+      logicalId: row.logicalId,
+      resourceType: row.resourceType,
+      status: row.status,
+      providerMode: row.providerMode,
+      oldStatus: "old" in row ? row.old.status : undefined,
+    });
+    if (
+      row.resourceType === "Planetscale.PostgresDatabase" ||
+      row.logicalId === "RelayPostgresDatabase" ||
+      fqn.includes("RelayPostgresDatabase")
+    ) {
+      databases.push(postgresStateIdentity(row));
+    }
+  }
+  yield* Console.log(
+    JSON.stringify({
+      stack: "T3CodeRelay",
+      stage,
+      postgresFqns: fqns.filter((fqn) => fqn.includes("Postgres") || fqn.includes("RelayPostgres")),
+      replaced: replaced.map((row) => ({
+        fqn: row.fqn,
+        logicalId: row.logicalId,
+        status: row.status,
+      })),
+      resources,
+      databases,
+    }),
+  );
+  return {
+    result: "state",
+    changed: false,
+    publicConfig: Option.none<RelayPublicConfig>(),
+  } satisfies RelayDeployOutcome;
+});
 
 const readRelayPublicConfig = Effect.fn("relay.deploy.readState")(function* (stage: string) {
   const state = yield* State.State;

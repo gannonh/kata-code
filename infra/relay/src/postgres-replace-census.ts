@@ -1,9 +1,4 @@
-export type PostgresReplaceActor =
-  | "region"
-  | "replicas"
-  | "arch"
-  | "status"
-  | "providerMode";
+export type PostgresReplaceActor = "region" | "replicas" | "arch" | "status" | "providerMode";
 
 export interface PostgresIdentity {
   readonly name?: unknown;
@@ -75,12 +70,14 @@ export function alchemyPostgresReplaceActors(input: {
   readonly providerMode?: string;
   readonly planMode?: string;
 }): PostgresReplaceActor[] {
-  const news = typeof input.news === "object" && input.news !== null
-    ? (input.news as Record<string, unknown>)
-    : {};
-  const olds = typeof input.olds === "object" && input.olds !== null
-    ? (input.olds as Record<string, unknown>)
-    : {};
+  const news =
+    typeof input.news === "object" && input.news !== null
+      ? (input.news as Record<string, unknown>)
+      : {};
+  const olds =
+    typeof input.olds === "object" && input.olds !== null
+      ? (input.olds as Record<string, unknown>)
+      : {};
   const output =
     typeof input.output === "object" && input.output !== null
       ? (input.output as Record<string, unknown>)
@@ -100,11 +97,7 @@ export function alchemyPostgresReplaceActors(input: {
   if (newsArch && newsArch !== oldArch) {
     actors.push("arch");
   }
-  if (
-    input.status === "creating" ||
-    input.status === "replacing" ||
-    input.status === "replaced"
-  ) {
+  if (input.status === "creating" || input.status === "replacing" || input.status === "replaced") {
     actors.push("status");
   }
   if (
