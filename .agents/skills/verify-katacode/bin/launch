@@ -58,6 +58,10 @@ mkdir -p "$HOME_DIR" "$EVIDENCE_DIR/screenshots" "$EVIDENCE_DIR/snapshots" "$EVI
 unset VITE_HTTP_URL VITE_WS_URL || true
 
 cd "$REPO_ROOT"
+# The runner spawns `vp`. A checkout with node_modules still fails if that
+# binary is not on PATH (no global vite-plus).
+PATH="$REPO_ROOT/node_modules/.bin:$PATH"
+export PATH
 # New session so the runner survives this helper exiting. Cursor's shell
 # tool kills the helper's process group when the command finishes.
 RUNNER_PID="$(
@@ -70,9 +74,20 @@ repo, home, log_path = sys.argv[1], sys.argv[2], sys.argv[3]
 env = os.environ.copy()
 env.pop("VITE_HTTP_URL", None)
 env.pop("VITE_WS_URL", None)
+# Web mode defaults auto-bootstrap on. createDevRunnerEnv deletes this
+# env unless the CLI flag is an explicit boolean, so pass --no-... too.
+env["KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD"] = "0"
+env["PATH"] = os.path.join(repo, "node_modules", ".bin") + os.pathsep + env.get("PATH", "")
 with open(log_path, "ab") as logf:
     proc = subprocess.Popen(
-        ["node", "scripts/dev-runner.ts", "dev", "--home-dir", home],
+        [
+            "node",
+            "scripts/dev-runner.ts",
+            "dev",
+            "--home-dir",
+            home,
+            "--no-auto-bootstrap-project-from-cwd",
+        ],
         cwd=repo,
         stdout=logf,
         stderr=subprocess.STDOUT,
@@ -218,6 +233,7 @@ printf '%s\n' "$RUN_ID" >"$LAST_RUN_FILE"
   echo "serverPort=$SERVER_PORT"
   echo "webPort=$WEB_PORT"
   grep -E '\[dev-runner\]' "$DEV_LOG" | redact_secrets || true
+  echo "autoBootstrapProjectFromCwd=false"
 } >"$EVIDENCE_DIR/logs/launch.txt"
 
 trap - EXIT

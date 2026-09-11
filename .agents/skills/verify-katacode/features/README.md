@@ -12,7 +12,7 @@ This directory is the maintained source for verifying user-facing behavior of th
 
 ## Driving conventions
 
-- Start every recipe from the paired empty landing unless its preconditions say otherwise.
+- Start every recipe from the paired empty landing unless its preconditions say otherwise. Pairing must finish the welcome wizard first.
 - Prefer ARIA roles and accessible names. The command palette also has `data-testid="command-palette"`; check `data-palette-mode` because File picker and Search project contents share that testid.
 - `wait --text` only sees visible text. Icon buttons (`Usage`, `Refresh usage`, `Settings`) are named by `aria-label`; wait on a heading or use `find role button --name` instead.
 - Treat every command as literal. Keep quoted names and the pairing URL fragment unchanged.
@@ -41,8 +41,8 @@ Keep implementation details out of the map. Name only user paths, stable handles
 
 ## Features
 
-- [Pair with this environment](./pairing.md) covers the one-time pairing URL, the token form, and landing on the empty home.
-- [Empty landing and add project](./landing.md) covers the no-project hero, command palette add flow, and the first draft thread.
-- [Usage](./usage.md) covers the usage page windows, cost/token metric, and empty-window copy.
-- [Settings](./settings.md) covers opening settings, searching, and switching General / Appearance.
+- [Pair with this environment](./pairing.md) covers the one-time pairing URL, the token form, the welcome wizard, and landing on the empty home.
+- [Empty landing and add project](./landing.md) covers the no-project hero after setup, command palette add flow, and the first draft thread.
+- [Usage](./usage.md) covers the usage page windows, Cost/Tokens/Limits, the environment menu, and empty-window copy.
+- [Settings](./settings.md) covers opening settings, searching, switching General / Appearance, and the Projects / SnapShots nav entries.
 - [Command palette](./command-palette.md) covers `mod+k`, the root search, and jumping to settings.
