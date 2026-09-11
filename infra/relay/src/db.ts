@@ -51,7 +51,11 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
           region: { slug: "us-west" },
           clusterSize: "PS_20",
           migrations: { dir: schema.out, table: "relay_migrations" },
-          replicas: 2,
+          // ponytail: keep the last applied prod replica count. Alchemy
+          // replaces the retained database when this number changes (0 -> 2
+          // on the July 26 state). Scale HA in a dedicated ticket after
+          // deploy, not by flipping this during the unblock apply.
+          replicas: 0,
         }).pipe(RemovalPolicy.retain())
       : yield* Planetscale.PostgresDatabase.ref("RelayPostgresDatabase", {
           stage: "prod",
