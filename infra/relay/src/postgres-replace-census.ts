@@ -206,3 +206,36 @@ export function abortInFlightPostgresReplace(
   }
   return { kind: "restored", row: old, restoredId: id, restoredName: name };
 }
+
+export type ConfirmRestoredPostgresGenerationResult =
+  | { readonly kind: "ok" }
+  | { readonly kind: "refuse"; readonly reason: string };
+
+export function confirmRestoredPostgresGeneration(
+  after: unknown,
+  expected: { readonly id: string; readonly name: string },
+): ConfirmRestoredPostgresGenerationResult {
+  const current = asRecord(after);
+  if (current === undefined) {
+    return { kind: "refuse", reason: "post-write Alchemy row is missing" };
+  }
+  const attr = asRecord(current.attr);
+  if (attr === undefined) {
+    return { kind: "refuse", reason: "post-write generation has no database identity" };
+  }
+  const id = typeof attr.id === "string" ? attr.id : undefined;
+  const name = typeof attr.name === "string" ? attr.name : undefined;
+  if (id === undefined || name === undefined) {
+    return { kind: "refuse", reason: "post-write generation has no database identity" };
+  }
+  if (name !== expected.name || id !== expected.id) {
+    return {
+      kind: "refuse",
+      reason: `post-write identity ${name}/${id} is not ${expected.name}/${expected.id}`,
+    };
+  }
+  if (attr.state !== "ready") {
+    return { kind: "refuse", reason: `post-write generation state is ${String(attr.state)}` };
+  }
+  return { kind: "ok" };
+}

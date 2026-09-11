@@ -35,6 +35,7 @@ import RelayStack from "../alchemy.run.ts";
 import {
   abortInFlightPostgresReplace,
   alchemyPostgresReplaceActors,
+  confirmRestoredPostgresGeneration,
   pickPostgresIdentity,
   postgresStateIdentity,
   type PostgresReplaceCensus,
@@ -366,6 +367,15 @@ const abortRelayPostgresReplace = Effect.fn("relay.deploy.abortPostgresReplace")
     });
   }
   const after = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
+  if (result.kind === "restored") {
+    const confirmed = confirmRestoredPostgresGeneration(after, {
+      id: result.restoredId,
+      name: result.restoredName,
+    });
+    if (confirmed.kind === "refuse") {
+      return yield* new RelayPostgresReplaceAbortError({ reason: confirmed.reason });
+    }
+  }
   yield* logJson({
     abort: result.kind,
     reason: result.kind === "noop" ? result.reason : undefined,

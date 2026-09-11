@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   abortInFlightPostgresReplace,
   alchemyPostgresReplaceActors,
+  confirmRestoredPostgresGeneration,
   pickPostgresIdentity,
   postgresStateIdentity,
 } from "./postgres-replace-census.ts";
@@ -165,6 +166,78 @@ describe("abortInFlightPostgresReplace", () => {
     ).toEqual({
       kind: "refuse",
       reason: "old generation identity otherdb/other is not katacoderelay/s5mpblbu2m4s",
+    });
+  });
+});
+
+describe("confirmRestoredPostgresGeneration", () => {
+  const expected = { id: "s5mpblbu2m4s", name: "katacoderelay" };
+
+  it("accepts the restored ready generation", () => {
+    expect(
+      confirmRestoredPostgresGeneration(
+        {
+          status: "updated",
+          attr: { id: "s5mpblbu2m4s", name: "katacoderelay", state: "ready" },
+        },
+        expected,
+      ),
+    ).toEqual({ kind: "ok" });
+  });
+
+  it("refuses a missing post-write row", () => {
+    expect(confirmRestoredPostgresGeneration(undefined, expected)).toEqual({
+      kind: "refuse",
+      reason: "post-write Alchemy row is missing",
+    });
+  });
+
+  it("refuses a leftover replacing row with empty attr", () => {
+    expect(
+      confirmRestoredPostgresGeneration(
+        {
+          status: "replacing",
+          attr: {},
+          old: {
+            status: "updated",
+            attr: { id: "s5mpblbu2m4s", name: "katacoderelay", state: "ready" },
+          },
+        },
+        expected,
+      ),
+    ).toEqual({
+      kind: "refuse",
+      reason: "post-write generation has no database identity",
+    });
+  });
+
+  it("refuses a post-write row whose identity is not the restored generation", () => {
+    expect(
+      confirmRestoredPostgresGeneration(
+        {
+          status: "updated",
+          attr: { id: "other", name: "otherdb", state: "ready" },
+        },
+        expected,
+      ),
+    ).toEqual({
+      kind: "refuse",
+      reason: "post-write identity otherdb/other is not katacoderelay/s5mpblbu2m4s",
+    });
+  });
+
+  it("refuses a post-write row that is not ready", () => {
+    expect(
+      confirmRestoredPostgresGeneration(
+        {
+          status: "updated",
+          attr: { id: "s5mpblbu2m4s", name: "katacoderelay", state: "sleeping" },
+        },
+        expected,
+      ),
+    ).toEqual({
+      kind: "refuse",
+      reason: "post-write generation state is sleeping",
     });
   });
 });
