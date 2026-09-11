@@ -205,7 +205,10 @@ describe("image build boundaries", () => {
       packages?: Record<string, { dependencies?: Record<string, string> }>;
     };
     const server = JSON.parse(
-      NodeFS.readFileSync(NodePath.join(packageDirectory, "../../apps/server/package.json"), "utf8"),
+      NodeFS.readFileSync(
+        NodePath.join(packageDirectory, "../../apps/server/package.json"),
+        "utf8",
+      ),
     ) as { dependencies?: Record<string, string> };
     const lockDeps = lock.packages?.["node_modules/@kata-sh/code-cli"]?.dependencies ?? {};
     const serverDeps = server.dependencies ?? {};
