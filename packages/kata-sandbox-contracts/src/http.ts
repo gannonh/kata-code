@@ -210,7 +210,7 @@ export type SandboxOperationResponse = typeof SandboxOperationResponse.Type;
 
 export const SandboxHandoffResponse = SandboxHandoff;
 
-export const SandboxHttpApiGroup = HttpApiGroup.make("kataSandbox")
+const SandboxHttpApiGroup = HttpApiGroup.make("kataSandbox")
   .add(
     HttpApiEndpoint.get("list", "/api/kata-sandbox", {
       success: SandboxListResponse,
@@ -299,8 +299,6 @@ export const SandboxHttpApiGroup = HttpApiGroup.make("kataSandbox")
     ),
   )
   .middleware(EnvironmentAuthenticatedAuth);
-
-export type SandboxHttpApiGroup = typeof SandboxHttpApiGroup;
 
 export const SandboxHttpApi = HttpApi.make("kataSandbox").add(SandboxHttpApiGroup);
 export type SandboxHttpApi = typeof SandboxHttpApi;

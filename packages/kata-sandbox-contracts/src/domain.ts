@@ -496,4 +496,3 @@ export const DEFAULT_DOCKER_SOCKET_PATH = "/var/run/docker.sock";
 export const DEFAULT_SANDBOX_CONTAINER_PORT = 3773;
 export const DEFAULT_SANDBOX_WORKSPACE_ROOT = "/workspace";
 export const DEFAULT_SANDBOX_KATA_HOME = "/var/lib/katacode";
-export const SANDBOX_HANDOFF_TTL_SECONDS = 5 * 60;

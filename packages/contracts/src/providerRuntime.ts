@@ -1226,7 +1226,7 @@ const ProviderRuntimeErrorEvent = Schema.Struct({
 });
 export type ProviderRuntimeErrorEvent = typeof ProviderRuntimeErrorEvent.Type;
 
-export const ProviderRuntimeEventV2 = Schema.Union([
+export const ProviderRuntimeEvent = Schema.Union([
   ProviderRuntimeSessionStartedEvent,
   ProviderRuntimeSessionConfiguredEvent,
   ProviderRuntimeSessionStateChangedEvent,
@@ -1277,10 +1277,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeWarningEvent,
   ProviderRuntimeErrorEvent,
 ]);
-export type ProviderRuntimeEventV2 = typeof ProviderRuntimeEventV2.Type;
-
-export const ProviderRuntimeEvent = ProviderRuntimeEventV2;
-export type ProviderRuntimeEvent = ProviderRuntimeEventV2;
+export type ProviderRuntimeEvent = typeof ProviderRuntimeEvent.Type;
 
 export const ProviderRuntimeTurnStatus = RuntimeTurnState;
 export type ProviderRuntimeTurnStatus = RuntimeTurnState;

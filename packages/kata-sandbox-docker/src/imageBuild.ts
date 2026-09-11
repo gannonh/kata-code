@@ -209,7 +209,7 @@ export function extractBuildxIndexDigest(value: unknown): string | undefined {
   return candidates.find(isSha256Digest);
 }
 
-export function imageDigestFromReference(reference: string): string {
+function imageDigestFromReference(reference: string): string {
   const at = reference.lastIndexOf("@");
   const digest = reference.slice(at + 1);
   if (at <= 0 || at !== reference.indexOf("@") || !isSha256Digest(digest)) {

@@ -18,18 +18,6 @@
     "./driver": {
       "types": "./src/driver.ts",
       "import": "./src/driver.ts"
-    },
-    "./registry": {
-      "types": "./src/registry.ts",
-      "import": "./src/registry.ts"
-    },
-    "./managedImage": {
-      "types": "./src/managedImage.ts",
-      "import": "./src/managedImage.ts"
-    },
-    "./redactSecrets": {
-      "types": "./src/redactSecrets.ts",
-      "import": "./src/redactSecrets.ts"
     }
   },
   "scripts": {

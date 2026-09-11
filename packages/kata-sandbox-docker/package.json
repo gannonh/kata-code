@@ -23,10 +23,6 @@
     "./engine": {
       "types": "./src/engine.ts",
       "import": "./src/engine.ts"
-    },
-    "./imageManifest": {
-      "types": "./src/imageManifest.ts",
-      "import": "./src/imageManifest.ts"
     }
   },
   "scripts": {
