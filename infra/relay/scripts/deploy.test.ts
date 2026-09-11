@@ -7,6 +7,7 @@ import * as Path from "effect/Path";
 import {
   hasDeployChanges,
   missingRelayPublicConfigFields,
+  postgresReplaceCensusFromPlan,
   publicConfigFromOutput,
   RelayDeployError,
   RelayDeployPublicConfigUnavailableError,
@@ -52,6 +53,85 @@ describe("RelayDeployError", () => {
     expect(error.message).toBe(
       "Relay deploy result 'dry-run' for stage 'production' did not produce public config required by GitHub environment output '/tmp/relay-client.env'.",
     );
+  });
+});
+
+describe("postgresReplaceCensusFromPlan", () => {
+  it("names Alchemy replace actors from the planned database node", () => {
+    expect(
+      postgresReplaceCensusFromPlan({
+        resources: {
+          RelayPostgresDatabase: {
+            resource: { LogicalId: "RelayPostgresDatabase" },
+            action: "replace",
+            mode: "live",
+            props: { name: "katacoderelay", region: { slug: "us-west" }, replicas: 0 },
+            state: {
+              status: "updated",
+              providerMode: "live",
+              props: { name: "katacoderelay", replicas: 2 },
+              attr: { name: "katacoderelay", region: { slug: "us-east" } },
+            },
+          },
+        },
+        deletions: {},
+      } as never),
+    ).toEqual({
+      actors: ["region", "replicas"],
+      status: "updated",
+      providerMode: "live",
+      planMode: "live",
+      news: { name: "katacoderelay", region: { slug: "us-west" }, replicas: 0 },
+      olds: { name: "katacoderelay", replicas: 2 },
+      output: { name: "katacoderelay", region: { slug: "us-east" } },
+    });
+  });
+
+  it("names a stuck replace from the live old generation, not the in-flight props", () => {
+    expect(
+      postgresReplaceCensusFromPlan({
+        resources: {
+          RelayPostgresDatabase: {
+            resource: { LogicalId: "RelayPostgresDatabase" },
+            action: "replace",
+            mode: "live",
+            props: { name: "katacoderelay", replicas: 0, arch: "arm" },
+            state: {
+              status: "replacing",
+              providerMode: "live",
+              props: { name: "katacoderelay", replicas: 2, clusterSize: "PS_20" },
+              attr: {},
+              old: {
+                status: "updated",
+                props: { name: "katacoderelay", replicas: 0, arch: "arm", clusterSize: "PS_5" },
+                attr: {
+                  id: "s5mpblbu2m4s",
+                  name: "katacoderelay",
+                  state: "ready",
+                  arch: "arm",
+                  region: { slug: "us-west" },
+                },
+              },
+            },
+          },
+        },
+        deletions: {},
+      } as never),
+    ).toEqual({
+      actors: ["status"],
+      status: "replacing",
+      providerMode: "live",
+      planMode: "live",
+      news: { name: "katacoderelay", replicas: 0, arch: "arm" },
+      olds: { name: "katacoderelay", replicas: 0, arch: "arm", clusterSize: "PS_5" },
+      output: {
+        id: "s5mpblbu2m4s",
+        name: "katacoderelay",
+        state: "ready",
+        arch: "arm",
+        region: { slug: "us-west" },
+      },
+    });
   });
 });
 

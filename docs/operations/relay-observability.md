@@ -52,6 +52,12 @@ tailing the Cloudflare Worker. The stack does not provision a separate query tok
 need scripted query access use the authorized account-level `AXIOM_TOKEN` together with
 `AXIOM_ORG_ID`; scoped ingest tokens remain write-only credentials for their producers.
 
+GitHub Actions production `AXIOM_TOKEN` is that same account credential. Alchemy lists every view
+with `GET /v2/views` before it reconciles the recent-spans view, so the token must be allowed to
+read, create, update, and delete views. A token that can manage API tokens but not views fails
+after other resources in the same apply have already changed. Keep the value in the GitHub
+`production` environment secret. Do not commit it.
+
 DPoP proof failures include the stable `relay.dpop.failure_code` span attribute. A `time_window`
 failure means that a signed proof was too old or too far in the future for the relay's allowed
 window. It can point to a date or time problem on either device, but it can also result from a

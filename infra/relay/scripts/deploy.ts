@@ -14,6 +14,7 @@ import { LoggingCli } from "alchemy/Cli/LoggingCli";
 import * as Plan from "alchemy/Plan";
 import * as Stage from "alchemy/Stage";
 import * as State from "alchemy/State/State";
+import { isActionState } from "alchemy/State/State";
 import { TelemetryLive } from "alchemy/Telemetry/Layer";
 import { PlatformServices } from "alchemy/Util/PlatformServices";
 import * as Config from "effect/Config";
@@ -31,6 +32,14 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 
 import { loadRepoEnv } from "../../../scripts/lib/public-config.ts";
 import RelayStack from "../alchemy.run.ts";
+import {
+  abortInFlightPostgresReplace,
+  alchemyPostgresReplaceActors,
+  confirmRestoredPostgresGeneration,
+  pickPostgresIdentity,
+  postgresStateIdentity,
+  type PostgresReplaceCensus,
+} from "../src/postgres-replace-census.ts";
 
 const relayDeployOutputFields = [
   "url",
@@ -64,6 +73,17 @@ export class RelayDeployError extends Schema.TaggedError<RelayDeployError>()("Re
   }
 }
 
+export class RelayPostgresReplaceAbortError extends Schema.TaggedError<RelayPostgresReplaceAbortError>()(
+  "RelayPostgresReplaceAbortError",
+  {
+    reason: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Refused to abort RelayPostgresDatabase replace: ${this.reason}`;
+  }
+}
+
 export class RelayDeployPublicConfigUnavailableError extends Schema.TaggedError<RelayDeployPublicConfigUnavailableError>()(
   "RelayDeployPublicConfigUnavailableError",
   {
@@ -87,6 +107,8 @@ export interface RelayDeployOptions {
   readonly githubOutput: boolean;
   readonly githubEnvFile: Option.Option<string>;
   readonly readState: boolean;
+  readonly inspectPostgresState: boolean;
+  readonly abortPostgresReplace: boolean;
 }
 
 export interface RelayPublicConfig {
@@ -98,6 +120,45 @@ export interface RelayPublicConfig {
   readonly clientTracingDataset: string;
   readonly clientTracingToken: string;
 }
+
+export function postgresReplaceCensusFromPlan(plan: Plan.Plan): PostgresReplaceCensus | undefined {
+  for (const node of Object.values(plan.resources)) {
+    if (!("resource" in node) || node.resource.LogicalId !== "RelayPostgresDatabase") {
+      continue;
+    }
+    if (node.action !== "replace") {
+      continue;
+    }
+    const live =
+      node.state.status === "updating" || node.state.status === "replacing"
+        ? node.state.old
+        : node.state;
+    const olds = live.props;
+    const output = "attr" in live ? live.attr : undefined;
+    return {
+      actors: alchemyPostgresReplaceActors({
+        news: node.props,
+        olds,
+        output,
+        status: node.state.status,
+        providerMode: node.state.providerMode,
+        planMode: node.mode,
+      }),
+      status: node.state.status,
+      providerMode: node.state.providerMode,
+      planMode: node.mode,
+      news: pickPostgresIdentity(node.props),
+      olds: pickPostgresIdentity(olds),
+      output: pickPostgresIdentity(output),
+    };
+  }
+  return undefined;
+}
+
+const encodeUnknownJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
+const logJson = (value: unknown) =>
+  encodeUnknownJson(value).pipe(Effect.flatMap((json) => Console.log(json)));
 
 export function hasDeployChanges(plan: Plan.Plan): boolean {
   return (
@@ -281,6 +342,108 @@ export function publicConfigFromOutput(output: unknown): RelayPublicConfig | nul
   };
 }
 
+const abortRelayPostgresReplace = Effect.fn("relay.deploy.abortPostgresReplace")(function* (
+  stage: string,
+) {
+  const state = yield* State.State;
+  const service = yield* state;
+  const fqn = "RelayPostgresDatabase";
+  const row = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
+  const result = abortInFlightPostgresReplace(row);
+  if (result.kind === "refuse") {
+    return yield* new RelayPostgresReplaceAbortError({ reason: result.reason });
+  }
+  if (result.kind === "restored") {
+    if (row === undefined || isActionState(row) || row.status !== "replacing") {
+      return yield* new RelayPostgresReplaceAbortError({
+        reason: "old generation disappeared",
+      });
+    }
+    yield* service.set({
+      stack: "T3CodeRelay",
+      stage,
+      fqn,
+      value: row.old,
+    });
+  }
+  const after = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
+  if (result.kind === "restored") {
+    const confirmed = confirmRestoredPostgresGeneration(after, {
+      id: result.restoredId,
+      name: result.restoredName,
+    });
+    if (confirmed.kind === "refuse") {
+      return yield* new RelayPostgresReplaceAbortError({ reason: confirmed.reason });
+    }
+  }
+  yield* logJson({
+    abort: result.kind,
+    reason: result.kind === "noop" ? result.reason : undefined,
+    restoredId: result.kind === "restored" ? result.restoredId : undefined,
+    after: postgresStateIdentity(after),
+  });
+  return {
+    result: "state",
+    changed: result.kind === "restored",
+    publicConfig: Option.none<RelayPublicConfig>(),
+  } satisfies RelayDeployOutcome;
+});
+
+const inspectRelayPostgresState = Effect.fn("relay.deploy.inspectPostgresState")(function* (
+  stage: string,
+) {
+  const state = yield* State.State;
+  const service = yield* state;
+  const fqns = yield* service.list({ stack: "T3CodeRelay", stage });
+  const replaced = yield* service.getReplacedResources({ stack: "T3CodeRelay", stage });
+  const resources = [];
+  const databases = [];
+  for (const fqn of fqns) {
+    const row = yield* service.get({ stack: "T3CodeRelay", stage, fqn });
+    if (row === undefined) {
+      resources.push({ fqn, missing: true });
+      continue;
+    }
+    if (isActionState(row)) {
+      resources.push({ fqn, kind: "action", status: row.status });
+      continue;
+    }
+    resources.push({
+      fqn,
+      logicalId: row.logicalId,
+      resourceType: row.resourceType,
+      status: row.status,
+      providerMode: row.providerMode,
+      oldStatus:
+        row.status === "replacing" || row.status === "replaced" ? row.old.status : undefined,
+    });
+    if (
+      row.resourceType === "Planetscale.PostgresDatabase" ||
+      row.logicalId === "RelayPostgresDatabase" ||
+      fqn.includes("RelayPostgresDatabase")
+    ) {
+      databases.push(postgresStateIdentity(row));
+    }
+  }
+  yield* logJson({
+    stack: "T3CodeRelay",
+    stage,
+    postgresFqns: fqns.filter((fqn) => fqn.includes("Postgres") || fqn.includes("RelayPostgres")),
+    replaced: replaced.map((row) => ({
+      fqn: row.fqn,
+      logicalId: row.logicalId,
+      status: row.status,
+    })),
+    resources,
+    databases,
+  });
+  return {
+    result: "state",
+    changed: false,
+    publicConfig: Option.none<RelayPublicConfig>(),
+  } satisfies RelayDeployOutcome;
+});
+
 const readRelayPublicConfig = Effect.fn("relay.deploy.readState")(function* (stage: string) {
   const state = yield* State.State;
   const service = yield* state;
@@ -314,6 +477,11 @@ const runRelayDeploy = Effect.fn("relay.deploy.run")(
     const changed = hasDeployChanges(plan);
     if (options.dryRun) {
       yield* cli.displayPlan(plan);
+      const census = postgresReplaceCensusFromPlan(plan);
+      if (census !== undefined) {
+        const json = yield* encodeUnknownJson(census);
+        yield* Console.log(`RelayPostgresDatabase replace census ${json}`);
+      }
       return {
         result: "dry-run",
         changed,
@@ -375,9 +543,13 @@ export const deploy = Effect.fn("relay.deploy")(function* (options: RelayDeployO
     Effect.provide(ConfigProvider.layer(configProvider)),
   );
   const stage = Option.getOrElse(options.stage, () => configuredStage);
-  const outcome = options.readState
-    ? yield* readRelayPublicConfig(stage).pipe(Effect.provide(Cloudflare.state()))
-    : yield* runRelayDeploy(options, configProvider, stage);
+  const outcome = options.abortPostgresReplace
+    ? yield* abortRelayPostgresReplace(stage).pipe(Effect.provide(Cloudflare.state()))
+    : options.inspectPostgresState
+      ? yield* inspectRelayPostgresState(stage).pipe(Effect.provide(Cloudflare.state()))
+      : options.readState
+        ? yield* readRelayPublicConfig(stage).pipe(Effect.provide(Cloudflare.state()))
+        : yield* runRelayDeploy(options, configProvider, stage);
   if (Option.isSome(outcome.publicConfig)) {
     yield* reportDeployedRelayUrl(outcome.publicConfig.value);
   }
@@ -430,6 +602,18 @@ export const relayDeployCommand = Command.make(
     ),
     readState: Flag.boolean("read-state").pipe(
       Flag.withDescription("Read the deployed stack output without planning or applying changes."),
+      Flag.withDefault(false),
+    ),
+    inspectPostgresState: Flag.boolean("inspect-postgres-state").pipe(
+      Flag.withDescription(
+        "Print Alchemy identity fields for RelayPostgresDatabase without planning or applying.",
+      ),
+      Flag.withDefault(false),
+    ),
+    abortPostgresReplace: Flag.boolean("abort-postgres-replace").pipe(
+      Flag.withDescription(
+        "Restore the live katacoderelay generation if Alchemy state is stuck mid-replace.",
+      ),
       Flag.withDefault(false),
     ),
   },

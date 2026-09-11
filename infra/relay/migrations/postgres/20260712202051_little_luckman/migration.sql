@@ -1,0 +1,2 @@
+ALTER TABLE "relay_environment_links" ADD COLUMN "cleanup_attempt_token" varchar(191);--> statement-breakpoint
+ALTER TABLE "relay_environment_links" ADD COLUMN "cleanup_attempt_expires_at" varchar(64);
