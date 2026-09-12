@@ -1,3 +1,4 @@
+import Migration0052 from "./Migrations/052_Routines.ts";
 /**
  * Migration runner with an inline loader.
  *
@@ -128,6 +129,7 @@ const migrationEntries = [
   [49, "ProjectionProjectIcon", Migration0049],
   [50, "ProjectionThreadBranchPullRequest", Migration0050],
   [51, "ProjectionThreadsActiveOrderKey", Migration0051],
+  [52, "Routines", Migration0052],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

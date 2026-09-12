@@ -9,6 +9,8 @@ import {
   type OrchestrationSession,
   ThreadId,
   type ProviderSession,
+  type RoutineProviderSubmission,
+  type RoutineRun,
   type RuntimeMode,
   type TurnId,
 } from "@kata-sh/code-contracts";
@@ -55,6 +57,7 @@ import {
 } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import * as RoutineStoreService from "../../routines/RoutineStore.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderAdapterValidationError = Schema.is(ProviderAdapterValidationError);
 const isProviderWorkspaceMissingError = Schema.is(ProviderWorkspaceMissingError);
@@ -233,6 +236,15 @@ function providerErrorLabel(value: string | undefined): string {
   return normalized && normalized.length > 0 ? normalized : "unknown";
 }
 
+function isRoutineSubmissionFenceLoss(cause: Cause.Cause<unknown>): boolean {
+  const detail = Cause.pretty(cause).toLowerCase();
+  return (
+    detail.includes("routine submission ownership is no longer current") ||
+    detail.includes("submission permission was already consumed") ||
+    detail.includes("routine preparation ownership expired")
+  );
+}
+
 export function providerErrorLabelFromInstanceHint(input: {
   readonly instanceId?: string | undefined;
   readonly modelSelectionInstanceId?: string | undefined;
@@ -323,6 +335,7 @@ const make = Effect.gen(function* () {
   const providerAuthService = yield* ProviderAuthService;
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
+  const routineStore = yield* Effect.serviceOption(RoutineStoreService.RoutineStore);
   const gitWorkflow = yield* GitWorkflowService;
   const fileSystem = yield* FileSystem.FileSystem;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
@@ -343,6 +356,34 @@ const make = Effect.gen(function* () {
         Cache.set(handledTurnStartKeys, key, true).pipe(Effect.as(Option.isSome(cached))),
       ),
     );
+
+  const markRoutineBlockedBeforeSubmission = (
+    submission: RoutineProviderSubmission | undefined,
+    detail: string,
+  ) => {
+    if (submission === undefined || Option.isNone(routineStore)) {
+      return Effect.void;
+    }
+    return Effect.gen(function* () {
+      yield* routineStore.value.markBlockedBeforeSubmission(
+        submission,
+        detail.slice(0, 4_000),
+        DateTime.toEpochMillis(yield* DateTime.now),
+      );
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("failed to mark routine submission blocked", {
+          routineRunId: submission.runId,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+  };
+
+  const markRoutineSubmissionFailure = (
+    submission: RoutineProviderSubmission | undefined,
+    cause: Cause.Cause<unknown>,
+  ) => markRoutineBlockedBeforeSubmission(submission, formatFailureDetail(cause));
 
   const threadModelSelections = new Map<string, ModelSelection>();
   const compactingThreadIds = new Set<ThreadId>();
@@ -843,6 +884,7 @@ const make = Effect.gen(function* () {
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
+    readonly routineSubmission?: RoutineProviderSubmission;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThreadShell(input.threadId);
@@ -894,6 +936,9 @@ const make = Effect.gen(function* () {
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      ...(input.routineSubmission !== undefined
+        ? { routineSubmission: input.routineSubmission }
+        : {}),
     };
   });
 
@@ -1180,16 +1225,46 @@ const make = Effect.gen(function* () {
     processThreadTitleRegenerationSafely,
   );
 
-  const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
+  const processTurnStartRequestedUnsafe = Effect.fn("processTurnStartRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
+    options?: { readonly bypassDedup?: boolean; readonly awaitProvider?: boolean },
   ) {
     const key = turnStartKeyForEvent(event);
-    if (yield* hasHandledTurnStartRecently(key)) {
+    if (options?.bypassDedup !== true && (yield* hasHandledTurnStartRecently(key))) {
       return;
+    }
+
+    // A routine turn-start event can be delivered both from the hot event
+    // stream and from durable recovery. Re-read the exact owner/generation
+    // before doing session or workspace preparation. Once the irreversible
+    // provider CAS has advanced the run past the pre-submission stages, a
+    // duplicate event is complete work and must not prepare a second session.
+    if (event.payload.routineSubmission !== undefined && Option.isSome(routineStore)) {
+      const shouldProcess = yield* routineStore.value
+        .submissionClaim(event.payload.routineSubmission)
+        .pipe(
+          Effect.matchEffect({
+            onFailure: (error) =>
+              error.code === "lost-fence" ? Effect.succeed(false) : Effect.fail(error),
+            onSuccess: (claim) =>
+              Effect.succeed(
+                claim.run.stage === "admitted" ||
+                  claim.run.stage === "thread-created" ||
+                  claim.run.stage === "prompt-accepted",
+              ),
+          }),
+        );
+      if (!shouldProcess) {
+        return;
+      }
     }
 
     const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
+      yield* markRoutineBlockedBeforeSubmission(
+        event.payload.routineSubmission,
+        `Thread '${event.payload.threadId}' was not found for routine submission.`,
+      );
       return;
     }
     const turnStart = yield* projectionSnapshotQuery.getTurnStartMessage({
@@ -1206,6 +1281,10 @@ const make = Effect.gen(function* () {
         createdAt: event.payload.createdAt,
         requestId: event.payload.messageId,
       });
+      yield* markRoutineBlockedBeforeSubmission(
+        event.payload.routineSubmission,
+        `User message '${event.payload.messageId}' was not found for routine submission.`,
+      );
       return;
     }
     const { message, hasOtherUserMessages } = turnStart.value;
@@ -1295,6 +1374,10 @@ const make = Effect.gen(function* () {
       return true;
     }).pipe(Effect.catchCause((cause) => recoverTurnStartFailure(cause).pipe(Effect.as(true))));
     if (authCommandHandled) {
+      yield* markRoutineBlockedBeforeSubmission(
+        event.payload.routineSubmission,
+        "The routine instruction was handled as a provider account command and was not submitted.",
+      );
       return;
     }
 
@@ -1373,11 +1456,19 @@ const make = Effect.gen(function* () {
       );
     if (isCompactCommand) {
       if (!hasOtherUserMessages) {
+        yield* markRoutineBlockedBeforeSubmission(
+          event.payload.routineSubmission,
+          "Routine instructions cannot compact a conversation before the initial turn.",
+        );
         return yield* appendTurnStartFailure(
           "Context compaction failed",
           "Context compaction requires an existing conversation.",
         );
       }
+      yield* markRoutineBlockedBeforeSubmission(
+        event.payload.routineSubmission,
+        "Routine instructions cannot be used as context compaction commands.",
+      );
       const latestThread = yield* resolveThreadShell(event.payload.threadId);
       if (
         compactingThreadIds.has(event.payload.threadId) ||
@@ -1417,6 +1508,10 @@ const make = Effect.gen(function* () {
       return;
     }
     if (compactingThreadIds.has(event.payload.threadId)) {
+      yield* markRoutineBlockedBeforeSubmission(
+        event.payload.routineSubmission,
+        "Context compaction is already in progress for this routine conversation.",
+      );
       return yield* appendTurnStartFailure(
         "Provider turn start failed",
         "Wait for context compaction to finish before sending another message.",
@@ -1430,20 +1525,92 @@ const make = Effect.gen(function* () {
         ? { modelSelection: event.payload.modelSelection }
         : {}),
       interactionMode: event.payload.interactionMode,
+      ...(event.payload.routineSubmission !== undefined
+        ? { routineSubmission: event.payload.routineSubmission }
+        : {}),
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.map(Option.some),
-      Effect.catchCause((cause) => handleTurnStartFailure(cause).pipe(Effect.as(Option.none()))),
+      Effect.catchCause((cause) =>
+        markRoutineSubmissionFailure(event.payload.routineSubmission, cause).pipe(
+          Effect.andThen(handleTurnStartFailure(cause)),
+          Effect.as(Option.none()),
+        ),
+      ),
     );
 
     if (Option.isNone(sendTurnRequest)) {
       return;
     }
 
-    yield* providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+    const sendTurn = providerService.sendTurn(sendTurnRequest.value).pipe(
+      Effect.asVoid,
+      Effect.catchCause((cause) =>
+        event.payload.routineSubmission !== undefined && isRoutineSubmissionFenceLoss(cause)
+          ? Effect.void
+          : markRoutineSubmissionFailure(event.payload.routineSubmission, cause).pipe(
+              Effect.andThen(recoverTurnStartFailure(cause)),
+            ),
+      ),
+    );
+    if (options?.awaitProvider === true) {
+      yield* sendTurn;
+    } else {
+      yield* sendTurn.pipe(Effect.forkScoped);
+    }
   });
+
+  const processTurnStartRequested = (
+    event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
+    options?: { readonly bypassDedup?: boolean; readonly awaitProvider?: boolean },
+  ) =>
+    processTurnStartRequestedUnsafe(event, options).pipe(
+      Effect.catchCause((cause) =>
+        markRoutineSubmissionFailure(event.payload.routineSubmission, cause).pipe(
+          Effect.andThen(Effect.failCause(cause)),
+        ),
+      ),
+    );
+
+  const recoverRoutineSubmission: ProviderCommandReactorShape["recoverRoutineSubmission"] = (
+    input,
+  ) =>
+    Effect.scoped(
+      processTurnStartRequested(
+        {
+          sequence: 0,
+          eventId: EventId.make(`routine-recovery:${input.run.id}:${input.submission.generation}`),
+          aggregateKind: "thread",
+          aggregateId: input.run.threadId,
+          occurredAt: input.run.updatedAt,
+          commandId: input.run.commandId,
+          causationEventId: null,
+          correlationId: input.run.commandId,
+          metadata: {},
+          type: "thread.turn-start-requested",
+          payload: {
+            threadId: input.run.threadId,
+            messageId: input.run.messageId,
+            modelSelection: input.run.configuration.modelSelection,
+            runtimeMode: input.run.configuration.runtimeMode,
+            interactionMode: "default",
+            routineSubmission: input.submission,
+            createdAt: input.run.updatedAt,
+          },
+        },
+        { bypassDedup: true, awaitProvider: true },
+      ).pipe(
+        Effect.asVoid,
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : Effect.logWarning("provider command reactor failed to recover routine submission", {
+                routineRunId: input.run.id,
+                cause: Cause.pretty(cause),
+              }),
+        ),
+      ),
+    );
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
@@ -1837,6 +2004,7 @@ const make = Effect.gen(function* () {
       yield* worker.drain;
       yield* threadTitleRegenerationWorker.drain;
     }),
+    recoverRoutineSubmission,
   } satisfies ProviderCommandReactorShape;
 });
 

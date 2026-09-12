@@ -41,6 +41,7 @@ import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
 import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReaper.ts";
+import * as RoutineScheduler from "./routines/RoutineScheduler.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -815,6 +816,7 @@ export const make = (options?: StartupOptions) =>
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
     const providerSessionDirectory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+    const routineScheduler = yield* RoutineScheduler.RoutineScheduler;
     const crypto = yield* Crypto.Crypto;
     const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
 
@@ -876,6 +878,11 @@ export const make = (options?: StartupOptions) =>
       );
 
       yield* runStartupPhase("provider-sessions.reconcile", reconcileProviderSessions);
+
+      yield* runStartupPhase(
+        "routines.start",
+        forkParked(routineScheduler.start.pipe(Scope.provide(reactorScope))),
+      );
 
       yield* Effect.logDebug("startup phase: syncing clean projects");
       yield* runStartupPhase("projects.auto-pull", syncAutoPullProjects);

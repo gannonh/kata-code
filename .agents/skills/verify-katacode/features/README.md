@@ -45,4 +45,5 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Empty landing and add project](./landing.md) covers the no-project hero after setup, command palette add flow, and the first draft thread.
 - [Usage](./usage.md) covers the usage page windows, Cost/Tokens/Limits, the environment menu, and empty-window copy.
 - [Settings](./settings.md) covers opening settings, searching, switching General / Appearance, and the Projects / SnapShots nav entries.
+- [Scheduled routines](./routines.md) covers configuring, testing, and reviewing durable scheduled runs.
 - [Command palette](./command-palette.md) covers `mod+k`, the root search, and jumping to settings.

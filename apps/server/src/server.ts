@@ -92,6 +92,9 @@ import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import { RoutineStoreLive } from "./routines/RoutineStore.ts";
+import { RoutineDispatcherLive } from "./routines/RoutineDispatcher.ts";
+import { RoutineSchedulerLive } from "./routines/RoutineScheduler.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRateLimit from "./sourceControl/SourceControlRateLimit.ts";
@@ -297,6 +300,8 @@ const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
   Layer.provide(ProviderSessionRuntime.layer),
 );
 
+const RoutineStoreLayerLive = RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+
 // `ProviderAdapterRegistryLive` is now a facade that resolves kind → adapter
 // by looking up the default `ProviderInstance` per driver in the instance
 // registry. Adapter construction itself moved inside each driver's
@@ -306,6 +311,7 @@ const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
 const ProviderLayerLive = ProviderServiceLive.pipe(
   Layer.provide(ProviderAdapterRegistryLive),
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
+  Layer.provideMerge(RoutineStoreLayerLive),
 );
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
@@ -461,7 +467,7 @@ const AntigravityInstallationRefreshLive = Layer.effectDiscard(
   }),
 );
 
-const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
+const RuntimeCoreDependenciesWithoutRoutinesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(AntigravityInstallationRefreshLive),
   Layer.provideMerge(ProviderAuthServiceLive),
   // Core Services
@@ -521,6 +527,12 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
       CloudManagedEndpointRuntimeLive,
     ),
   ),
+);
+
+const RuntimeCoreDependenciesLive = RoutineSchedulerLive.pipe(
+  Layer.provideMerge(RoutineDispatcherLive.pipe(Layer.provideMerge(RoutineStoreLayerLive))),
+  Layer.provideMerge(RoutineStoreLayerLive),
+  Layer.provideMerge(RuntimeCoreDependenciesWithoutRoutinesLive),
 );
 
 const RuntimeDependenciesLive = SandboxDeploymentService.layer.pipe(

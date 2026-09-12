@@ -73,6 +73,7 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@kata-sh/code-contracts";
+import { previewRoutineSchedule, RoutineError } from "@kata-sh/code-contracts";
 import { resolveServerBackgroundActivitySettings } from "@kata-sh/code-shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -141,6 +142,7 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as RoutineStore from "./routines/RoutineStore.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
@@ -574,6 +576,20 @@ const makeWsRpcLayer = (
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+      const routineStore = yield* Effect.serviceOption(RoutineStore.RoutineStore);
+      const withRoutineStore = <A, E>(
+        run: (store: RoutineStore.RoutineStore["Service"]) => Effect.Effect<A, E>,
+      ): Effect.Effect<A, E | RoutineError> =>
+        Option.match(routineStore, {
+          onNone: () =>
+            Effect.fail(
+              new RoutineError({
+                code: "blocked",
+                message: "Scheduled routines are unavailable in this server runtime.",
+              }),
+            ),
+          onSome: run,
+        });
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       yield* backgroundPolicy.registerClientConnection;
       yield* Effect.addFinalizer(() => backgroundPolicy.unregisterClientConnection);
@@ -1300,6 +1316,101 @@ const makeWsRpcLayer = (
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
       return WsRpcGroup.of({
+        [WS_METHODS.routinesList]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesList,
+            withRoutineStore((store) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => store.list(environmentId)),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesGet]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesGet,
+            withRoutineStore((store) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => store.get(environmentId, input.id)),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesSave]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesSave,
+            withRoutineStore((store) =>
+              Effect.gen(function* () {
+                const environmentId = yield* serverEnvironment.getEnvironmentId;
+                const now = DateTime.toEpochMillis(yield* DateTime.now);
+                return yield* store.save(environmentId, input, now);
+              }),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesChange]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesChange,
+            withRoutineStore((store) =>
+              Effect.gen(function* () {
+                const environmentId = yield* serverEnvironment.getEnvironmentId;
+                const now = DateTime.toEpochMillis(yield* DateTime.now);
+                return yield* store.change(environmentId, input, now);
+              }),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesTest]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesTest,
+            withRoutineStore((store) =>
+              Effect.gen(function* () {
+                const environmentId = yield* serverEnvironment.getEnvironmentId;
+                const now = DateTime.toEpochMillis(yield* DateTime.now);
+                return yield* store.testRun(environmentId, input, now);
+              }),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesHistory]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesHistory,
+            withRoutineStore((store) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => store.history(environmentId, input)),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesPreview]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesPreview,
+            Effect.gen(function* () {
+              const now = yield* DateTime.now;
+              return yield* Effect.try({
+                try: () => previewRoutineSchedule(input.trigger, DateTime.toDateUtc(now)),
+                catch: (cause) =>
+                  Schema.is(RoutineError)(cause)
+                    ? cause
+                    : new RoutineError({
+                        code: "validation",
+                        message: cause instanceof Error ? cause.message : String(cause),
+                      }),
+              });
+            }),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesSubscribe]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.routinesSubscribe,
+            withRoutineStore((store) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => store.subscribe(environmentId)),
+                Effect.map(({ latest, changes }) => Stream.concat(Stream.make(latest), changes)),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,

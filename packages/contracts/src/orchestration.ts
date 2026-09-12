@@ -23,6 +23,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { RoutineProviderSubmission } from "./routineFence.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -1109,6 +1110,8 @@ export const ThreadTurnStartCommand = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
+  /** Present only on server-created routine commands; excluded from client RPC input. */
+  routineSubmission: Schema.optional(RoutineProviderSubmission),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });
@@ -1581,6 +1584,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   interactionMode: ProviderInteractionMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
+  routineSubmission: Schema.optional(RoutineProviderSubmission),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
   createdAt: IsoDateTime,
 });

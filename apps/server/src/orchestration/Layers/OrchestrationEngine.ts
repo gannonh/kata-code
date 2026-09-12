@@ -141,118 +141,134 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           "orchestration.aggregate_id": aggregateRef.aggregateId,
         });
 
-        const existingReceipt = yield* commandReceiptRepository.getByCommandId({
-          commandId: envelope.command.commandId,
-        });
-        if (Option.isSome(existingReceipt)) {
-          // A receipt only proves this exact command was handled. Replaying it
-          // for a command aimed at another aggregate would report success for
-          // work that never happened.
-          if (
-            existingReceipt.value.aggregateKind !== aggregateRef.aggregateKind ||
-            existingReceipt.value.aggregateId !== aggregateRef.aggregateId
-          ) {
-            return yield* new OrchestrationCommandIdConflictError({
-              commandId: envelope.command.commandId,
-              receiptAggregateKind: existingReceipt.value.aggregateKind,
-              receiptAggregateId: existingReceipt.value.aggregateId,
-              commandAggregateKind: aggregateRef.aggregateKind,
-              commandAggregateId: aggregateRef.aggregateId,
-            });
-          }
-          if (existingReceipt.value.status === "accepted") {
-            return {
-              sequence: existingReceipt.value.resultSequence,
-            };
-          }
-          return yield* new OrchestrationCommandPreviouslyRejectedError({
-            commandId: envelope.command.commandId,
-            detail: existingReceipt.value.error ?? "Previously rejected.",
-          });
-        }
-
-        if (
-          envelope.command.type === "thread.auto-settle" &&
-          (yield* eventStore.hasEventAfter({
-            aggregateKind: "thread",
-            aggregateId: envelope.command.threadId,
-            sequenceExclusive: envelope.command.snapshotSequence,
-          }))
-        ) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: envelope.command.type,
-            detail: `thread ${envelope.command.threadId} changed before automatic settlement`,
-          });
-        }
-
-        // The decider compares the lookup inputs. Only recreation needs an
-        // event check, since it can reset a thread to the same field values.
-        if (
-          envelope.command.type === "thread.pull-request.sync" &&
-          (yield* eventStore.hasEventAfter({
-            aggregateKind: "thread",
-            aggregateId: envelope.command.threadId,
-            sequenceExclusive: envelope.command.snapshotSequence,
-            type: "thread.created",
-          }))
-        ) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: envelope.command.type,
-            detail: `thread ${envelope.command.threadId} was recreated before pull request discovery`,
-          });
-        }
-
-        if (
-          envelope.command.type === "thread.auto-settle" &&
-          threadBackgroundLiveness.getThreadBackgroundLiveness(envelope.command.threadId) !== null
-        ) {
-          return yield* new OrchestrationCommandInvariantError({
-            commandType: envelope.command.type,
-            detail: `thread ${envelope.command.threadId} has live background work`,
-          });
-        }
-
-        // Command snapshots omit activities at startup and cap them while running.
-        // Read this request's durable state before deciding how to send the answer.
-        const userInputActivity =
-          envelope.command.type === "thread.user-input.respond" ||
-          envelope.command.type === "thread.user-input.dismiss"
-            ? yield* projectionSnapshotQuery.getUserInputActivity(envelope.command)
-            : Option.none();
-        const eventBase = yield* decideOrchestrationCommand({
-          command: envelope.command,
-          readModel: commandReadModel,
-          ...(Option.isSome(userInputActivity)
-            ? { userInputActivity: userInputActivity.value }
-            : {}),
-        }).pipe(
-          Effect.provideService(Crypto.Crypto, crypto),
-          Effect.mapError((cause) =>
-            isOrchestrationCommandRejection(cause)
-              ? cause
-              : new OrchestrationCommandInvariantError({
-                  commandType: envelope.command.type,
-                  detail: "Failed to generate an event identifier.",
-                  cause,
-                }),
-          ),
-        );
-        const plannedEvents = Array.isArray(eventBase) ? eventBase : [eventBase];
-        // Stamp the dispatching client's origin onto every event the command
-        // produced. The decider stays pure; attribution is an engine concern.
-        const eventBases =
-          envelope.origin === undefined
-            ? plannedEvents
-            : plannedEvents.map((planned) => ({
-                ...planned,
-                metadata: { ...planned.metadata, origin: envelope.origin },
-              }));
         const committedCommand = yield* sql
           .withTransaction(
             Effect.gen(function* () {
+              // SQLite's normal deferred transaction permits two processes to
+              // read the same command model before either writes. Touching a
+              // singleton row first upgrades this transaction to the writer
+              // lock, so the catch-up and decision below are authoritative.
+              yield* sql`UPDATE orchestration_dispatch_lock SET id=id WHERE id=1`;
+              const caughtUpChunk = yield* Stream.runCollect(
+                eventStore.readFromSequence(commandReadModel.snapshotSequence),
+              );
+              const caughtUpEvents = Array.from(caughtUpChunk);
+              let nextCommandReadModel = yield* projectEventsOntoReadModel(
+                commandReadModel,
+                caughtUpEvents,
+              );
+
+              const existingReceipt = yield* commandReceiptRepository.getByCommandId({
+                commandId: envelope.command.commandId,
+              });
+              if (Option.isSome(existingReceipt)) {
+                // A receipt only proves this exact command was handled. Replaying it
+                // for a command aimed at another aggregate would report success for
+                // work that never happened.
+                if (
+                  existingReceipt.value.aggregateKind !== aggregateRef.aggregateKind ||
+                  existingReceipt.value.aggregateId !== aggregateRef.aggregateId
+                ) {
+                  return yield* new OrchestrationCommandIdConflictError({
+                    commandId: envelope.command.commandId,
+                    receiptAggregateKind: existingReceipt.value.aggregateKind,
+                    receiptAggregateId: existingReceipt.value.aggregateId,
+                    commandAggregateKind: aggregateRef.aggregateKind,
+                    commandAggregateId: aggregateRef.aggregateId,
+                  });
+                }
+                if (existingReceipt.value.status === "accepted") {
+                  return {
+                    kind: "replayed" as const,
+                    sequence: existingReceipt.value.resultSequence,
+                    nextCommandReadModel,
+                  };
+                }
+                return yield* new OrchestrationCommandPreviouslyRejectedError({
+                  commandId: envelope.command.commandId,
+                  detail: existingReceipt.value.error ?? "Previously rejected.",
+                });
+              }
+
+              if (
+                envelope.command.type === "thread.auto-settle" &&
+                (yield* eventStore.hasEventAfter({
+                  aggregateKind: "thread",
+                  aggregateId: envelope.command.threadId,
+                  sequenceExclusive: envelope.command.snapshotSequence,
+                }))
+              ) {
+                return yield* new OrchestrationCommandInvariantError({
+                  commandType: envelope.command.type,
+                  detail: `thread ${envelope.command.threadId} changed before automatic settlement`,
+                });
+              }
+
+              // The decider compares the lookup inputs. Only recreation needs an
+              // event check, since it can reset a thread to the same field values.
+              if (
+                envelope.command.type === "thread.pull-request.sync" &&
+                (yield* eventStore.hasEventAfter({
+                  aggregateKind: "thread",
+                  aggregateId: envelope.command.threadId,
+                  sequenceExclusive: envelope.command.snapshotSequence,
+                  type: "thread.created",
+                }))
+              ) {
+                return yield* new OrchestrationCommandInvariantError({
+                  commandType: envelope.command.type,
+                  detail: `thread ${envelope.command.threadId} was recreated before pull request discovery`,
+                });
+              }
+
+              if (
+                envelope.command.type === "thread.auto-settle" &&
+                threadBackgroundLiveness.getThreadBackgroundLiveness(envelope.command.threadId) !==
+                  null
+              ) {
+                return yield* new OrchestrationCommandInvariantError({
+                  commandType: envelope.command.type,
+                  detail: `thread ${envelope.command.threadId} has live background work`,
+                });
+              }
+
+              // Command snapshots omit activities at startup and cap them while running.
+              // Read this request's durable state before deciding how to send the answer.
+              const userInputActivity =
+                envelope.command.type === "thread.user-input.respond" ||
+                envelope.command.type === "thread.user-input.dismiss"
+                  ? yield* projectionSnapshotQuery.getUserInputActivity(envelope.command)
+                  : Option.none();
+              const eventBase = yield* decideOrchestrationCommand({
+                command: envelope.command,
+                readModel: nextCommandReadModel,
+                ...(Option.isSome(userInputActivity)
+                  ? { userInputActivity: userInputActivity.value }
+                  : {}),
+              }).pipe(
+                Effect.provideService(Crypto.Crypto, crypto),
+                Effect.mapError((cause) =>
+                  isOrchestrationCommandRejection(cause)
+                    ? cause
+                    : new OrchestrationCommandInvariantError({
+                        commandType: envelope.command.type,
+                        detail: "Failed to generate an event identifier.",
+                        cause,
+                      }),
+                ),
+              );
+              const plannedEvents = Array.isArray(eventBase) ? eventBase : [eventBase];
+              // Stamp the dispatching client's origin onto every event the command
+              // produced. The decider stays pure; attribution is an engine concern.
+              const eventBases =
+                envelope.origin === undefined
+                  ? plannedEvents
+                  : plannedEvents.map((planned) => ({
+                      ...planned,
+                      metadata: { ...planned.metadata, origin: envelope.origin },
+                    }));
               const committedEvents: OrchestrationEvent[] = [];
               const attachmentCleanups: Effect.Effect<void>[] = [];
-              let nextCommandReadModel = commandReadModel;
 
               for (const nextEvent of eventBases) {
                 const savedEvent = yield* eventStore.append(nextEvent);
@@ -281,11 +297,12 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               });
 
               return {
+                kind: "committed" as const,
                 committedEvents,
                 attachmentCleanups,
                 lastSequence: lastSavedEvent.sequence,
                 nextCommandReadModel,
-              } as const;
+              };
             }),
           )
           .pipe(
@@ -297,6 +314,13 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
         commandReadModel = committedCommand.nextCommandReadModel;
+        // Catch-up events update this process's decision model only. They were
+        // already published by the process that committed them; publishing
+        // them again here would replay ordinary provider commands on every
+        // process that later acquires the writer lock.
+        if (committedCommand.kind === "replayed") {
+          return { sequence: committedCommand.sequence };
+        }
         for (const cleanup of committedCommand.attachmentCleanups) {
           yield* cleanup;
         }

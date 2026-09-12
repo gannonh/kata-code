@@ -1,6 +1,7 @@
 import {
   ArrowLeftIcon,
   ChartNoAxesColumnIcon,
+  CalendarClockIcon,
   GitPullRequestIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -101,9 +102,11 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           ? "project-settings"
           : location.pathname === "/usage"
             ? "usage"
-            : location.pathname === "/pull-requests"
-              ? "pull-requests"
-              : null,
+            : location.pathname === "/routines"
+              ? "routines"
+              : location.pathname === "/pull-requests"
+                ? "pull-requests"
+                : null,
   });
   const { environments } = useEnvironments();
   // The page reads every connected server, so one of them offering pull requests is enough for
@@ -171,6 +174,14 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
             onClick={handleUsageClick}
+          />
+          <SidebarUtilityItem
+            icon={<CalendarClockIcon />}
+            label="Routines"
+            onClick={() => {
+              closeMobileSidebar();
+              void navigate({ to: "/routines" });
+            }}
           />
         </>
       )}

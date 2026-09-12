@@ -234,8 +234,33 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  Routine,
+  RoutineChangeInput,
+  RoutineError,
+  RoutineGetInput,
+  RoutineHistory,
+  RoutineHistoryInput,
+  RoutineList,
+  RoutinePreview,
+  RoutinePreviewInput,
+  RoutineRun,
+  RoutineSaveInput,
+  RoutineSubscriptionEvent,
+  RoutineTestInput,
+} from "./routines.ts";
 
 export const WS_METHODS = {
+  // Scheduled routine methods
+  routinesList: "routines.list",
+  routinesGet: "routines.get",
+  routinesSave: "routines.save",
+  routinesChange: "routines.change",
+  routinesTest: "routines.test",
+  routinesHistory: "routines.history",
+  routinesPreview: "routines.preview",
+  routinesSubscribe: "routines.subscribe",
+
   // Project registry methods
   projectsList: "projects.list",
   projectsAdd: "projects.add",
@@ -380,6 +405,57 @@ export const WS_METHODS = {
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
 } as const;
+
+const RoutineRpcError = Schema.Union([RoutineError, EnvironmentAuthorizationError]);
+
+const WsRoutinesListRpc = Rpc.make(WS_METHODS.routinesList, {
+  payload: Schema.Struct({}),
+  success: RoutineList,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesGetRpc = Rpc.make(WS_METHODS.routinesGet, {
+  payload: RoutineGetInput,
+  success: Routine,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesSaveRpc = Rpc.make(WS_METHODS.routinesSave, {
+  payload: RoutineSaveInput,
+  success: Routine,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesChangeRpc = Rpc.make(WS_METHODS.routinesChange, {
+  payload: RoutineChangeInput,
+  success: Routine,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesTestRpc = Rpc.make(WS_METHODS.routinesTest, {
+  payload: RoutineTestInput,
+  success: RoutineRun,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesHistoryRpc = Rpc.make(WS_METHODS.routinesHistory, {
+  payload: RoutineHistoryInput,
+  success: RoutineHistory,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesPreviewRpc = Rpc.make(WS_METHODS.routinesPreview, {
+  payload: RoutinePreviewInput,
+  success: RoutinePreview,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesSubscribeRpc = Rpc.make(WS_METHODS.routinesSubscribe, {
+  payload: Schema.Struct({}),
+  success: RoutineSubscriptionEvent,
+  error: RoutineRpcError,
+  stream: true,
+});
 
 const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
   payload: ServerUpsertKeybindingInput,
@@ -1182,6 +1258,14 @@ const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTel
 });
 
 export const WsRpcGroup = RpcGroup.make(
+  WsRoutinesListRpc,
+  WsRoutinesGetRpc,
+  WsRoutinesSaveRpc,
+  WsRoutinesChangeRpc,
+  WsRoutinesTestRpc,
+  WsRoutinesHistoryRpc,
+  WsRoutinesPreviewRpc,
+  WsRoutinesSubscribeRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

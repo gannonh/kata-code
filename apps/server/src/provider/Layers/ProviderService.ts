@@ -32,12 +32,14 @@ import {
   type ProviderDriverKind,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type RoutineProviderSubmission,
 } from "@kata-sh/code-contracts";
 import { expandAssistantCitationsForProvider } from "@kata-sh/code-shared/assistantCitations";
 import { causeErrorTag } from "@kata-sh/code-shared/observability";
 import { getModelSelectionStringOptionValue } from "@kata-sh/code-shared/model";
 import { resolveProjectAgentBrowserAccess } from "@kata-sh/code-shared/serverSettings";
 import * as DateTime from "effect/DateTime";
+import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -79,6 +81,7 @@ import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as ProjectionSnapshotQuery from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as RoutineStore from "../../routines/RoutineStore.ts";
 const isModelSelection = Schema.is(ModelSelection);
 const encodePromptJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -473,6 +476,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
   const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+  // ProviderService is also unit-tested in isolation. Production supplies the
+  // durable routine store; tests and non-routine callers may omit it.
+  const routineStore = yield* Effect.serviceOption(RoutineStore.RoutineStore);
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const projectionQuery = yield* Effect.serviceOption(
     ProjectionSnapshotQuery.ProjectionSnapshotQuery,
@@ -1047,10 +1053,98 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       } else if (canonicalEvent.type === "model.rerouted") {
         yield* observeModelReroutedForAnalytics(source, canonicalEvent);
       } else if (
+        canonicalEvent.type === "request.opened" &&
+        canonicalEvent.turnId !== undefined &&
+        canonicalEvent.payload.requestType.includes("approval")
+      ) {
+        if (Option.isSome(routineStore)) {
+          yield* routineStore.value
+            .markWaitingForApproval(
+              {
+                threadId: canonicalEvent.threadId,
+                turnId: canonicalEvent.turnId,
+                detail: canonicalEvent.payload.detail,
+              },
+              DateTime.toEpochMillis(yield* DateTime.now),
+            )
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("failed to persist routine approval wait", {
+                  threadId: canonicalEvent.threadId,
+                  turnId: canonicalEvent.turnId,
+                  cause,
+                }),
+              ),
+            );
+        }
+      } else if (
+        canonicalEvent.type === "request.resolved" &&
+        canonicalEvent.turnId !== undefined &&
+        canonicalEvent.payload.requestType.includes("approval")
+      ) {
+        if (Option.isSome(routineStore)) {
+          yield* routineStore.value
+            .markProviderApprovalResolved(
+              {
+                threadId: canonicalEvent.threadId,
+                turnId: canonicalEvent.turnId,
+              },
+              DateTime.toEpochMillis(yield* DateTime.now),
+            )
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("failed to persist routine approval resolution", {
+                  threadId: canonicalEvent.threadId,
+                  turnId: canonicalEvent.turnId,
+                  cause,
+                }),
+              ),
+            );
+        }
+      } else if (
         canonicalEvent.type === "turn.completed" ||
         canonicalEvent.type === "turn.aborted"
       ) {
         yield* recordTurnCompletedAnalytics(source, canonicalEvent);
+        if (Option.isSome(routineStore)) {
+          const status =
+            canonicalEvent.type === "turn.aborted"
+              ? "interrupted"
+              : canonicalEvent.payload.state === "completed"
+                ? "succeeded"
+                : canonicalEvent.payload.state === "failed"
+                  ? "failed"
+                  : "interrupted";
+          const detail =
+            canonicalEvent.type === "turn.aborted"
+              ? canonicalEvent.payload.reason
+              : (canonicalEvent.payload.errorMessage ?? canonicalEvent.payload.stopReason ?? null);
+          // Store terminal evidence before attempting to match it. The store
+          // joins it to a provider-bound initial turn immediately, or retains
+          // it until bindProviderTurn supplies the exact adapter turn id.
+          if (canonicalEvent.turnId !== undefined) {
+            yield* routineStore.value
+              .recordProviderTerminal(
+                {
+                  eventId: canonicalEvent.eventId,
+                  threadId: canonicalEvent.threadId,
+                  turnId: canonicalEvent.turnId,
+                  status,
+                  detail,
+                },
+                DateTime.toEpochMillis(yield* DateTime.now),
+              )
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("failed to persist routine provider terminal event", {
+                    threadId: canonicalEvent.threadId,
+                    turnId: canonicalEvent.turnId,
+                    cause,
+                  }),
+                ),
+              );
+          }
+        }
       } else if (canonicalEvent.type === "session.exited") {
         yield* clearTurnAnalyticsSession(source.instanceId, canonicalEvent.threadId);
       }
@@ -1639,7 +1733,77 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }),
         (turnMetadata) =>
           Effect.gen(function* () {
-            const turn = yield* routed.adapter.sendTurn(input);
+            if (input.routineSubmission !== undefined) {
+              if (Option.isNone(routineStore)) {
+                return yield* toValidationError(
+                  "ProviderService.sendTurn",
+                  "Routine provider submission requires the durable routine store",
+                );
+              }
+              yield* routineStore.value
+                .consumeSubmissionForProvider(
+                  input.routineSubmission,
+                  DateTime.toEpochMillis(yield* DateTime.now),
+                )
+                .pipe(
+                  Effect.mapError((error) =>
+                    toValidationError("ProviderService.sendTurn", error.message, error),
+                  ),
+                );
+            }
+            const { routineSubmission: _routineSubmission, ...adapterInput } = input;
+            const turn = yield* routed.adapter.sendTurn(adapterInput).pipe(
+              Effect.catchCause((cause) => {
+                if (input.routineSubmission === undefined || Option.isNone(routineStore)) {
+                  return Effect.failCause(cause);
+                }
+                return routineStore.value
+                  .markNeedsAttention(
+                    input.routineSubmission,
+                    Cause.pretty(cause).slice(0, 4_000),
+                    DateTime.toEpochMillis(DateTime.nowUnsafe()),
+                  )
+                  .pipe(
+                    Effect.catchCause((attentionCause) =>
+                      Effect.logWarning("failed to retain uncertain routine submission", {
+                        threadId: input.threadId,
+                        cause: Cause.pretty(attentionCause),
+                      }),
+                    ),
+                    Effect.andThen(Effect.failCause(cause)),
+                  );
+              }),
+            );
+            if (input.routineSubmission !== undefined && Option.isSome(routineStore)) {
+              yield* routineStore.value
+                .bindProviderTurn(
+                  input.routineSubmission,
+                  String(turn.turnId),
+                  DateTime.toEpochMillis(yield* DateTime.now),
+                )
+                .pipe(
+                  Effect.catchCause((cause) =>
+                    routineStore.value
+                      .markNeedsAttention(
+                        input.routineSubmission!,
+                        Cause.pretty(cause).slice(0, 4_000),
+                        DateTime.toEpochMillis(DateTime.nowUnsafe()),
+                      )
+                      .pipe(
+                        Effect.catchCause((attentionCause) =>
+                          Effect.logWarning("failed to retain uncertain routine binding", {
+                            threadId: input.threadId,
+                            cause: Cause.pretty(attentionCause),
+                          }),
+                        ),
+                        Effect.andThen(Effect.failCause(cause)),
+                      ),
+                  ),
+                  Effect.mapError((error) =>
+                    toValidationError("ProviderService.sendTurn", error.message, error),
+                  ),
+                );
+            }
             yield* associateTurnAnalytics({
               providerInstanceId: routed.instanceId,
               threadId: input.threadId,
