@@ -48,7 +48,7 @@ const makeRoutineScheduler = Effect.gen(function* () {
     dispatcher.drain(owner).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
-          ? Effect.failCause(cause)
+          ? Effect.failCause(cause as Cause.Cause<never>)
           : Effect.logWarning("routine dispatcher drain failed", { cause }),
       ),
       Effect.andThen(Effect.sleep("1 second")),

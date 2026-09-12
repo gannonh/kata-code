@@ -5,6 +5,7 @@ import {
   type OrchestrationProjectShell,
   type RoutineRun,
   type RoutineProviderSubmission,
+  type VcsRef,
 } from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -38,9 +39,11 @@ const routineCreateCommandId = (run: RoutineRun) =>
 
 const detailFromCause = (cause: Cause.Cause<unknown>) => Cause.pretty(cause).slice(0, 4_000);
 
-export const failUnlessInterrupted = (cause: Cause.Cause<unknown>) =>
+export const failUnlessInterrupted = (
+  cause: Cause.Cause<unknown>,
+): Effect.Effect<never, RoutineError> =>
   Cause.hasInterruptsOnly(cause)
-    ? Effect.failCause(cause)
+    ? Effect.failCause(cause as Cause.Cause<never>)
     : Effect.fail(
         new RoutineError({
           code: "blocked",
@@ -48,23 +51,13 @@ export const failUnlessInterrupted = (cause: Cause.Cause<unknown>) =>
         }),
       );
 
-const remoteRefBranchName = (ref: {
-  readonly name: string;
-  readonly remoteName?: string;
-  readonly isRemote: boolean;
-}) =>
+const remoteRefBranchName = (ref: Pick<VcsRef, "name" | "remoteName" | "isRemote">) =>
   ref.isRemote && ref.remoteName && ref.name.startsWith(`${ref.remoteName}/`)
     ? ref.name.slice(ref.remoteName.length + 1)
     : ref.name;
 
 const resolveConfiguredWorktreeBase = (
-  refs: ReadonlyArray<{
-    readonly name: string;
-    readonly remoteName?: string;
-    readonly isRemote: boolean;
-    readonly isDefault: boolean;
-    readonly current: boolean;
-  }>,
+  refs: ReadonlyArray<Pick<VcsRef, "name" | "remoteName" | "isRemote" | "isDefault" | "current">>,
   configured: string,
 ) => {
   if (refs.some((ref) => remoteRefBranchName(ref) === configured)) return configured;
@@ -374,16 +367,17 @@ const makeRoutineDispatcher = Effect.gen(function* () {
     ).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
-          ? Effect.failCause(cause)
+          ? Effect.failCause(cause as Cause.Cause<never>)
           : Effect.logWarning("routine preparation lease renewal stopped", {
               routineRunId: claim.run.id,
               cause: Cause.pretty(cause),
-            }).pipe(Effect.andThen(Effect.failCause(cause))),
+            }).pipe(Effect.andThen(failUnlessInterrupted(cause))),
       ),
     );
     return dispatchClaimUnsafe(claim).pipe(
       Effect.raceFirst(keepLease),
       Effect.catchCause(failUnlessInterrupted),
+      Effect.asVoid,
     );
   };
 
@@ -396,7 +390,7 @@ const makeRoutineDispatcher = Effect.gen(function* () {
           yield* dispatchClaim(claim).pipe(
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause)
-                ? Effect.failCause(cause)
+                ? Effect.failCause(cause as Cause.Cause<never>)
                 : failBeforeSubmission(claim, cause),
             ),
           );
@@ -404,7 +398,7 @@ const makeRoutineDispatcher = Effect.gen(function* () {
       }).pipe(
         Effect.catchCause((cause) =>
           Cause.hasInterruptsOnly(cause)
-            ? Effect.failCause(cause)
+            ? Effect.failCause(cause as Cause.Cause<never>)
             : Effect.logWarning("routine dispatcher drain failed", {
                 cause: Cause.pretty(cause),
               }),
