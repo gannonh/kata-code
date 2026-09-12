@@ -31,7 +31,7 @@ export class NativeAppIconResolver extends Context.Service<
     /** Returns a cached PNG path for the application, or `null` when no icon is available. */
     readonly resolve: (app: ToolActivityNativeAppReference) => Effect.Effect<string | null>;
   }
->()("t3/assets/NativeAppIconResolver") {}
+>()("@kata-sh/code-cli/assets/NativeAppIconResolver") {}
 
 function appCacheKey(app: ToolActivityNativeAppReference): string {
   return JSON.stringify(app);

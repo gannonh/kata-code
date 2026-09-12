@@ -31,7 +31,7 @@ export class ThreadSettlementReactor extends Context.Service<
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly drain: Effect.Effect<void>;
   }
->()("t3/orchestration/ThreadSettlementReactor") {}
+>()("@kata-sh/code-cli/orchestration/ThreadSettlementReactor") {}
 
 /** @public Service construction is part of the canonical Effect module API. */
 /** Whether any environment default or project override can settle a thread. */

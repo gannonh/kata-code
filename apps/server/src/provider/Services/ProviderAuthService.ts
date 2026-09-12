@@ -61,4 +61,4 @@ export interface ProviderAuthServiceShape {
 export class ProviderAuthService extends Context.Service<
   ProviderAuthService,
   ProviderAuthServiceShape
->()("t3/provider/Services/ProviderAuthService") {}
+>()("@kata-sh/code-cli/provider/Services/ProviderAuthService") {}

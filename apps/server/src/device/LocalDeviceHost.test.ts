@@ -99,6 +99,7 @@ it.effect(
         ),
         Effect.provideService(ProcessRunner.ProcessRunner, {
           run: () => Effect.die(new Error("Host construction must not run commands")),
+          runBytes: () => Effect.die(new Error("Host construction must not run commands")),
         }),
         Effect.provideService(
           HttpClient.HttpClient,

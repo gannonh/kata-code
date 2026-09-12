@@ -34,7 +34,7 @@ export class ThreadPullRequestReactor extends Context.Service<
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly drain: Effect.Effect<void>;
   }
->()("t3/orchestration/ThreadPullRequestReactor") {}
+>()("@kata-sh/code-cli/orchestration/ThreadPullRequestReactor") {}
 
 function samePullRequest(
   left: ThreadLinkedPullRequest | null | undefined,
