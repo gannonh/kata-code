@@ -475,6 +475,71 @@ export const makeRoutineStore = Effect.gen(function* () {
     }).pipe(Effect.mapError(persistenceError));
   const consumeSubmissionForProvider = (submission: RoutineProviderSubmission, now: number) =>
     submissionClaim(submission).pipe(Effect.flatMap((claim) => consumeSubmission(claim, now)));
+  const beginSessionPreparation = (submission: RoutineProviderSubmission) =>
+    transaction(
+      Effect.gen(function* () {
+        const marker = `session-preparing:${submission.generation}`;
+        const rows = yield* sql<{
+          record: string;
+        }>`UPDATE routine_runs SET intent_event=${marker}
+      WHERE id=${submission.runId} AND owner=${submission.owner} AND generation=${submission.generation}
+      AND thread_id=${submission.threadId} AND message_id=${submission.messageId} AND command_id=${submission.commandId}
+      AND submission_consumed=0 AND active=1
+      AND (intent_event IS NULL OR intent_event='setup-complete' OR (
+        intent_event LIKE 'session-preparing:%' AND intent_event != ${marker}
+      ))
+      RETURNING record`;
+        if (!rows[0]) return false;
+        const run = decodeRun(rows[0].record);
+        return (
+          run.stage === "admitted" ||
+          run.stage === "thread-created" ||
+          run.stage === "prompt-accepted"
+        );
+      }),
+    );
+  const settleOnSessionExit = (
+    input: {
+      readonly threadId: ThreadId;
+      readonly detail?: string | null | undefined;
+    },
+    now: number,
+  ) =>
+    transaction(
+      Effect.gen(function* () {
+        const rows = yield* sql<{ record: string }>`SELECT record FROM routine_runs
+      WHERE thread_id=${input.threadId} AND active=1 AND submission_consumed=1
+      ORDER BY admitted_at DESC, id DESC`;
+        const current = rows.map((row) => decodeRun(row.record)).find((run) => run.stage !== "terminal");
+        if (!current) return false;
+        if (current.stage === "submitting" || current.turnId === null) {
+          yield* writeRun(
+            {
+              ...current,
+              status: "needs-attention",
+              detail:
+                input.detail ??
+                "The provider session exited before this routine turn was bound.",
+              updatedAt: isoAt(now),
+            },
+            true,
+          );
+          return true;
+        }
+        yield* writeRun(
+          {
+            ...current,
+            stage: "terminal",
+            status: "interrupted",
+            detail:
+              input.detail ?? "The provider session exited before the routine turn completed.",
+            updatedAt: isoAt(now),
+          },
+          false,
+        );
+        return true;
+      }),
+    );
   const bindProviderTurn = (submission: RoutineProviderSubmission, turnId: string, now: number) =>
     transaction(
       Effect.gen(function* () {
@@ -496,7 +561,7 @@ export const makeRoutineStore = Effect.gen(function* () {
         // it must not resurrect that result or report a false fence loss.
         if (current.stage === "terminal") return;
         const terminalEvents = yield* sql<{
-          status: Extract<RoutineRun["status"], "succeeded" | "failed" | "interrupted">;
+          status: string;
           detail: string | null;
           initialMessageId: string | null;
         }>`SELECT status, detail, initial_message_id AS initialMessageId FROM routine_provider_events
@@ -510,6 +575,9 @@ export const makeRoutineStore = Effect.gen(function* () {
       WHERE thread_id=${submission.threadId} AND provider_turn_id <> ${turnId}`;
         if (
           terminalEvent &&
+          (terminalEvent.status === "succeeded" ||
+            terminalEvent.status === "failed" ||
+            terminalEvent.status === "interrupted") &&
           (terminalEvent.initialMessageId === null ||
             terminalEvent.initialMessageId === String(submission.messageId))
         ) {
@@ -524,6 +592,21 @@ export const makeRoutineStore = Effect.gen(function* () {
               updatedAt: isoAt(now),
             },
             false,
+          );
+          return;
+        }
+        if (terminalEvent?.status === "waiting-for-approval") {
+          yield* sql`DELETE FROM routine_provider_events WHERE thread_id=${submission.threadId} AND provider_turn_id=${turnId}`;
+          yield* writeRun(
+            {
+              ...current,
+              stage: "provider-bound",
+              status: "waiting-for-approval",
+              turnId: TurnId.make(turnId),
+              detail: terminalEvent.detail,
+              updatedAt: isoAt(now),
+            },
+            true,
           );
           return;
         }
@@ -604,7 +687,14 @@ export const makeRoutineStore = Effect.gen(function* () {
               run.turnId !== null &&
               String(run.turnId) === String(input.turnId),
           );
-        if (!current) return false;
+        if (!current) {
+          yield* sql`INSERT INTO routine_provider_events(event_id, thread_id, provider_turn_id, initial_message_id, status, detail, observed_at)
+        VALUES (${EventId.make(`routine-approval:${input.threadId}:${input.turnId}`)}, ${input.threadId}, ${input.turnId}, ${null}, ${"waiting-for-approval"}, ${input.detail ?? null}, ${now})
+        ON CONFLICT(thread_id, provider_turn_id) DO UPDATE SET
+          detail=COALESCE(excluded.detail, routine_provider_events.detail)
+        WHERE routine_provider_events.status='waiting-for-approval'`;
+          return false;
+        }
         if (current.status === "waiting-for-approval") return true;
         yield* writeRun(
           {
@@ -669,7 +759,10 @@ export const makeRoutineStore = Effect.gen(function* () {
         yield* sql`INSERT INTO routine_provider_events(event_id, thread_id, provider_turn_id, initial_message_id, status, detail, observed_at)
       VALUES (${input.eventId}, ${input.threadId}, ${input.turnId}, ${input.messageId ?? null}, ${input.status}, ${input.detail ?? null}, ${now})
       ON CONFLICT(thread_id, provider_turn_id) DO UPDATE SET
-        initial_message_id=COALESCE(routine_provider_events.initial_message_id, excluded.initial_message_id)`;
+        initial_message_id=COALESCE(routine_provider_events.initial_message_id, excluded.initial_message_id),
+        status=excluded.status,
+        detail=excluded.detail,
+        observed_at=excluded.observed_at`;
         const rows = yield* sql<{ record: string }>`SELECT record FROM routine_runs
       WHERE thread_id=${input.threadId} AND active=1 AND submission_consumed=1
       ORDER BY admitted_at DESC, id DESC`;
@@ -827,7 +920,8 @@ export const makeRoutineStore = Effect.gen(function* () {
               detail: string | null;
               initialMessageId: string | null;
             }>`SELECT status, detail, initial_message_id AS initialMessageId FROM routine_provider_events
-          WHERE thread_id=${current.threadId} AND provider_turn_id=${current.turnId}`;
+          WHERE thread_id=${current.threadId} AND provider_turn_id=${current.turnId}
+            AND status IN ('succeeded', 'failed', 'interrupted')`;
             const terminalEvent = terminalRows[0];
             if (
               terminalEvent &&
@@ -860,7 +954,8 @@ export const makeRoutineStore = Effect.gen(function* () {
               status: Extract<RoutineRun["status"], "succeeded" | "failed" | "interrupted">;
               detail: string | null;
             }>`SELECT provider_turn_id AS providerTurnId, status, detail FROM routine_provider_events
-          WHERE thread_id=${current.threadId} AND initial_message_id=${current.messageId}`;
+          WHERE thread_id=${current.threadId} AND initial_message_id=${current.messageId}
+            AND status IN ('succeeded', 'failed', 'interrupted')`;
             // The projection is the normalized durable fallback when the runtime
             // subscriber stopped after ProviderService persisted raw evidence but
             // before it could annotate that row with the initial message id.
@@ -877,7 +972,8 @@ export const makeRoutineStore = Effect.gen(function* () {
                 ON turns.thread_id = events.thread_id
                 AND turns.turn_id = events.provider_turn_id
                 AND turns.pending_message_id = ${current.messageId}
-              WHERE events.thread_id=${current.threadId}`;
+              WHERE events.thread_id=${current.threadId}
+                AND events.status IN ('succeeded', 'failed', 'interrupted')`;
             const terminalEvent = correlatedTerminalRows[0] ?? projectedTerminalRows[0];
             if (terminalEvent) {
               yield* sql`DELETE FROM routine_provider_events
@@ -943,6 +1039,7 @@ export const makeRoutineStore = Effect.gen(function* () {
     renew,
     consumeSubmission,
     consumeSubmissionForProvider,
+    beginSessionPreparation,
     bindProviderTurn,
     markNeedsAttention,
     markBlockedBeforeSubmission,
@@ -950,6 +1047,7 @@ export const makeRoutineStore = Effect.gen(function* () {
     markProviderApprovalResolved,
     recordProviderTerminal,
     completeProviderTurn,
+    settleOnSessionExit,
     updatePreparation,
     markSetupComplete,
     activeRuns,

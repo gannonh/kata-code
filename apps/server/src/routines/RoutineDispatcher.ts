@@ -11,7 +11,6 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -38,6 +37,43 @@ const routineCreateCommandId = (run: RoutineRun) =>
   CommandId.make(`routine:${run.id}:thread-create`);
 
 const detailFromCause = (cause: Cause.Cause<unknown>) => Cause.pretty(cause).slice(0, 4_000);
+
+export const failUnlessInterrupted = (cause: Cause.Cause<unknown>) =>
+  Cause.hasInterruptsOnly(cause)
+    ? Effect.failCause(cause)
+    : Effect.fail(
+        new RoutineError({
+          code: "blocked",
+          message: detailFromCause(cause),
+        }),
+      );
+
+const remoteRefBranchName = (ref: {
+  readonly name: string;
+  readonly remoteName?: string;
+  readonly isRemote: boolean;
+}) =>
+  ref.isRemote && ref.remoteName && ref.name.startsWith(`${ref.remoteName}/`)
+    ? ref.name.slice(ref.remoteName.length + 1)
+    : ref.name;
+
+const resolveConfiguredWorktreeBase = (
+  refs: ReadonlyArray<{
+    readonly name: string;
+    readonly remoteName?: string;
+    readonly isRemote: boolean;
+    readonly isDefault: boolean;
+    readonly current: boolean;
+  }>,
+  configured: string,
+) => {
+  if (refs.some((ref) => remoteRefBranchName(ref) === configured)) return configured;
+  const defaultRef = refs.find((ref) => ref.isDefault);
+  const current =
+    refs.find((ref) => ref.current && !ref.isRemote) ?? refs.find((ref) => ref.current);
+  const chosen = defaultRef ?? current;
+  return chosen ? remoteRefBranchName(chosen) : null;
+};
 
 export const makeRoutineDispatcher = Effect.gen(function* () {
   const store = yield* RoutineStore;
@@ -94,7 +130,20 @@ export const makeRoutineDispatcher = Effect.gen(function* () {
       yield* renew(claim);
       yield* fileSystem.makeDirectory(path.dirname(worktreePath), { recursive: true });
       yield* renew(claim);
-      let refName = workspace.baseBranch;
+      const available = yield* git.listRefs({
+        cwd: project.workspaceRoot,
+        refKind: "all",
+        limit: 100,
+      });
+      yield* renew(claim);
+      const baseBranch = resolveConfiguredWorktreeBase(available.refs, workspace.baseBranch);
+      if (baseBranch === null) {
+        return yield* new RoutineError({
+          code: "blocked",
+          message: `Git project has no default or current branch to start a worktree from (configured '${workspace.baseBranch}').`,
+        });
+      }
+      let refName = baseBranch;
       const hasOrigin =
         workspace.startFromOrigin &&
         (yield* git.remoteExists({ cwd: project.workspaceRoot, remoteName: "origin" }));
@@ -105,13 +154,13 @@ export const makeRoutineDispatcher = Effect.gen(function* () {
         const hasRemoteBranch = yield* git.remoteBranchExists({
           cwd: project.workspaceRoot,
           remoteName: "origin",
-          refName: workspace.baseBranch,
+          refName: baseBranch,
         });
         yield* renew(claim);
         if (hasRemoteBranch) {
           refName = (yield* git.resolveRemoteTrackingCommit({
             cwd: project.workspaceRoot,
-            refName: workspace.baseBranch,
+            refName: baseBranch,
             fallbackRemoteName: "origin",
           })).commitSha;
           yield* renew(claim);
@@ -155,7 +204,7 @@ export const makeRoutineDispatcher = Effect.gen(function* () {
         cwd: project.workspaceRoot,
         refName,
         newRefName: branch,
-        baseRefName: workspace.baseBranch,
+        baseRefName: baseBranch,
         path: worktreePath,
       });
       yield* renew(claim);
@@ -319,33 +368,22 @@ export const makeRoutineDispatcher = Effect.gen(function* () {
     });
   });
 
-  const dispatchClaim: RoutineDispatcherShape["dispatchClaim"] = (claim) =>
-    Effect.gen(function* () {
-      const renewal = yield* Effect.forkDetach(
-        Effect.forever(
-          Effect.sleep("5 seconds").pipe(
-            Effect.andThen(renew(claim)),
-            Effect.catchCause((cause) =>
-              Effect.logWarning("routine preparation lease renewal stopped", {
-                routineRunId: claim.run.id,
-                cause: Cause.pretty(cause),
-              }).pipe(Effect.andThen(Effect.failCause(cause))),
-            ),
-          ),
-        ),
-      );
-      return yield* dispatchClaimUnsafe(claim).pipe(
-        Effect.catchCause((cause) =>
-          Effect.fail(
-            new RoutineError({
-              code: "blocked",
-              message: detailFromCause(cause),
-            }),
-          ),
-        ),
-        Effect.ensuring(Fiber.interrupt(renewal)),
-      );
-    });
+  const dispatchClaim: RoutineDispatcherShape["dispatchClaim"] = (claim) => {
+    const keepLease = Effect.forever(Effect.sleep("5 seconds").pipe(Effect.andThen(renew(claim)))).pipe(
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("routine preparation lease renewal stopped", {
+              routineRunId: claim.run.id,
+              cause: Cause.pretty(cause),
+            }).pipe(Effect.andThen(Effect.failCause(cause))),
+      ),
+    );
+    return dispatchClaimUnsafe(claim).pipe(
+      Effect.raceFirst(keepLease),
+      Effect.catchCause(failUnlessInterrupted),
+    );
+  };
 
   const drain: RoutineDispatcherShape["drain"] = Effect.fn("RoutineDispatcher.drain")(
     function* (owner) {
@@ -354,14 +392,20 @@ export const makeRoutineDispatcher = Effect.gen(function* () {
           const claim = yield* store.claim(owner, DateTime.toEpochMillis(DateTime.nowUnsafe()));
           if (claim === null) return;
           yield* dispatchClaim(claim).pipe(
-            Effect.catchCause((cause) => failBeforeSubmission(claim, cause)),
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.failCause(cause)
+                : failBeforeSubmission(claim, cause),
+            ),
           );
         }
       }).pipe(
         Effect.catchCause((cause) =>
-          Effect.logWarning("routine dispatcher drain failed", {
-            cause: Cause.pretty(cause),
-          }),
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("routine dispatcher drain failed", {
+                cause: Cause.pretty(cause),
+              }),
         ),
       );
     },

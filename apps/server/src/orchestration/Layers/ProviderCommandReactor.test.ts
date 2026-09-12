@@ -24,6 +24,7 @@ import {
   TurnId,
 } from "@kata-sh/code-contracts";
 import { serializeAssistantCitation } from "@kata-sh/code-shared/assistantCitations";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
@@ -38,9 +39,10 @@ import { it as effectIt } from "@effect/vitest";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { deriveServerPaths, ServerConfig } from "../../config.ts";
-import { TextGenerationError } from "@kata-sh/code-contracts";
+import { TextGenerationError, RoutineError } from "@kata-sh/code-contracts";
 import {
   ProviderAdapterRequestError,
+  ProviderValidationError,
   ProviderWorkspaceMissingError,
   type ProviderServiceError,
 } from "../../provider/Errors.ts";
@@ -62,6 +64,7 @@ import * as ThreadBackgroundLiveness from "../ThreadBackgroundLiveness.ts";
 import * as ThreadPlanProgress from "../ThreadPlanProgress.ts";
 import {
   providerErrorLabelFromInstanceHint,
+  isRoutineSubmissionFenceLoss,
   ProviderCommandReactorLive,
 } from "./ProviderCommandReactor.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -162,6 +165,32 @@ describe("ProviderCommandReactor", () => {
           instanceId: "claude_openrouter",
         }),
       ).toBe("claude_openrouter");
+    });
+  });
+
+  describe("routine submission fence loss", () => {
+    it("matches a nested lost-fence RoutineError regardless of the outer message", () => {
+      const cause = Cause.fail(
+        new ProviderValidationError({
+          operation: "ProviderService.sendTurn",
+          issue: "arbitrary wrapper text",
+          cause: new RoutineError({
+            code: "lost-fence",
+            message: "custom fence loss copy",
+          }),
+        }),
+      );
+      expect(isRoutineSubmissionFenceLoss(cause)).toBe(true);
+    });
+
+    it("does not treat unrelated errors as fence loss", () => {
+      const cause = Cause.fail(
+        new ProviderValidationError({
+          operation: "ProviderService.sendTurn",
+          issue: "routine submission ownership is no longer current",
+        }),
+      );
+      expect(isRoutineSubmissionFenceLoss(cause)).toBe(false);
     });
   });
 

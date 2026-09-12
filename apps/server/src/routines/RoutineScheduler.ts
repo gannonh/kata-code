@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { RoutineError } from "@kata-sh/code-contracts";
 
 import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -45,7 +46,11 @@ export const makeRoutineScheduler = Effect.gen(function* () {
   );
   const dispatchLoop = Effect.forever(
     dispatcher.drain(owner).pipe(
-      Effect.catchCause((cause) => Effect.logWarning("routine dispatcher drain failed", { cause })),
+      Effect.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.failCause(cause)
+          : Effect.logWarning("routine dispatcher drain failed", { cause }),
+      ),
       Effect.andThen(Effect.sleep("1 second")),
     ),
   );

@@ -25,7 +25,7 @@ Preconditions:
 - At least one connected environment has one imported project and one enabled provider with a model.
 - Use a disposable environment because Save, Test run, Pause, Resume, and Delete write durable state.
 
-- **Open.** Run `agent-browser --session kat-3319-routines open "$WEB_ORIGIN/routines"`. The heading `Routines`, button `New routine`, and sidebar button `Routines` are visible.
+- **Open.** Run `agent-browser --session katacode-verify open "$WEB_ORIGIN/routines"`. The heading `Routines`, button `New routine`, and sidebar button `Routines` are visible.
 - **Menu.** Click `New routine`, then inspect the menu. `Set up manually` is enabled and `Create in chat` is disabled.
 - **Create.** Click `Set up manually`, fill `Name` and `Instruction`, choose `Project`, `Provider and model`, and `Permission mode`, then choose `Daily` and set an IANA timezone. Click `Save`. The routine card shows the saved name and schedule.
 - **Preview.** In the editor, change `IANA timezone` to `America/Los_Angeles`. Three `Next runs` rows remain visible and include a local offset.
@@ -38,7 +38,7 @@ Preconditions:
 
 ## Gotchas
 
-- Run every command with `--session kat-3319-routines` after pairing; an unpaired session can appear to load the route while mutations fail.
+- Run every command with `--session katacode-verify` after pairing; an unpaired session can appear to load the route while mutations fail.
 - A disconnected environment still appears in the library. Its cards remain readable, while Save, Test run, Pause, Resume, and Delete are disabled.
 - The preview is server-validated. Invalid IANA zones and malformed cron expressions show an error and cannot be saved.
 - A provider response may take time. Keep the editor open so the durable history subscription can show the terminal state.

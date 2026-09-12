@@ -125,10 +125,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
       }
 
       commandReadModel = yield* projectEventsOntoReadModel(commandReadModel, persistedEvents);
-
-      for (const persistedEvent of persistedEvents) {
-        yield* PubSub.publish(eventPubSub, persistedEvent);
-      }
+      // Catch-up events were already published by the process that committed
+      // them. Republishing them here would replay ordinary provider commands
+      // on a follower that then fails its own command.
     });
 
     return Effect.exit(

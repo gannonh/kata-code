@@ -657,4 +657,193 @@ it.layer(storeLayer)("RoutineStore", (it) => {
       assert.equal(completed.runs[0]?.status, "succeeded");
     }),
   );
+
+  it.effect("applies a permission wait that arrived before bindProviderTurn", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const environment = EnvironmentId.make("routine-early-approval-environment");
+      const routine = yield* store.save(
+        environment,
+        {
+          id: RoutineId.make("routine-early-approval"),
+          expectedRevision: 0,
+          configuration,
+        },
+        91_000,
+      );
+      const run = yield* store.testRun(
+        environment,
+        {
+          id: routine.id,
+          expectedRevision: routine.revision,
+          requestId: RoutineRequestId.make("request-early-approval"),
+        },
+        91_001,
+      );
+      const claim = yield* store.claim("early-approval-worker", 91_001);
+      assert.isNotNull(claim);
+      const submission = {
+        runId: run.id,
+        owner: claim!.owner,
+        generation: RoutineOwnerGeneration.make(claim!.generation),
+        threadId: run.threadId,
+        messageId: run.messageId,
+        commandId: run.commandId,
+      };
+      yield* store.consumeSubmissionForProvider(submission, 91_001);
+      const buffered = yield* store.markWaitingForApproval(
+        {
+          threadId: run.threadId,
+          turnId: TurnId.make("early-approval-turn"),
+          detail: "Approve the command.",
+        },
+        91_002,
+      );
+      assert.isFalse(buffered);
+      yield* store.bindProviderTurn(submission, "early-approval-turn", 91_003);
+      const waiting = yield* store.history(environment, { id: routine.id });
+      assert.equal(waiting.runs[0]?.status, "waiting-for-approval");
+      assert.equal(waiting.runs[0]?.stage, "provider-bound");
+    }),
+  );
+
+  it.effect("does not treat a buffered permission wait as terminal recovery evidence", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const environment = EnvironmentId.make("routine-approval-recover-environment");
+      const routine = yield* store.save(
+        environment,
+        {
+          id: RoutineId.make("routine-approval-recover"),
+          expectedRevision: 0,
+          configuration,
+        },
+        91_100,
+      );
+      const run = yield* store.testRun(
+        environment,
+        {
+          id: routine.id,
+          expectedRevision: routine.revision,
+          requestId: RoutineRequestId.make("request-approval-recover"),
+        },
+        91_101,
+      );
+      const claim = yield* store.claim("approval-recover-worker", 91_101);
+      assert.isNotNull(claim);
+      const submission = {
+        runId: run.id,
+        owner: claim!.owner,
+        generation: RoutineOwnerGeneration.make(claim!.generation),
+        threadId: run.threadId,
+        messageId: run.messageId,
+        commandId: run.commandId,
+      };
+      yield* store.consumeSubmissionForProvider(submission, 91_101);
+      yield* store.markWaitingForApproval(
+        {
+          threadId: run.threadId,
+          turnId: TurnId.make("approval-recover-turn"),
+          detail: "Approve the command.",
+        },
+        91_102,
+      );
+      yield* store.recoverConsumed(91_103);
+      const recovered = yield* store.history(environment, { id: routine.id });
+      assert.equal(recovered.runs[0]?.stage, "submitting");
+      assert.notEqual(recovered.runs[0]?.status, "waiting-for-approval");
+      assert.notEqual(recovered.runs[0]?.stage, "terminal");
+      yield* store.bindProviderTurn(submission, "approval-recover-turn", 91_104);
+      const waiting = yield* store.history(environment, { id: routine.id });
+      assert.equal(waiting.runs[0]?.status, "waiting-for-approval");
+      assert.equal(waiting.runs[0]?.stage, "provider-bound");
+    }),
+  );
+
+  it.effect("lets only one owner begin session preparation for a generation", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const environment = EnvironmentId.make("routine-prepare-environment");
+      const routine = yield* store.save(
+        environment,
+        {
+          id: RoutineId.make("routine-prepare"),
+          expectedRevision: 0,
+          configuration,
+        },
+        92_000,
+      );
+      const run = yield* store.testRun(
+        environment,
+        {
+          id: routine.id,
+          expectedRevision: routine.revision,
+          requestId: RoutineRequestId.make("request-prepare"),
+        },
+        92_001,
+      );
+      const claim = yield* store.claim("prepare-worker", 92_001);
+      assert.isNotNull(claim);
+      const submission = {
+        runId: run.id,
+        owner: claim!.owner,
+        generation: RoutineOwnerGeneration.make(claim!.generation),
+        threadId: run.threadId,
+        messageId: run.messageId,
+        commandId: run.commandId,
+      };
+      assert.isTrue(yield* store.beginSessionPreparation(submission));
+      assert.isFalse(yield* store.beginSessionPreparation(submission));
+    }),
+  );
+
+  it.effect("interrupts a bound run when its provider session exits", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const environment = EnvironmentId.make("routine-session-exit-environment");
+      const routine = yield* store.save(
+        environment,
+        {
+          id: RoutineId.make("routine-session-exit"),
+          expectedRevision: 0,
+          configuration,
+        },
+        93_000,
+      );
+      const run = yield* store.testRun(
+        environment,
+        {
+          id: routine.id,
+          expectedRevision: routine.revision,
+          requestId: RoutineRequestId.make("request-session-exit"),
+        },
+        93_001,
+      );
+      const claim = yield* store.claim("session-exit-worker", 93_001);
+      assert.isNotNull(claim);
+      const submission = {
+        runId: run.id,
+        owner: claim!.owner,
+        generation: RoutineOwnerGeneration.make(claim!.generation),
+        threadId: run.threadId,
+        messageId: run.messageId,
+        commandId: run.commandId,
+      };
+      yield* store.consumeSubmissionForProvider(submission, 93_001);
+      yield* store.bindProviderTurn(submission, "session-exit-turn", 93_002);
+      assert.isTrue(
+        yield* store.settleOnSessionExit(
+          { threadId: run.threadId, detail: "session closed" },
+          93_003,
+        ),
+      );
+      const history = yield* store.history(environment, { id: routine.id });
+      assert.equal(history.runs[0]?.status, "interrupted");
+      assert.equal(history.runs[0]?.stage, "terminal");
+      assert.equal(
+        (yield* store.activeRuns()).some((active) => active.id === run.id),
+        false,
+      );
+    }),
+  );
 });

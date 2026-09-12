@@ -345,6 +345,20 @@ function toValidationError(
   });
 }
 
+const ROUTINE_PERMISSION_REQUEST_TYPES = new Set([
+  "command_execution_approval",
+  "file_read_approval",
+  "file_change_approval",
+  "apply_patch_approval",
+  "exec_command_approval",
+  "mcp_elicitation_approval",
+  "dynamic_tool_call",
+]);
+
+function isRoutinePermissionRequest(requestType: string): boolean {
+  return ROUTINE_PERMISSION_REQUEST_TYPES.has(requestType);
+}
+
 const decodeInputOrValidationError = <S extends Schema.Top>(input: {
   readonly operation: string;
   readonly schema: S;
@@ -1055,7 +1069,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       } else if (
         canonicalEvent.type === "request.opened" &&
         canonicalEvent.turnId !== undefined &&
-        canonicalEvent.payload.requestType.includes("approval")
+        isRoutinePermissionRequest(canonicalEvent.payload.requestType)
       ) {
         if (Option.isSome(routineStore)) {
           yield* routineStore.value
@@ -1080,7 +1094,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       } else if (
         canonicalEvent.type === "request.resolved" &&
         canonicalEvent.turnId !== undefined &&
-        canonicalEvent.payload.requestType.includes("approval")
+        isRoutinePermissionRequest(canonicalEvent.payload.requestType)
       ) {
         if (Option.isSome(routineStore)) {
           yield* routineStore.value
@@ -1147,6 +1161,26 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
       } else if (canonicalEvent.type === "session.exited") {
         yield* clearTurnAnalyticsSession(source.instanceId, canonicalEvent.threadId);
+        if (Option.isSome(routineStore)) {
+          yield* routineStore.value
+            .settleOnSessionExit(
+              {
+                threadId: canonicalEvent.threadId,
+                detail:
+                  canonicalEvent.payload.reason ??
+                  "The provider session exited before the routine turn completed.",
+              },
+              DateTime.toEpochMillis(yield* DateTime.now),
+            )
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("failed to settle routine after session exit", {
+                  threadId: canonicalEvent.threadId,
+                  cause,
+                }),
+              ),
+            );
+        }
       }
       if (
         isCompactedEvent(canonicalEvent) &&

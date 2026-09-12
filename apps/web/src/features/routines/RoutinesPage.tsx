@@ -42,6 +42,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useProjects } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
+import { vcsEnvironment } from "../../state/vcs";
 import { cn } from "../../lib/utils";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -50,7 +51,14 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../../components/ui/menu
 import { SidebarInset } from "../../components/ui/sidebar";
 import { WorkspacePageHeader } from "../../components/WorkspacePageHeader";
 import { Badge } from "../../components/ui/badge";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../../components/ui/empty";
+import { Empty, EmptyHeader, EmptyTitle } from "../../components/ui/empty";
+import {
+  canSaveRoutineDraft,
+  enabledProviders,
+  firstEnabledProviderModel,
+  preferredWorktreeBaseBranch,
+  routinesLibraryEmptyKind,
+} from "./RoutinesPage.logic";
 
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
 
@@ -64,6 +72,11 @@ type DraftState = {
   readonly environmentId: EnvironmentId;
   readonly expectedRevision: number;
   readonly configuration: RoutineDraft;
+};
+
+type EnvironmentRoutineLoad = {
+  readonly status: "ready" | "unavailable" | "pending";
+  readonly routines: readonly RoutineWithOwner[];
 };
 
 const EMPTY_ROUTINES: readonly RoutineWithOwner[] = [];
@@ -89,36 +102,26 @@ const runStatusLabel: Record<RoutineRun["status"], string> = {
   blocked: "Blocked",
 };
 
-function firstProviderModel(providers: readonly ServerProvider[]): RoutineDraft["modelSelection"] {
-  const provider = providers.find(
-    (candidate) => candidate.enabled && candidate.models.length > 0 && candidate.instanceId,
-  );
-  const model = provider?.models.find((candidate) => !candidate.isLegacy) ?? provider?.models[0];
-  return decodeModelSelection({
-    instanceId: provider?.instanceId ?? ProviderInstanceId.make("codex"),
-    model: model?.slug ?? "gpt-5.4",
-  });
+function worktreeWorkspace(baseBranch: string): RoutineDraft["workspace"] {
+  return {
+    kind: "worktree",
+    baseBranch,
+    startFromOrigin: true,
+    runSetupScript: true,
+  };
 }
 
 function defaultDraft(
   environmentId: EnvironmentId,
   projects: readonly ReturnType<typeof useProjects>[number][],
   providers: readonly ServerProvider[],
+  baseBranch = "main",
 ): DraftState | null {
   const project = projects.find((candidate) => candidate.environmentId === environmentId);
   if (!project) return null;
-  // `repositoryIdentity` is optional on cached shells from older servers. A
-  // missing value means the server has not resolved the repository yet; keep
-  // the safe Git worktree default and let the editor expose shared storage
-  // explicitly. A resolved null is the definitive non-Git result.
   const workspace =
     project.repositoryIdentity !== null
-      ? {
-          kind: "worktree" as const,
-          baseBranch: "main",
-          startFromOrigin: true,
-          runSetupScript: true,
-        }
+      ? worktreeWorkspace(baseBranch)
       : { kind: "shared" as const, directory: project.workspaceRoot };
   return {
     id: RoutineId.make(nextDraftId()),
@@ -128,7 +131,12 @@ function defaultDraft(
       name: "",
       instruction: "",
       projectId: project.id,
-      modelSelection: firstProviderModel(providers),
+      modelSelection:
+        firstEnabledProviderModel(providers) ??
+        decodeModelSelection({
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        }),
       runtimeMode: "approval-required",
       workspace,
       trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
@@ -183,20 +191,27 @@ function RoutineEnvironmentRows({
   readonly environmentId: EnvironmentId;
   readonly ownerLabel: string;
   readonly connectionPhase: string;
-  readonly onLoaded: (environmentId: EnvironmentId, routines: readonly RoutineWithOwner[]) => void;
+  readonly onLoaded: (environmentId: EnvironmentId, load: EnvironmentRoutineLoad) => void;
 }) {
   const query = useEnvironmentQuery(routineEnvironment.list({ environmentId, input: {} }));
   useEffect(() => {
-    if (query.data === null) return;
-    onLoaded(
-      environmentId,
-      query.data.map((routine) => ({
-        ...routine,
-        ownerLabel,
-        connectionPhase,
-      })),
-    );
-  }, [connectionPhase, onLoaded, ownerLabel, query.data]);
+    if (query.data !== null) {
+      onLoaded(environmentId, {
+        status: "ready",
+        routines: query.data.map((routine) => ({
+          ...routine,
+          ownerLabel,
+          connectionPhase,
+        })),
+      });
+      return;
+    }
+    if (query.error !== null || (connectionPhase !== "connected" && !query.isPending)) {
+      onLoaded(environmentId, { status: "unavailable", routines: EMPTY_ROUTINES });
+      return;
+    }
+    onLoaded(environmentId, { status: "pending", routines: EMPTY_ROUTINES });
+  }, [connectionPhase, environmentId, onLoaded, ownerLabel, query.data, query.error, query.isPending]);
   return null;
 }
 
@@ -274,8 +289,10 @@ function RoutineEditor({
   routine,
   projects,
   providers,
+  owners,
   offline,
   onDraftChange,
+  onOwnerChange,
   onSaved,
   onCancel,
 }: {
@@ -283,8 +300,13 @@ function RoutineEditor({
   readonly routine: RoutineWithOwner | null;
   readonly projects: readonly ReturnType<typeof useProjects>[number][];
   readonly providers: readonly ServerProvider[];
+  readonly owners: readonly {
+    readonly environmentId: EnvironmentId;
+    readonly label: string;
+  }[];
   readonly offline: boolean;
   readonly onDraftChange: (draft: DraftState) => void;
+  readonly onOwnerChange: (environmentId: EnvironmentId) => void;
   readonly onSaved: (routine: Routine) => void;
   readonly onCancel: () => void;
 }) {
@@ -299,6 +321,29 @@ function RoutineEditor({
         })
       : null,
   );
+  const [historyBefore, setHistoryBefore] = useState<string | null>(null);
+  const olderHistory = useEnvironmentQuery(
+    routine && historyBefore
+      ? routineEnvironment.history({
+          environmentId: routine.environmentId,
+          input: { id: routine.id, limit: 20, before: historyBefore },
+        })
+      : null,
+  );
+  const [extraRuns, setExtraRuns] = useState<readonly RoutineRun[]>([]);
+  const [olderCursor, setOlderCursor] = useState<string | null>(null);
+  const firstPageKey = history.data?.runs.map((run) => run.id).join(",") ?? "";
+  useEffect(() => {
+    setExtraRuns([]);
+    setHistoryBefore(null);
+    setOlderCursor(history.data?.nextCursor ?? null);
+  }, [firstPageKey, history.data?.nextCursor, routine?.id]);
+  useEffect(() => {
+    if (!historyBefore || olderHistory.data === null) return;
+    setExtraRuns((previous) => [...previous, ...olderHistory.data!.runs]);
+    setOlderCursor(olderHistory.data.nextCursor);
+    setHistoryBefore(null);
+  }, [historyBefore, olderHistory.data]);
   const preview = useEnvironmentQuery(
     routineEnvironment.preview({
       environmentId: draft.environmentId,
@@ -315,7 +360,23 @@ function RoutineEditor({
   const setTrigger = (patch: Partial<ScheduleTrigger>) =>
     setConfiguration({ trigger: { ...configuration.trigger, ...patch } as ScheduleTrigger });
   const project = projects.find((candidate) => candidate.id === configuration.projectId);
-  const provider = providers.find(
+  const selectableProviders = enabledProviders(providers);
+  const refs = useEnvironmentQuery(
+    project && configuration.workspace.kind === "worktree"
+      ? vcsEnvironment.listRefs({
+          environmentId: draft.environmentId,
+          input: { cwd: project.workspaceRoot, refKind: "all", limit: 100 },
+        })
+      : null,
+  );
+  useEffect(() => {
+    if (configuration.workspace.kind !== "worktree" || refs.data === null) return;
+    const preferred = preferredWorktreeBaseBranch(refs.data.refs);
+    if (!preferred || preferred === configuration.workspace.baseBranch) return;
+    if (configuration.workspace.baseBranch !== "main") return;
+    setConfiguration({ workspace: worktreeWorkspace(preferred) });
+  }, [configuration.workspace, refs.data]);
+  const provider = selectableProviders.find(
     (candidate) => candidate.instanceId === configuration.modelSelection.instanceId,
   );
   const availableModels = provider?.models ?? [];
@@ -337,13 +398,16 @@ function RoutineEditor({
       }),
     });
   };
-  const canSave =
-    configuration.name.trim().length > 0 &&
-    configuration.instruction.trim().length > 0 &&
-    project !== undefined &&
-    !offline &&
-    !busy;
+  const canSave = canSaveRoutineDraft({
+    name: configuration.name,
+    instruction: configuration.instruction,
+    hasProject: project !== undefined,
+    offline,
+    busy,
+    provider,
+  });
   const isSaved = routine !== null;
+  const historyRuns = [...(history.data?.runs ?? []), ...extraRuns];
 
   const submitSave = async () => {
     if (!canSave) return;
@@ -454,6 +518,23 @@ function RoutineEditor({
 
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <div className="grid gap-4">
+          {!isSaved && owners.length > 1 ? (
+            <div className="grid gap-1.5">
+              <FieldLabel htmlFor="routine-environment">Environment</FieldLabel>
+              <select
+                id="routine-environment"
+                className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
+                value={draft.environmentId}
+                onChange={(event) => onOwnerChange(event.target.value as EnvironmentId)}
+              >
+                {owners.map((owner) => (
+                  <option key={owner.environmentId} value={owner.environmentId}>
+                    {owner.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <div className="grid gap-1.5">
             <FieldLabel htmlFor="routine-name">Name</FieldLabel>
             <Input
@@ -488,12 +569,9 @@ function RoutineEditor({
                   projectId: nextProject.id,
                   workspace:
                     nextProject.repositoryIdentity !== null
-                      ? {
-                          kind: "worktree",
-                          baseBranch: "main",
-                          startFromOrigin: true,
-                          runSetupScript: true,
-                        }
+                      ? worktreeWorkspace(
+                          preferredWorktreeBaseBranch(refs.data?.refs ?? []) ?? "main",
+                        )
                       : { kind: "shared", directory: nextProject.workspaceRoot },
                 });
               }}
@@ -523,7 +601,7 @@ function RoutineEditor({
                 });
               }}
             >
-              {providers.flatMap((candidate) =>
+              {selectableProviders.flatMap((candidate) =>
                 candidate.models
                   .filter((model) => !model.isLegacy)
                   .map((model) => (
@@ -536,9 +614,9 @@ function RoutineEditor({
                   )),
               )}
             </select>
-            {availableModels.length === 0 ? (
+            {selectableProviders.length === 0 ? (
               <p className="text-xs text-warning-foreground">
-                No models are available on this environment.
+                No enabled provider is available on this environment.
               </p>
             ) : null}
             {optionDescriptors.length > 0 ? (
@@ -709,12 +787,9 @@ function RoutineEditor({
               onChange={(event) => {
                 if (event.target.value === "worktree")
                   setConfiguration({
-                    workspace: {
-                      kind: "worktree",
-                      baseBranch: "main",
-                      startFromOrigin: true,
-                      runSetupScript: true,
-                    },
+                    workspace: worktreeWorkspace(
+                      preferredWorktreeBaseBranch(refs.data?.refs ?? []) ?? "main",
+                    ),
                   });
                 else
                   setConfiguration({
@@ -731,12 +806,7 @@ function RoutineEditor({
                 value={configuration.workspace.baseBranch}
                 onValueChange={(value) =>
                   setConfiguration({
-                    workspace: {
-                      kind: "worktree",
-                      baseBranch: value,
-                      startFromOrigin: true,
-                      runSetupScript: true,
-                    },
+                    workspace: worktreeWorkspace(value),
                   })
                 }
                 placeholder="main"
@@ -803,9 +873,9 @@ function RoutineEditor({
       {isSaved ? (
         <div className="mt-6 border-t border-border/60 pt-4">
           <h3 className="text-sm font-semibold">Recent runs</h3>
-          {history.data?.runs.length ? (
+          {historyRuns.length ? (
             <div className="mt-3 grid gap-2">
-              {history.data.runs.map((run) => (
+              {historyRuns.map((run) => (
                 <div
                   key={run.id}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/50 bg-card/30 px-3 py-2 text-xs"
@@ -835,6 +905,16 @@ function RoutineEditor({
                   ) : null}
                 </div>
               ))}
+              {olderCursor ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setHistoryBefore(olderCursor)}
+                  disabled={busy || historyBefore !== null}
+                >
+                  Load older runs
+                </Button>
+              ) : null}
             </div>
           ) : history.error ? (
             <p className="mt-2 text-xs text-destructive">{history.error}</p>
@@ -868,17 +948,27 @@ export function RoutinesPage() {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projects = useProjects();
   const [routinesByEnvironment, setRoutinesByEnvironment] = useState<
-    ReadonlyMap<EnvironmentId, readonly RoutineWithOwner[]>
+    ReadonlyMap<EnvironmentId, EnvironmentRoutineLoad>
   >(new Map());
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [editing, setEditing] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const newRoutineTriggerRef = useRef<HTMLButtonElement | null>(null);
   const allRoutines = useMemo(
-    () => Array.from(routinesByEnvironment.values()).flatMap((values) => values),
+    () => Array.from(routinesByEnvironment.values()).flatMap((load) => load.routines),
     [routinesByEnvironment],
   );
+  const libraryEmptyKind = routinesLibraryEmptyKind({
+    routineCount: allRoutines.length,
+    unavailableCount: Array.from(routinesByEnvironment.values()).filter(
+      (load) => load.status === "unavailable",
+    ).length,
+    pendingCount: Array.from(routinesByEnvironment.values()).filter(
+      (load) => load.status === "pending",
+    ).length,
+  });
   const selectedRoutine =
     allRoutines.find((routine) => `${routine.environmentId}:${routine.id}` === selectedKey) ?? null;
   const selectedEnvironment = environments.find(
@@ -894,23 +984,35 @@ export function RoutinesPage() {
         ("" as EnvironmentId),
     ),
   );
+  const connectedOwners = environments.filter(
+    (environment) =>
+      environment.connection.phase === "connected" &&
+      projects.some((project) => project.environmentId === environment.environmentId),
+  );
   const saveDraftEnvironment =
     draft?.environmentId ??
-    selectedRoutine?.environmentId ??
-    primaryEnvironmentId ??
-    environments[0]?.environmentId ??
+    (connectedOwners.some((owner) => owner.environmentId === selectedRoutine?.environmentId)
+      ? selectedRoutine?.environmentId
+      : null) ??
+    (connectedOwners.some((owner) => owner.environmentId === primaryEnvironmentId)
+      ? primaryEnvironmentId
+      : null) ??
+    connectedOwners[0]?.environmentId ??
     null;
 
-  const onLoaded = useCallback(
-    (environmentId: EnvironmentId, values: readonly RoutineWithOwner[]) => {
-      setRoutinesByEnvironment((previous) => new Map(previous).set(environmentId, values));
-    },
-    [],
-  );
+  const onLoaded = useCallback((environmentId: EnvironmentId, load: EnvironmentRoutineLoad) => {
+    setRoutinesByEnvironment((previous) => new Map(previous).set(environmentId, load));
+  }, []);
 
   const startNew = () => {
-    const environmentId = primaryEnvironmentId ?? environments[0]?.environmentId;
-    if (!environmentId) return;
+    if (connectedOwners.length === 0) {
+      setCreateError("Import a project on a connected environment before creating a routine.");
+      setShowMenu(false);
+      setEditing(false);
+      setDraft(null);
+      return;
+    }
+    setCreateError(null);
     setShowMenu(false);
     setSelectedKey(null);
     setDraft(null);
@@ -919,16 +1021,54 @@ export function RoutinesPage() {
 
   useEffect(() => {
     if (!editing || draft !== null || saveDraftEnvironment === null) return;
-    // The provider snapshot is read through the atom registry by the next
-    // render. This effect only chooses a concrete owner and project.
     const environmentId = saveDraftEnvironment;
     const environmentProjects = projects.filter(
       (project) => project.environmentId === environmentId,
     );
     const providers = selectedProviders ?? [];
     const next = defaultDraft(environmentId, environmentProjects, providers);
-    if (next) setDraft(next);
+    if (next) {
+      setCreateError(null);
+      setDraft(next);
+      return;
+    }
+    setEditing(false);
+    setCreateError("Import a project on a connected environment before creating a routine.");
   }, [draft, editing, projects, saveDraftEnvironment, selectedProviders]);
+
+  const changeOwner = (environmentId: EnvironmentId) => {
+    if (!draft) return;
+    setDraft({ ...draft, environmentId });
+  };
+
+  useEffect(() => {
+    if (!editing || draft === null || selectedRoutine !== null) return;
+    const environmentProjects = projects.filter(
+      (project) => project.environmentId === draft.environmentId,
+    );
+    const projectOk = environmentProjects.some(
+      (project) => project.id === draft.configuration.projectId,
+    );
+    const providerOk = enabledProviders(selectedProviders ?? []).some(
+      (candidate) => candidate.instanceId === draft.configuration.modelSelection.instanceId,
+    );
+    if (
+      projectOk &&
+      (providerOk || enabledProviders(selectedProviders ?? []).length === 0)
+    )
+      return;
+    const next = defaultDraft(draft.environmentId, environmentProjects, selectedProviders ?? []);
+    if (!next) return;
+    setDraft({
+      ...next,
+      id: draft.id,
+      configuration: {
+        ...next.configuration,
+        name: draft.configuration.name,
+        instruction: draft.configuration.instruction,
+      },
+    });
+  }, [draft, editing, projects, selectedProviders, selectedRoutine]);
 
   const selectRoutine = (routine: RoutineWithOwner) => {
     setSelectedKey(`${routine.environmentId}:${routine.id}`);
@@ -946,6 +1086,7 @@ export function RoutinesPage() {
     setEditing(false);
     setDraft(null);
     setSelectedKey(null);
+    setCreateError(null);
     queueMicrotask(() => newRoutineTriggerRef.current?.focus());
   };
 
@@ -961,26 +1102,27 @@ export function RoutinesPage() {
     setEditing(true);
     setRoutinesByEnvironment((previous) => {
       const next = new Map(previous);
-      const existing = next.get(routine.environmentId) ?? [];
+      const existing = next.get(routine.environmentId);
+      const currentRoutines = existing?.routines ?? [];
       if (routine.state === "deleted") {
-        next.set(
-          routine.environmentId,
-          existing.filter((entry) => entry.id !== routine.id),
-        );
+        next.set(routine.environmentId, {
+          status: existing?.status ?? "ready",
+          routines: currentRoutines.filter((entry) => entry.id !== routine.id),
+        });
         return next;
       }
-      const owner = existing.find((entry) => entry.id === routine.id);
+      const owner = currentRoutines.find((entry) => entry.id === routine.id);
       const replacement: RoutineWithOwner = {
         ...routine,
         ownerLabel: owner?.ownerLabel ?? "Environment",
         connectionPhase: owner?.connectionPhase ?? "connected",
       };
-      next.set(
-        routine.environmentId,
-        existing.some((entry) => entry.id === routine.id)
-          ? existing.map((entry) => (entry.id === routine.id ? replacement : entry))
-          : [...existing, replacement],
-      );
+      next.set(routine.environmentId, {
+        status: existing?.status ?? "ready",
+        routines: currentRoutines.some((entry) => entry.id === routine.id)
+          ? currentRoutines.map((entry) => (entry.id === routine.id ? replacement : entry))
+          : [...currentRoutines, replacement],
+      });
       return next;
     });
   };
@@ -1028,6 +1170,11 @@ export function RoutinesPage() {
             </MenuPopup>
           </Menu>
         </div>
+        {createError ? (
+          <div className="mt-4 rounded-lg border border-warning/30 bg-warning/8 px-3 py-2 text-xs text-warning-foreground">
+            {createError}
+          </div>
+        ) : null}
         <div className="mt-7 grid gap-3 sm:grid-cols-2">
           {environments.map((environment) => (
             <RoutineEnvironmentRows
@@ -1038,7 +1185,19 @@ export function RoutinesPage() {
               onLoaded={onLoaded}
             />
           ))}
-          {allRoutines.length === 0 ? (
+          {libraryEmptyKind === "pending" ? (
+            <div className="col-span-full rounded-xl border border-dashed border-border/70 px-6 py-12 text-center">
+              <p className="text-sm font-medium">Loading routines…</p>
+            </div>
+          ) : libraryEmptyKind === "unavailable" ? (
+            <div className="col-span-full rounded-xl border border-dashed border-border/70 px-6 py-12 text-center">
+              <CalendarClockIcon className="mx-auto size-8 text-muted-foreground/60" />
+              <p className="mt-3 text-sm font-medium">Environments unavailable</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Saved routines stay on their owning machine and will appear when it reconnects.
+              </p>
+            </div>
+          ) : libraryEmptyKind === "empty" ? (
             <div className="col-span-full rounded-xl border border-dashed border-border/70 px-6 py-12 text-center">
               <CalendarClockIcon className="mx-auto size-8 text-muted-foreground/60" />
               <p className="mt-3 text-sm font-medium">No routines yet</p>
@@ -1074,8 +1233,13 @@ export function RoutinesPage() {
             routine={selectedRoutine}
             projects={projects.filter((project) => project.environmentId === draft.environmentId)}
             providers={selectedProviders ?? []}
+            owners={connectedOwners.map((owner) => ({
+              environmentId: owner.environmentId,
+              label: owner.label,
+            }))}
             offline={ownerOffline === true}
             onDraftChange={setDraft}
+            onOwnerChange={changeOwner}
             onSaved={updateSavedRoutine}
             onCancel={cancelEditing}
           />

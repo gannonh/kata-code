@@ -9,6 +9,7 @@ import {
   type OrchestrationSession,
   ThreadId,
   type ProviderSession,
+  RoutineError,
   type RoutineProviderSubmission,
   type RoutineRun,
   type RuntimeMode,
@@ -36,6 +37,7 @@ import { increment, orchestrationEventsProcessedTotal } from "../../observabilit
 import {
   ProviderAdapterRequestError,
   ProviderAdapterValidationError,
+  ProviderValidationError,
   ProviderWorkspaceMissingError,
 } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
@@ -60,7 +62,9 @@ import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import * as RoutineStoreService from "../../routines/RoutineStore.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderAdapterValidationError = Schema.is(ProviderAdapterValidationError);
+const isProviderValidationError = Schema.is(ProviderValidationError);
 const isProviderWorkspaceMissingError = Schema.is(ProviderWorkspaceMissingError);
+const isRoutineError = Schema.is(RoutineError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
 type ProviderIntentEvent = Extract<
@@ -236,12 +240,17 @@ function providerErrorLabel(value: string | undefined): string {
   return normalized && normalized.length > 0 ? normalized : "unknown";
 }
 
-function isRoutineSubmissionFenceLoss(cause: Cause.Cause<unknown>): boolean {
-  const detail = Cause.pretty(cause).toLowerCase();
-  return (
-    detail.includes("routine submission ownership is no longer current") ||
-    detail.includes("submission permission was already consumed") ||
-    detail.includes("routine preparation ownership expired")
+function isLostFenceError(error: unknown): boolean {
+  if (isRoutineError(error) && error.code === "lost-fence") return true;
+  if (isProviderValidationError(error) && error.cause !== undefined) {
+    return isLostFenceError(error.cause);
+  }
+  return false;
+}
+
+export function isRoutineSubmissionFenceLoss(cause: Cause.Cause<unknown>): boolean {
+  return cause.reasons.some(
+    (reason) => Cause.isFailReason(reason) && isLostFenceError(reason.error),
   );
 }
 
@@ -1241,17 +1250,14 @@ const make = Effect.gen(function* () {
     // duplicate event is complete work and must not prepare a second session.
     if (event.payload.routineSubmission !== undefined && Option.isSome(routineStore)) {
       const shouldProcess = yield* routineStore.value
-        .submissionClaim(event.payload.routineSubmission)
+        .beginSessionPreparation(event.payload.routineSubmission)
         .pipe(
           Effect.matchEffect({
             onFailure: (error) =>
-              error.code === "lost-fence" ? Effect.succeed(false) : Effect.fail(error),
-            onSuccess: (claim) =>
-              Effect.succeed(
-                claim.run.stage === "admitted" ||
-                  claim.run.stage === "thread-created" ||
-                  claim.run.stage === "prompt-accepted",
-              ),
+              error.code === "lost-fence" || error.code === "persistence"
+                ? Effect.succeed(false)
+                : Effect.fail(error),
+            onSuccess: (won) => Effect.succeed(won),
           }),
         );
       if (!shouldProcess) {
