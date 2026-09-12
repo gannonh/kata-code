@@ -21,7 +21,7 @@ export class RoutineScheduler extends Context.Service<RoutineScheduler, RoutineS
   "@kata-sh/code-cli/routines/RoutineScheduler",
 ) {}
 
-export const makeRoutineScheduler = Effect.gen(function* () {
+const makeRoutineScheduler = Effect.gen(function* () {
   const store = yield* RoutineStore;
   const dispatcher = yield* RoutineDispatcher;
   const owner = `routine-worker:${randomUUID()}`;

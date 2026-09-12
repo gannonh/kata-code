@@ -75,7 +75,7 @@ const resolveConfiguredWorktreeBase = (
   return chosen ? remoteRefBranchName(chosen) : null;
 };
 
-export const makeRoutineDispatcher = Effect.gen(function* () {
+const makeRoutineDispatcher = Effect.gen(function* () {
   const store = yield* RoutineStore;
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const projection = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;

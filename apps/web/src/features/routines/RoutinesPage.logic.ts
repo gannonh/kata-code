@@ -8,7 +8,7 @@ import * as Schema from "effect/Schema";
 
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
 
-export function remoteRefBranchName(ref: Pick<VcsRef, "name" | "remoteName" | "isRemote">): string {
+function remoteRefBranchName(ref: Pick<VcsRef, "name" | "remoteName" | "isRemote">): string {
   if (ref.isRemote && ref.remoteName && ref.name.startsWith(`${ref.remoteName}/`)) {
     return ref.name.slice(ref.remoteName.length + 1);
   }

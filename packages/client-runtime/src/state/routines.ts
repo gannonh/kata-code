@@ -81,7 +81,3 @@ export function createRoutineEnvironmentAtoms<R, E>(
 
   return { changes, list, get, history, preview, save, change, test };
 }
-
-export function routineOwnerKey(environmentId: EnvironmentId, routineId: string): string {
-  return `${environmentId}:${routineId}`;
-}
