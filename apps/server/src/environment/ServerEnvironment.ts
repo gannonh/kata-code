@@ -52,7 +52,7 @@ export class ServerEnvironmentIdentity extends Context.Service<
   {
     readonly getEnvironmentId: Effect.Effect<EnvironmentId>;
   }
->()("t3/environment/ServerEnvironment/ServerEnvironmentIdentity") {}
+>()("@kata-sh/code-cli/environment/ServerEnvironment/ServerEnvironmentIdentity") {}
 
 function platformOs(platform: NodeJS.Platform): ExecutionEnvironmentDescriptor["platform"]["os"] {
   switch (platform) {
@@ -223,6 +223,7 @@ export const make = Effect.gen(function* () {
       threadSettlement: true,
       threadAutoSettlement: true,
       threadRestartContinuation: true,
+      projectSettingsOverrides: true,
       threadSnooze: true,
       environmentThemes: true,
       usageLimitSources: true,
@@ -231,6 +232,8 @@ export const make = Effect.gen(function* () {
       threadPinReorder: true,
       threadActiveReorder: true,
       threadTitleRegeneration: true,
+      threadPullRequests: true,
+      pullRequestStackActions: true,
       threadPullRequestLinking: true,
       environmentIcon: true,
       ...(serverSelfUpdate === null ? {} : { serverSelfUpdate }),

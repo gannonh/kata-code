@@ -22,7 +22,7 @@ import type {
   VcsStatusStreamEvent,
 } from "@kata-sh/code-contracts";
 import { mergeGitStatusParts } from "@kata-sh/code-shared/git";
-import { resolveProjectAutoPull } from "@kata-sh/code-shared/serverSettings";
+import { resolveProjectSettings } from "@kata-sh/code-shared/projectSettings";
 
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
@@ -145,7 +145,7 @@ interface StreamStatusOptions {
 
 export class VcsAutoPullPolicy extends Context.Reference<{
   readonly isEnabled: (cwd: string) => Effect.Effect<boolean, never>;
-}>("t3/vcs/VcsAutoPullPolicy", {
+}>("@kata-sh/code-cli/vcs/VcsAutoPullPolicy", {
   defaultValue: () => ({ isEnabled: () => Effect.succeed(false) }),
 }) {}
 
@@ -160,7 +160,7 @@ export const autoPullPolicyLayer = Layer.effect(
           const project = yield* snapshots.getActiveProjectByWorkspaceRoot(cwd);
           if (project._tag === "None") return false;
           const settings = yield* serverSettings.getSettings;
-          return resolveProjectAutoPull(settings, project.value.id, project.value.autoPull);
+          return resolveProjectSettings(settings, project.value.id).settings.defaultAutoPull;
         },
         Effect.orElseSucceed(() => false),
       ),

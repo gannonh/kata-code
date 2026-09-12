@@ -13,7 +13,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 export class HostResources extends Context.Service<
   HostResources,
   { readonly read: Effect.Effect<HostResourcesSnapshot> }
->()("t3/resourceTelemetry/HostResources") {}
+>()("@kata-sh/code-cli/resourceTelemetry/HostResources") {}
 
 function readCpu() {
   const cpus = NodeOS.cpus();

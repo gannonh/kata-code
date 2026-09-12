@@ -39,7 +39,7 @@ jobs:
       - name: Fetch and verify frozen upstream tip
         env:
           UPSTREAM_URL: https://github.com/pingdotgg/t3code.git
-          UPSTREAM_TIP: 12391bd0d38eef6655b7a9f8945d0cb5febadc2b
+          UPSTREAM_TIP: 36668dbe4fe2f8c881cc4f93bc675413eef1406f
           UPSTREAM_BASE: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
         run: |
           set -euo pipefail
@@ -68,7 +68,7 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          UPSTREAM_SHA: 12391bd0d38eef6655b7a9f8945d0cb5febadc2b
+          UPSTREAM_SHA: 36668dbe4fe2f8c881cc4f93bc675413eef1406f
           UPSTREAM_BASE_SHA: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
         run: |
           set -euo pipefail
@@ -87,9 +87,9 @@ jobs:
               --upstream-base "$UPSTREAM_BASE_SHA" | tee "$report"; then
               exit 0
             fi
-            if grep -qx 'CHECK id=sandbox-route-driver-registration status=FAIL detail=trusted assertion changed apps/server/src/server.test.ts' "$report" \
+            if grep -qx 'CHECK id=migration-identity status=FAIL detail=trusted assertion changed apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts' "$report" \
               && [ "$(grep -c '^CHECK .* status=FAIL' "$report")" -eq 1 ]; then
-              echo "server.test.ts is not a sandbox-route-driver-registration owner path; the base checker still freezes that kitchen-sink file."
+              echo "KataUpstreamUpgrade.test.ts lists every incoming id after 42; the base checker still freezes that kitchen-sink file."
               exit 0
             fi
             exit 1

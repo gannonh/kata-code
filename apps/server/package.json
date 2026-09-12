@@ -45,6 +45,7 @@
     "@kata-sh/code-kata-sandbox-contracts": "workspace:*",
     "@kata-sh/code-kata-sandbox-docker": "workspace:*",
     "@kata-sh/code-shared": "workspace:*",
+    "@kata-sh/code-ssh": "workspace:*",
     "@kata-sh/code-tailscale": "workspace:*",
     "@kata-sh/code-web": "workspace:*",
     "@types/bun": "1.3.14",

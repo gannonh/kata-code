@@ -70,8 +70,8 @@ import { Input } from "../ui/input";
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { ScrollArea } from "../ui/scroll-area";
 import { Spinner } from "../ui/spinner";
-import { WizardPanel, WizardSteps } from "../ui/wizard";
-import { Dialog, DialogHeader, DialogPopup, DialogTitle } from "../ui/dialog";
+import { WizardPanel, WizardSteps, WizardPopup, WizardHeader } from "../ui/wizard";
+import { Dialog } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
@@ -184,71 +184,71 @@ export function WelcomeWizard({
 
   return (
     <Dialog open disablePointerDismissal onOpenChange={(_, event) => event.cancel()}>
-      <DialogPopup
-        className="max-w-xl overflow-x-hidden overflow-y-auto"
+      <WizardPopup
         bottomStickOnMobile={false}
         showCloseButton={false}
         initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
       >
-        <DialogTitle className="sr-only">Set up Kata Code</DialogTitle>
-        <div className="flex min-h-0 flex-col">
-          <DialogHeader className="gap-4">
+        <WizardHeader
+          title="Set up Kata Code"
+          identity={
             <div className="flex items-center gap-2" role="img" aria-label="Kata Code">
               <img src="/apple-touch-icon.png" alt="" className="size-6 shrink-0 rounded-md" />
               <span className="text-[1.4rem] font-medium tracking-tight text-foreground">
                 Kata Code
               </span>
             </div>
-            <WizardSteps
-              steps={ONBOARDING_STAGES}
-              currentStep={stageIndex}
-              isStepDisabled={(index) => isImporting || index >= stageIndex}
-              onStepChange={(index) => {
-                if (isImporting || index > stageIndex) return;
-                setStep(index === 0 ? "connection" : "agents");
+          }
+        >
+          <WizardSteps
+            steps={ONBOARDING_STAGES}
+            currentStep={stageIndex}
+            isStepDisabled={(index) => isImporting || index >= stageIndex}
+            onStepChange={(index) => {
+              if (isImporting || index > stageIndex) return;
+              setStep(index === 0 ? "connection" : "agents");
+            }}
+          />
+        </WizardHeader>
+
+        <WizardPanel holdHeight={isLoadingProjects}>
+          {step === "connection" ? (
+            <ConnectionStep
+              expandPairingInitially={!localAvailable && !hasCloudPublicConfig()}
+              selectedIds={selectedIds}
+              autoSelectedComputers={autoSelectedComputers.current}
+              onSelectionChange={setSelection}
+              onToggleEnvironment={(environmentId, checked) =>
+                setSelection((current) => {
+                  const next = new Set(current ?? selectedIds);
+                  if (checked) next.add(environmentId);
+                  else next.delete(environmentId);
+                  return next;
+                })
+              }
+              onContinue={() =>
+                startSetup(
+                  environments
+                    .filter((environment) => selectedIds.has(environment.environmentId))
+                    .map((environment) => environment.environmentId),
+                )
+              }
+              onPaired={(environmentId) => {
+                setSelection(new Set([...selectedIds, environmentId]));
               }}
             />
-          </DialogHeader>
-
-          <WizardPanel className="min-w-0" holdHeight={isLoadingProjects}>
-            {step === "connection" ? (
-              <ConnectionStep
-                expandPairingInitially={!localAvailable && !hasCloudPublicConfig()}
-                selectedIds={selectedIds}
-                autoSelectedComputers={autoSelectedComputers.current}
-                onSelectionChange={setSelection}
-                onToggleEnvironment={(environmentId, checked) =>
-                  setSelection((current) => {
-                    const next = new Set(current ?? selectedIds);
-                    if (checked) next.add(environmentId);
-                    else next.delete(environmentId);
-                    return next;
-                  })
-                }
-                onContinue={() =>
-                  startSetup(
-                    environments
-                      .filter((environment) => selectedIds.has(environment.environmentId))
-                      .map((environment) => environment.environmentId),
-                  )
-                }
-                onPaired={(environmentId) => {
-                  setSelection(new Set([...selectedIds, environmentId]));
-                }}
-              />
-            ) : step === "agents" ? (
-              <AgentsStep environmentIds={setupIds} onContinue={() => setStep("import")} />
-            ) : (
-              <ImportStep
-                scans={scans}
-                isImporting={isImporting}
-                setIsImporting={setIsImporting}
-                onDone={finish}
-              />
-            )}
-          </WizardPanel>
-        </div>
-      </DialogPopup>
+          ) : step === "agents" ? (
+            <AgentsStep environmentIds={setupIds} onContinue={() => setStep("import")} />
+          ) : (
+            <ImportStep
+              scans={scans}
+              isImporting={isImporting}
+              setIsImporting={setIsImporting}
+              onDone={finish}
+            />
+          )}
+        </WizardPanel>
+      </WizardPopup>
     </Dialog>
   );
 }
