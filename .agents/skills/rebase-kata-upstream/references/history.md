@@ -4,15 +4,11 @@ These observations were checked against Kata main `0c2aa608219f35ae1254092fa81a2
 
 ## Last upstream integration
 
-[KAT-3297 / PR #194](https://github.com/gannonh/kata-code/pull/194) integrated 1,105 upstream commits, from `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f` to `12391bd0d38eef6655b7a9f8945d0cb5febadc2b`. Kata's starting main was `22c5c9c04526199a93fa938d82b5f0fdb8fa8b5e`. Its dry merge reported 443 content conflicts plus deletion/location conflicts.
+[KAT-3329 / PR #212](https://github.com/gannonh/kata-code/pull/212) integrated 102 upstream commits, from `12391bd0d38eef6655b7a9f8945d0cb5febadc2b` to `36668dbe4fe2f8c881cc4f93bc675413eef1406f`. Kata freeze main was `cc884451eb56ca9b97ed527df3819e6dc3227870`. It landed as merge commit `9926bc3db3ee0edc0579c289f7d9ce7f5c71bdbe` with parents `6395a985c6ffbf99521d90b59a470f943d113451` (main) and `1cf73933d370d98c3920599cb14310e18771a69d` (candidate). On that commit, `git merge-base --is-ancestor 36668dbe4fe2f8c881cc4f93bc675413eef1406f HEAD` holds. Original root remains `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f`.
 
-Read these repository files for particular conflicts:
+Read `docs/upstream/kat-3329-intake.md` and `docs/upstream/kat-3329-decisions.tsv`.
 
-- `docs/upstream/kat-3297-intake.md` defines the range, retained features, and TAKE/SKIP decisions.
-- `docs/upstream/kat-3297-decisions.tsv` records resolutions and superseding corrections. Later entries can correct earlier decisions.
-- `docs/upstream/kat-3297-verification.md` separates tests, build results, and limited browser observations.
-
-The landed commit `31828c7463c75197e288c6f52bff77c2c99a93fe` has only the Kata starting main as a parent. Squashing discarded the upstream ancestry described by the intake. `git merge-base main 12391bd0d...` still returns the original fork root at the observed baseline. Follow the guarded previous-pin anchor in [Git procedure](git-integration.md) instead of replaying the old intake. Check ancestry after landing, not just on the PR branch.
+The previous integration [KAT-3297 / PR #194](https://github.com/gannonh/kata-code/pull/194) squashed to `31828c7463c75197e288c6f52bff77c2c99a93fe`, so pin `12391bd0d38eef6655b7a9f8945d0cb5febadc2b` was not an ancestor of main. That run's dry merge reported 443 content conflicts. Its intake, decisions, and verification files remain the prior-run record. KAT-3329 recorded the squash-lost pin with `git merge --strategy=ours --no-ff` before merging the frozen tip, then landed with GitHub's merge-commit method. Prefer that path. Check ancestry after landing, not just on the PR branch.
 
 ## Preserve behavior through refactors
 
@@ -24,6 +20,7 @@ The landed commit `31828c7463c75197e288c6f52bff77c2c99a93fe` has only the Kata s
 | Export/SQLite refactors merged cleanly | Find Kata-only consumers and retained assertions even when upstream deletes or moves their source tests. Compilation and selected conflict tests alone are insufficient. |
 | New upstream automation and assets entered the delta | Preserve active/parked workflow decisions, registry/release ownership, existing Kata artwork, and intentional deletions of `.repos`, `.plans`, devcontainer/reference debris. Review newly added files. |
 | Browser preview improvements overlap Docker settings | Preserve Docker provisioning, credential/private-GitHub/resume behavior and shipped Sprite CLI. Keep `enableSandboxes` off by default, its supported override, and the current Experimental placement. Do not restart canceled feature work. |
+| Codex cited AGENTS.md "Do not preserve backward compatibility" to delete TAKE mixed-fleet adapters | Keep `threadPullRequestCompatibility` `single` / `thread.meta.update` PR linking and `translateLegacyProjectOverridePatch` / `deriveLegacyProjectOverrides` while main still advertises `threadPullRequestLinking` and `projectAgentBrowserAccessOverrides`. Gannon KEEP on KAT-3329 PR #212 (`r3996918967`, `r3996919018`). Mixed fleet is the TAKE. |
 
 ## Branding repair exposed missing coverage
 
