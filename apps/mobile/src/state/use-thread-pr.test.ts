@@ -1,4 +1,8 @@
-import { ProjectId, type ThreadPullRequestLink, type VcsStatusResult } from "@kata-sh/code-contracts";
+import {
+  ProjectId,
+  type ThreadPullRequestLink,
+  type VcsStatusResult,
+} from "@kata-sh/code-contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {

@@ -1,6 +1,11 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { scopeThreadRef } from "@kata-sh/code-client-runtime/environment";
-import type { EnvironmentId, PullRequestRef, ScopedThreadRef, ThreadId } from "@kata-sh/code-contracts";
+import type {
+  EnvironmentId,
+  PullRequestRef,
+  ScopedThreadRef,
+  ThreadId,
+} from "@kata-sh/code-contracts";
 import { CheckIcon, LinkIcon, MessageSquareIcon, UnlinkIcon } from "lucide-react";
 import { useState } from "react";
 import { threadPullRequestLinkMode } from "@kata-sh/code-client-runtime/thread-pull-request-compatibility";

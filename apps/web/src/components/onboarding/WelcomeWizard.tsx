@@ -192,10 +192,10 @@ export function WelcomeWizard({
         <WizardHeader
           title="Set up Kata Code"
           identity={
-            <div className="flex items-baseline gap-1.5" role="img" aria-label="Kata Code">
-              <T3Wordmark className="h-4 w-auto shrink-0" aria-hidden />
-              <span className="text-[1.4rem] font-medium tracking-tight text-muted-foreground">
-                Code
+            <div className="flex items-center gap-2" role="img" aria-label="Kata Code">
+              <img src="/apple-touch-icon.png" alt="" className="size-6 shrink-0 rounded-md" />
+              <span className="text-[1.4rem] font-medium tracking-tight text-foreground">
+                Kata Code
               </span>
             </div>
           }

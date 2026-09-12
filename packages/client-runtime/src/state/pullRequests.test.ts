@@ -1,4 +1,9 @@
-import { EnvironmentId, ProjectId, WS_METHODS, type PullRequestStack } from "@kata-sh/code-contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  WS_METHODS,
+  type PullRequestStack,
+} from "@kata-sh/code-contracts";
 import { expect, it } from "@effect/vitest";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";

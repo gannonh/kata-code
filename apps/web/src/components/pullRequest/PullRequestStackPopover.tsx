@@ -1,5 +1,9 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
-import type { EnvironmentId, PullRequestRef, PullRequestStackMembership } from "@kata-sh/code-contracts";
+import type {
+  EnvironmentId,
+  PullRequestRef,
+  PullRequestStackMembership,
+} from "@kata-sh/code-contracts";
 import { LayersIcon } from "lucide-react";
 import { useState } from "react";
 import { usePullRequestStack } from "~/state/usePullRequestStack";

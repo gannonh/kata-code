@@ -3,7 +3,10 @@ import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent, useCallback } from "react";
 
 import { pullRequestHostOf, type SourceControlProviderKind } from "@kata-sh/code-contracts";
-import { parseChangeRequestUrl, type ChangeRequestLink } from "@kata-sh/code-shared/changeRequestUrl";
+import {
+  parseChangeRequestUrl,
+  type ChangeRequestLink,
+} from "@kata-sh/code-shared/changeRequestUrl";
 import {
   canonicalRepositoryKey,
   sourceControlRepositorySelector,

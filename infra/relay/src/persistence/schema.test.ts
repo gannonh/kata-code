@@ -60,12 +60,12 @@ describe("relay persisted schema reconciliation", () => {
   });
 
   it("keeps the production-applied archive migrations Alchemy already recorded", () => {
-    const localDirs = NodeFS.readdirSync(postgresMigrationsDir).filter((name) =>
-      /^\d{14}_/.test(name),
+    const localDirs = new Set(
+      NodeFS.readdirSync(postgresMigrationsDir).filter((name) => /^\d{14}_/.test(name)),
     );
     const unmatched = productionAppliedArchiveMigrations
       .map((migration) => migration.file)
-      .filter((file) => !localDirs.includes(file.replace(/\/migration\.sql$/, "")));
+      .filter((file) => !localDirs.has(file.replace(/\/migration\.sql$/, "")));
     expect(unmatched).toEqual([]);
 
     for (const migration of productionAppliedArchiveMigrations) {
