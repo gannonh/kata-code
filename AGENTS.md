@@ -118,8 +118,8 @@ Linear status is the phase of the work. This section defines the states and thei
 - **Backlog.** Spec and AC live here. Do not implement from Backlog.
 - **Todo.** Approved and queued. Moving Backlog → Todo is the approval. Wait for Start before Build.
 - **Start.** Explicit start signal. Build begins after the issue moves to In Progress.
-- **In Progress.** Implement on the issue's branch and isolated worktree against its AC. Draft PRs stay here. Keep the PR draft until artifacts and diffs are reviewable. When complete, mark the PR ready for review and move the issue to Agent Review.
-- **Agent Review.** Fix CI and answer every review thread, human or bot, on the existing branch. Resolve false-positive bot findings with a reply stating why. When the PR is merge-ready, move the issue to Human Review.
+- **In Progress.** Implement on the issue's branch and isolated worktree against its AC. Draft PRs stay here. Keep the PR draft until artifacts and diffs are reviewable. When complete, mark the PR ready for review, post a top-level comment whose entire body is `@coderabbitai review` unless that exact comment is already on the PR, and move the issue to Agent Review.
+- **Agent Review.** Fix CI and answer every review thread, human or bot, on the existing branch. If the ready PR has no top-level comment whose entire body is `@coderabbitai review`, post one. Resolve false-positive bot findings with a reply stating why. When the PR is merge-ready, move the issue to Human Review.
 - **Human Review.** Human-owned stand-down. Do not dispatch coding agents, CI fixes, or review runs on the PR until the issue moves or a human says resume.
 - **Merging.** Permission to merge. Merge only from this column.
 - **Done.** Merged. Verify follows: confirm the AC landed and record the result as a comment on the issue. If the AC did not land, reopen the issue or open a new issue linked to it.
