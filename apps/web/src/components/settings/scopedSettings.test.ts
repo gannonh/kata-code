@@ -13,6 +13,7 @@ import {
   planProjectOverridesClear,
   planScopedSettingsClear,
   planScopedSettingsPatch,
+  partitionScopedSettingsPatch,
   resolveScopedSettingsTargets,
   scopedSettingsAreMixed,
   scopedSettingsSource,
@@ -242,6 +243,28 @@ describe("scoped settings writes", () => {
     expect(
       planScopedSettingsPatch(checkout, [laptop, legacy], { defaultAutoPull: true }),
     ).toMatchObject({ serverWrites: [], unavailableReason: expect.stringContaining("update") });
+  });
+
+  it("keeps project restore writes when the patch also has environment-only keys", () => {
+    const mixed = { enableSandboxes: false, defaultAutoPull: true };
+    expect(planScopedSettingsPatch(project, environments, mixed)).toMatchObject({
+      serverWrites: [],
+    });
+    const { projectOrClient, environmentOnly } = partitionScopedSettingsPatch(mixed);
+    expect(environmentOnly).toEqual({ enableSandboxes: false });
+    expect(projectOrClient).toEqual({ defaultAutoPull: true });
+    expect(planScopedSettingsPatch(project, environments, projectOrClient).serverWrites).toEqual([
+      {
+        environmentId: server.environmentId,
+        label: server.label,
+        patch: { projectSettingsOverrides: { [projectId]: { defaultAutoPull: true } } },
+      },
+      {
+        environmentId: laptop.environmentId,
+        label: laptop.label,
+        patch: { projectSettingsOverrides: { [laptopProjectId]: { defaultAutoPull: true } } },
+      },
+    ]);
   });
 
   it("clears overrides per member and removes an emptied entry", () => {

@@ -70,7 +70,7 @@ import {
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { usePrimarySessionState } from "../../environments/primary";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import { planScopedSettingsPatch, partitionScopedSettingsPatch } from "./scopedSettings";
 import {
   useScopedSettings,
   useScopedSettingsMixed,
@@ -493,6 +493,7 @@ export function useSettingsRestore(onRestored?: () => void) {
   } = useTheme();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
+  const { scope, environments } = useSettingsScope();
 
   const isTextGenerationModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
@@ -710,7 +711,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       notifyThemeRestoreFailure();
       return;
     }
-    updateSettings({
+    const restorePatch = {
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
       diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
@@ -762,12 +763,22 @@ export function useSettingsRestore(onRestored?: () => void) {
       // name, so a user restoring defaults is told the agent regains access
       // rather than discovering it later.
       enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
-    });
+    };
+    const { projectOrClient, environmentOnly } = partitionScopedSettingsPatch(restorePatch);
+    if (Object.keys(projectOrClient).length > 0) updateSettings(projectOrClient);
+    if (
+      Object.keys(environmentOnly).length > 0 &&
+      planScopedSettingsPatch(scope, environments, environmentOnly).serverWrites.length > 0
+    ) {
+      updateSettings(environmentOnly);
+    }
     onRestored?.();
   }, [
     changedSettingLabels,
     clearThemeHalves,
+    environments,
     onRestored,
+    scope,
     setFollowSystem,
     setTheme,
     setThemeHalf,
@@ -2083,8 +2094,8 @@ function LegacyFeaturesSection() {
 }
 
 function SandboxesPreviewSetting() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
   return (
     <SettingsRow
       {...searchableSetting("sandboxes-preview")}

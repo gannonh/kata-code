@@ -342,6 +342,25 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       ),
     );
 
+  const hubAction = (
+    request: HttpClientRequest.HttpClientRequest,
+    operation: string,
+    timeout: Duration.Input = Duration.seconds(15),
+  ) =>
+    hubJson(request, HubActionResult, operation, timeout).pipe(
+      Effect.flatMap((result) =>
+        result.ok
+          ? Effect.succeed(result)
+          : Effect.fail(
+              new DeviceOperationError({
+                operation,
+                reason: "hub_rejected",
+                cause: result,
+              }),
+            ),
+      ),
+    );
+
   const fetchDevices = Effect.fn("DeviceService.fetchDevices")(function* (ready: DeviceReadiness) {
     const list = yield* hubJson(
       HttpClientRequest.get(`${ready.hub.origin}/api/devices`),
@@ -547,9 +566,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           (cause) =>
             new DeviceOperationError({ operation: "boot", reason: "invalid_payload", cause }),
         ),
-        Effect.flatMap((request) =>
-          hubJson(request, HubActionResult, "attach stream", BOOT_TIMEOUT),
-        ),
+        Effect.flatMap((request) => hubAction(request, "attach stream", BOOT_TIMEOUT)),
       );
     }
     return result.serial ?? result.id ?? device.id;
@@ -600,9 +617,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           (cause) =>
             new DeviceOperationError({ operation: "open", reason: "invalid_payload", cause }),
         ),
-        Effect.flatMap((request) =>
-          hubJson(request, HubActionResult, "attach stream", BOOT_TIMEOUT),
-        ),
+        Effect.flatMap((request) => hubAction(request, "attach stream", BOOT_TIMEOUT)),
       );
     }
     if (hosts.get(host.id) !== host)
@@ -656,18 +671,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
         (cause) =>
           new DeviceOperationError({ operation: "shutdown", reason: "invalid_payload", cause }),
       ),
-      Effect.flatMap((request) => hubJson(request, HubActionResult, "shutdown")),
-      Effect.flatMap((result) =>
-        result.ok
-          ? Effect.void
-          : Effect.fail(
-              new DeviceOperationError({
-                operation: "shutdown",
-                reason: "hub_rejected",
-                cause: result,
-              }),
-            ),
-      ),
+      Effect.flatMap((request) => hubAction(request, "shutdown")),
     );
     yield* publish((state) => ({
       ...state,

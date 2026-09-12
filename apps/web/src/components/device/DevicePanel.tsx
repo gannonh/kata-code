@@ -61,7 +61,7 @@ export function DevicePanel(props: {
   const [handle, setHandle] = useState<DeviceStreamHandle | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [axOverlay, setAxOverlay] = useState(false);
-  const access = useDeviceHubAccess(environmentId);
+  const access = useDeviceHubAccess(environmentId, props.surface.target?.hostId ?? "local");
 
   const hostDisabled = state.hostStatus === "disabled";
 

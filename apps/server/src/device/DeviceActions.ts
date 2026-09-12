@@ -426,9 +426,14 @@ const runAndroid = Effect.fn("DeviceActions.runAndroid")(function* (
         });
       }
       const verb = input.decision === "grant" ? "grant" : "revoke";
-      for (const permission of permissions) {
-        // Not every app declares every permission in a group; ignore those.
-        yield* shell(["pm", verb, input.appId, permission], "permission").pipe(Effect.ignore);
+      const outcomes = yield* Effect.forEach(permissions, (permission) =>
+        shell(["pm", verb, input.appId, permission], "permission").pipe(Effect.result),
+      );
+      for (const outcome of outcomes) {
+        if (outcome._tag === "Success") return;
+      }
+      for (const outcome of outcomes) {
+        if (outcome._tag === "Failure") return yield* Effect.fail(outcome.failure);
       }
       return;
     }

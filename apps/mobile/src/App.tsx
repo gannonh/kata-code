@@ -93,11 +93,17 @@ function AppContent() {
                 the system is in dark mode. */}
             {/* Blur target for Android dropdown backdrops — see appBlurTarget.ts. */}
             <BlurTargetView ref={appBlurTargetRef} style={{ flex: 1 }}>
-              <IncomingShareProvider>
-                <Navigation linking={appLinking} theme={navigationTheme} />
-              </IncomingShareProvider>
-              <ConfirmDialogHost />
-              <ThreadArrangementHost />
+              {markdownImageRaceFixture ? (
+                <MarkdownImageRaceFixture />
+              ) : (
+                <>
+                  <IncomingShareProvider>
+                    <Navigation linking={appLinking} theme={navigationTheme} />
+                  </IncomingShareProvider>
+                  <ConfirmDialogHost />
+                  <ThreadArrangementHost />
+                </>
+              )}
             </BlurTargetView>
             {/* Anchored-menu overlays render here — in-window, so the
                 keyboard stays up while a dropdown is open. */}

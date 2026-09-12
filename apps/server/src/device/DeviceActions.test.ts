@@ -94,6 +94,40 @@ describe("runDeviceAction", () => {
     }),
   );
 
+  it.effect("fails a single Android permission when pm grant fails", () =>
+    Effect.gen(function* () {
+      const { ready } = makeReady(() => ({ code: 1, stderr: "Unknown permission" }));
+      const result = yield* runDeviceAction(ready, "android", {
+        type: "setPermission",
+        deviceId: "emulator-5554",
+        appId: "com.example.app",
+        permission: "camera",
+        decision: "grant",
+      }).pipe(Effect.result);
+      expect(result._tag).toBe("Failure");
+    }),
+  );
+
+  it.effect("grants an Android permission group when one member succeeds", () =>
+    Effect.gen(function* () {
+      const { ready, calls } = makeReady((call) => {
+        const permission = call.args.at(-1);
+        if (permission === "android.permission.READ_EXTERNAL_STORAGE") {
+          return { code: 1, stderr: "Unknown permission" };
+        }
+        return { code: 0 };
+      });
+      yield* runDeviceAction(ready, "android", {
+        type: "setPermission",
+        deviceId: "emulator-5554",
+        appId: "com.example.app",
+        permission: "photos",
+        decision: "grant",
+      });
+      expect(calls.filter((call) => call.args.includes("pm"))).toHaveLength(2);
+    }),
+  );
+
   it.effect(
     "rotates emulators through the accelerometer and physical devices through the lock",
     () =>

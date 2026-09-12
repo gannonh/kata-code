@@ -41,6 +41,23 @@ export function isProjectScopedSettingKey(key: string): key is ProjectScopedServ
   return PROJECT_SCOPED_KEYS.has(key);
 }
 
+/** Split a mixed patch so project-scope restores do not drop server writes. */
+export function partitionScopedSettingsPatch(patch: ScopedSettingsPatch): {
+  readonly projectOrClient: ScopedSettingsPatch;
+  readonly environmentOnly: ScopedSettingsPatch;
+} {
+  const projectOrClient: Record<string, unknown> = {};
+  const environmentOnly: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (CLIENT_KEYS.has(key) || PROJECT_SCOPED_KEYS.has(key)) projectOrClient[key] = value;
+    else environmentOnly[key] = value;
+  }
+  return {
+    projectOrClient: projectOrClient as ScopedSettingsPatch,
+    environmentOnly: environmentOnly as ScopedSettingsPatch,
+  };
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

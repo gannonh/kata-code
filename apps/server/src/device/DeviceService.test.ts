@@ -61,6 +61,7 @@ const fixture = Effect.fn("fixture")(function* (
   onBoot: Effect.Effect<void> = Effect.void,
   bootError?: string,
   failListAfterShutdown = false,
+  gridStartError?: string,
 ) {
   const settings = yield* Ref.make(DEFAULT_SERVER_SETTINGS);
   const starts: string[] = [];
@@ -162,10 +163,28 @@ const fixture = Effect.fn("fixture")(function* (
               ),
             );
           }
+          if (request.url.includes("/grid/api/start")) {
+            return HttpClientResponse.fromWeb(
+              request,
+              Response.json(gridStartError ? { ok: false, error: gridStartError } : { ok: true }),
+            );
+          }
           return HttpClientResponse.fromWeb(
             request,
             Response.json({
-              simulators: [],
+              simulators:
+                gridStartError === undefined
+                  ? []
+                  : [
+                      {
+                        id: "SIM-1",
+                        name: "iPhone",
+                        platform: "ios",
+                        version: "iOS 18",
+                        booted: true,
+                        physical: false,
+                      },
+                    ],
               emulators: booted
                 ? [
                     {
@@ -335,5 +354,22 @@ it.effect("keeps shutdown successful when subsequent discovery fails", () =>
     const state = yield* service.state;
     expect(state.sessions).toEqual([]);
     expect(state.devices.find((device) => device.id === session.deviceId)?.booted).toBe(false);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("rejects open when iOS stream attach returns ok false", () =>
+  Effect.gen(function* () {
+    const { service, requests } = yield* fixture(Effect.void, undefined, false, "helper missing");
+    yield* service.configure({ enabled: true });
+    const error = yield* service
+      .open({
+        threadId: ThreadId.make("ios-attach"),
+        deviceId: "SIM-1",
+        platform: "ios",
+      })
+      .pipe(Effect.flip);
+    expect(error._tag).toBe("DeviceOperationError");
+    expect(requests.some((url) => url.includes("/grid/api/start"))).toBe(true);
+    expect((yield* service.state).sessions).toEqual([]);
   }).pipe(Effect.scoped),
 );
