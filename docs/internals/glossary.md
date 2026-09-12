@@ -46,20 +46,10 @@ Terms whose meaning matters across Kata Code. Architecture and lifecycle constra
 | Checkpoint baseline | The workspace state captured before the work being compared.                                                 |
 | Turn diff           | The workspace changes attributed to one turn.                                                                |
 
-## Kata Sandbox
+## Pull requests
 
-#### Deployment
-
-A durable record for a Docker-hosted Kata environment. A deployment records the requested intent,
-the owned provider resource, the identified target environment, or a deletion tombstone. See
-[`kata-sandbox.md`](./kata-sandbox.md).
-
-#### Provider observation
-
-The latest state the control server can prove about a provider resource. Sandbox observations are
-`Running`, `Unknown`, or `Gone`.
-
-#### Operation receipt
-
-The durable result of an authenticated Sandbox command. It tracks request identity and command
-status so retries can return the original operation.
+| Term                 | Meaning                                                                                                                                                                                  |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pull request link    | A persisted thread association identified by host, repository, and number. Links can cross projects within an environment and carry a server-maintained snapshot.                        |
+| Pull request sync    | The reactor that refreshes each distinct linked review once per cadence and discovers native stack layers. Explicit refreshes and failed stack reads trigger another read.               |
+| Current pull request | The link used by single-review controls and older clients. Open work takes precedence; a completed single chain points at its top layer. Unrelated terminal links use the latest update. |

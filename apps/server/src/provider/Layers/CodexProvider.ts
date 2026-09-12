@@ -25,7 +25,11 @@ import type {
 } from "@kata-sh/code-contracts";
 import { PREFERRED_DEFAULT_CODEX_MODELS, ServerSettingsError } from "@kata-sh/code-contracts";
 
-import { createModelCapabilities, readCustomModelEntries } from "@kata-sh/code-shared/model";
+import {
+  codexModelFamily,
+  createModelCapabilities,
+  readCustomModelEntries,
+} from "@kata-sh/code-shared/model";
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
 import {
@@ -62,6 +66,7 @@ const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
 const CODEX_PRESENTATION = {
   displayName: "Codex",
   showInteractionModeToggle: true,
+  reportsContextWindow: true,
 } as const;
 
 export interface CodexAppServerProviderSnapshot {
@@ -231,9 +236,9 @@ function parseCodexModelListResponse(
 export function applyPreferredCodexDefaultModel(
   models: ReadonlyArray<ServerProviderModel>,
 ): ReadonlyArray<ServerProviderModel> {
-  const preferredSlug = PREFERRED_DEFAULT_CODEX_MODELS.find((slug) =>
-    models.some((model) => model.slug === slug && !model.isCustom),
-  );
+  const preferredSlug = PREFERRED_DEFAULT_CODEX_MODELS.flatMap((slug) =>
+    models.filter((model) => !model.isCustom && codexModelFamily(model.slug) === slug),
+  )[0]?.slug;
   if (!preferredSlug) {
     return models;
   }

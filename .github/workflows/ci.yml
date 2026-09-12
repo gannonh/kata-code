@@ -39,7 +39,7 @@ jobs:
       - name: Fetch and verify frozen upstream tip
         env:
           UPSTREAM_URL: https://github.com/pingdotgg/t3code.git
-          UPSTREAM_TIP: 12391bd0d38eef6655b7a9f8945d0cb5febadc2b
+          UPSTREAM_TIP: 36668dbe4fe2f8c881cc4f93bc675413eef1406f
           UPSTREAM_BASE: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
         run: |
           set -euo pipefail
@@ -68,7 +68,7 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          UPSTREAM_SHA: 12391bd0d38eef6655b7a9f8945d0cb5febadc2b
+          UPSTREAM_SHA: 36668dbe4fe2f8c881cc4f93bc675413eef1406f
           UPSTREAM_BASE_SHA: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
         run: |
           set -euo pipefail

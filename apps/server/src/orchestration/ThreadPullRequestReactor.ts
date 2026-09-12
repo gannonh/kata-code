@@ -1,5 +1,9 @@
 // @effect-diagnostics deterministicKeys:off - FORK.md retains internal upstream service identifiers.
 import {
+  canonicalRepositoryKey,
+  sourceControlRepositorySelector,
+} from "@kata-sh/code-shared/sourceControl";
+import {
   CommandId,
   type OrchestrationEvent,
   type OrchestrationProjectShell,
@@ -54,18 +58,6 @@ interface RefreshRequest {
   readonly backfill?: boolean;
 }
 
-function canonicalRepositoryKey(key: string): string {
-  return key
-    .replace(
-      /^(?:ssh\.dev\.azure\.com|vs-ssh\.visualstudio\.com)\/v3\/([^/]+)\/([^/]+)\/([^/]+)$/u,
-      "dev.azure.com/$1/$2/_git/$3",
-    )
-    .replace(
-      /^([^.]+)\.visualstudio\.com\/(?:defaultcollection\/)?([^/]+)\/_git\/([^/]+)$/u,
-      "dev.azure.com/$1/$2/_git/$3",
-    );
-}
-
 export function pullRequestMatchesProject(
   pullRequest: GitManager.GitBranchPullRequest,
   project: OrchestrationProjectShell,
@@ -110,7 +102,10 @@ export const make = Effect.gen(function* () {
     const projects = new Map(snapshot.projects.map((project) => [project.id, project]));
     if (request.backfill) {
       for (const thread of snapshot.threads) {
-        if (thread.settledOverride === "settled" && thread.branchPullRequest == null) {
+        if (
+          (thread.settledOverride === "settled" || thread.settledAt !== null) &&
+          thread.branchPullRequest == null
+        ) {
           pendingBackfill.set(thread.id, BACKFILL_ATTEMPTS);
         }
       }
@@ -123,7 +118,7 @@ export const make = Effect.gen(function* () {
       (thread) =>
         thread.archivedAt === null &&
         (request.threadId === null || thread.id === request.threadId) &&
-        (thread.settledOverride !== "settled" ||
+        ((thread.settledOverride !== "settled" && thread.settledAt === null) ||
           request.threadId !== null ||
           pendingBackfill.has(thread.id)) &&
         (thread.branch !== null || thread.branchPullRequest != null),
@@ -139,7 +134,7 @@ export const make = Effect.gen(function* () {
           const first = group[0]!;
           const project = projects.get(first.projectId);
           if (project === undefined) return finishBackfill(group);
-          const repository = PullRequestService.repositoryIdentityOf(project);
+          const repository = sourceControlRepositorySelector(project.repositoryIdentity);
           if (first.branch !== null && repository === null) return finishBackfill(group);
           const worktreeExists =
             first.worktreePath !== null && (yield* fileSystem.exists(first.worktreePath));
@@ -190,6 +185,7 @@ export const make = Effect.gen(function* () {
 
               let replacement: ThreadLinkedPullRequest | undefined;
               if (
+                thread.pullRequests.length === 0 &&
                 thread.linkedPullRequest != null &&
                 detected?.state === "open" &&
                 detectedReference !== null &&
@@ -335,7 +331,9 @@ export const make = Effect.gen(function* () {
           event.payload.session.status !== "running" &&
           event.payload.session.status !== "starting"
         ) {
-          return worker.enqueue({ threadId: event.payload.threadId, refresh: true });
+          // Checkpoint completion forces the post-turn read. Session lifecycle
+          // events reuse it regardless of which event reaches this worker first.
+          return worker.enqueue({ threadId: event.payload.threadId, refresh: false });
         }
         break;
       case "thread.turn-diff-completed":

@@ -1,8 +1,5 @@
-import {
-  AntigravitySettings,
-  ProviderDriverKind,
-  ProviderSetupError,
-} from "@kata-sh/code-contracts";
+import { withAgentDeviceEnvironment } from "../../mcp/McpProviderSession.ts";
+import { AntigravitySettings, ProviderDriverKind, ProviderSetupError } from "@kata-sh/code-contracts";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -166,7 +163,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
             installation: executable,
             profile,
             cwd: input.cwd,
-            baseEnv: processEnvironment,
+            baseEnv: withAgentDeviceEnvironment(processEnvironment, input),
             auth,
           }),
         }).pipe(Effect.provideService(Crypto.Crypto, crypto));

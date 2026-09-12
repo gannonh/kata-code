@@ -9,6 +9,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { createStaticNavigation } from "@react-navigation/native";
 
 import { RegistryContext } from "@effect/atom-react";
+import { ThreadArrangementHost } from "./features/threads/ThreadArrangementSheet";
 import { ConfirmDialogHost } from "./components/ConfirmDialogHost";
 import { CloudAuthProvider } from "./features/cloud/CloudAuthProvider";
 import { prepareNativeShowcaseCapture } from "./features/showcase/nativeShowcaseScene";
@@ -92,16 +93,11 @@ function AppContent() {
                 the system is in dark mode. */}
             {/* Blur target for Android dropdown backdrops — see appBlurTarget.ts. */}
             <BlurTargetView ref={appBlurTargetRef} style={{ flex: 1 }}>
-              {markdownImageRaceFixture ? (
-                <MarkdownImageRaceFixture />
-              ) : (
-                <>
-                  <IncomingShareProvider>
-                    <Navigation linking={appLinking} theme={navigationTheme} />
-                  </IncomingShareProvider>
-                  <ConfirmDialogHost />
-                </>
-              )}
+              <IncomingShareProvider>
+                <Navigation linking={appLinking} theme={navigationTheme} />
+              </IncomingShareProvider>
+              <ConfirmDialogHost />
+              <ThreadArrangementHost />
             </BlurTargetView>
             {/* Anchored-menu overlays render here — in-window, so the
                 keyboard stays up while a dropdown is open. */}

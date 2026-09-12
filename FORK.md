@@ -9,17 +9,17 @@ Hard fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code) at
 | ------------------------------ | ------------------------------------------ | ----------------------------------------------- |
 | Archive of pre-cut Kata `main` | `3bd3df5beebdc5546ab5b86e95b4746de131035f` | `archive/kata-2026-08` branch and annotated tag |
 | T3 pin (new `main` root)       | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f` | `pingdotgg/t3code` `main` at Build start        |
-| Current T3 pin                 | `12391bd0d38eef6655b7a9f8945d0cb5febadc2b` | Clean-slate upstream pull, KAT-3297             |
+| Current T3 pin                 | `36668dbe4fe2f8c881cc4f93bc675413eef1406f` | Upstream pull, KAT-3329                        |
 
-Vendor-pull runs **forward from the current T3 pin**. This clean-slate pull supersedes
-the Phase 1 "do not chase newer T3" freeze for this update only. The chosen tip is
-fixed for this run; a different tip requires a new intake. The previous Kata scan
-baseline `708d5383` is obsolete. See the [intake](docs/upstream/kat-3297-intake.md)
-and [conflict decisions](docs/upstream/kat-3297-decisions.tsv).
+Vendor-pull runs **forward from the current T3 pin**. The chosen tip is
+fixed for this run; a different tip requires a new intake. See the
+[intake](docs/upstream/kat-3329-intake.md) and
+[conflict decisions](docs/upstream/kat-3329-decisions.tsv). The previous
+accounted-for pin remains `12391bd0d38eef6655b7a9f8945d0cb5febadc2b`.
 
 ```bash
 git fetch upstream
-# next scan starts at 12391bd0d
+# next scan starts at 36668dbe4
 ```
 
 ## Remotes
