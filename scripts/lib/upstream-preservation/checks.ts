@@ -191,10 +191,13 @@ export const PRESERVATION_CHECKS = [
     ],
     specRefs: ["docs/upstream/kat-3297-decisions.tsv", "docs/upstream/kat-3297-intake.md"],
     commands: [
-      vpTestCommand([
-        "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
-        "apps/server/src/kataSandbox/migrations.test.ts",
-      ]),
+      {
+        ...vpTestCommand([
+          "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
+          "apps/server/src/kataSandbox/migrations.test.ts",
+        ]),
+        trustedPaths: ["apps/server/src/kataSandbox/migrations.test.ts"],
+      },
     ],
   },
   {

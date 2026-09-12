@@ -231,6 +231,31 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 });
               }
 
+              // New and moved projects do not carry a resolved identity in the event-derived
+              // command model. Legacy PR edits need it to identify the link they replace.
+              if (
+                envelope.command.type === "thread.meta.update" &&
+                envelope.command.linkedPullRequest !== undefined
+              ) {
+                const threadId = envelope.command.threadId;
+                const thread = nextCommandReadModel.threads.find((entry) => entry.id === threadId);
+                if (thread !== undefined) {
+                  const project = yield* projectionSnapshotQuery.getProjectShellById(
+                    thread.projectId,
+                  );
+                  if (Option.isSome(project)) {
+                    nextCommandReadModel = {
+                      ...nextCommandReadModel,
+                      projects: nextCommandReadModel.projects.map((entry) =>
+                        entry.id === thread.projectId
+                          ? { ...entry, repositoryIdentity: project.value.repositoryIdentity }
+                          : entry,
+                      ),
+                    };
+                  }
+                }
+              }
+
               // Command snapshots omit activities at startup and cap them while running.
               // Read this request's durable state before deciding how to send the answer.
               const userInputActivity =

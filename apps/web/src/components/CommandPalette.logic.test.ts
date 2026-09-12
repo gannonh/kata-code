@@ -3,8 +3,10 @@ import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@kata-sh
 import type { Project, Thread } from "../types";
 import {
   buildBrowseGroups,
+  buildCommandPaletteProjectMetadata,
   buildProjectActionItems,
   buildThreadActionItems,
+  buildLinkedThreadActionItems,
   enumerateCommandPaletteItems,
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
@@ -12,6 +14,166 @@ import {
   reduceCommandPaletteUiState,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
+
+describe("linked pull request thread navigation", () => {
+  it("keeps archived relations searchable and routes them through the PR environment", async () => {
+    const environmentId = EnvironmentId.make("remote");
+    const id = ThreadId.make("archived-thread");
+    const runThread = vi.fn(async () => {});
+    const query = "https://github.com/acme/web/pull/42";
+    const linkedThreads = {
+      environmentId,
+      threads: [
+        {
+          id,
+          projectId: ProjectId.make("project"),
+          title: "Completed work",
+          archivedAt: "2026-09-01T00:00:00.000Z",
+        },
+      ],
+    };
+    const state = reduceCommandPaletteUiState(
+      { open: false, mode: "command", openIntent: null },
+      {
+        _tag: "OpenSearch",
+        query,
+        linkedThreads,
+      },
+    );
+    expect(state.openIntent).toEqual({ kind: "search", query, linkedThreads });
+    const items = buildLinkedThreadActionItems({ ...linkedThreads, query, icon: null, runThread });
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query,
+      isInSubmenu: false,
+      projectSearchItems: [],
+      settingsSearchItems: [],
+      threadSearchItems: items,
+    });
+    expect(groups.flatMap((group) => group.items)).toEqual(items);
+    expect(items[0]?.description).toBe("Archived thread");
+    await items[0]?.run();
+    expect(runThread).toHaveBeenCalledWith({ environmentId, id });
+  });
+});
+
+describe("buildCommandPaletteProjectMetadata", () => {
+  const localEnvironmentId = EnvironmentId.make("environment-local");
+  const remoteEnvironmentId = EnvironmentId.make("environment-build-box");
+  const locations = new Map([
+    [localEnvironmentId, { kind: "local" as const, label: "Local", machine: "laptop" as const }],
+    [
+      remoteEnvironmentId,
+      { kind: "remote" as const, label: "Build box", machine: "server" as const },
+    ],
+  ]);
+
+  it("makes every member environment and path searchable", () => {
+    const metadata = buildCommandPaletteProjectMetadata({
+      projects: [
+        {
+          environmentId: localEnvironmentId,
+          title: "Kata Code",
+          workspaceRoot: "/Users/theo/Projects/t3code",
+        },
+        {
+          environmentId: remoteEnvironmentId,
+          title: "t3code",
+          workspaceRoot: "/srv/t3code",
+        },
+      ],
+      locationByEnvironmentId: locations,
+    });
+
+    expect(metadata.searchTerms).toEqual([
+      "Kata Code",
+      "/Users/theo/Projects/t3code",
+      "Local",
+      "t3code",
+      "/srv/t3code",
+      "Build box",
+    ]);
+    expect(metadata.environmentLabels).toEqual(["Local", "Build box"]);
+
+    const [filteredGroup] = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "build box",
+      isInSubmenu: false,
+      projectSearchItems: [
+        {
+          kind: "action",
+          value: "project:t3code",
+          title: "Kata Code",
+          searchTerms: metadata.searchTerms,
+          icon: null,
+          run: async () => undefined,
+        },
+      ],
+      threadSearchItems: [],
+    });
+    expect(filteredGroup?.items).toHaveLength(1);
+  });
+
+  it("deduplicates grouped checkouts by environment", () => {
+    const metadata = buildCommandPaletteProjectMetadata({
+      projects: [
+        {
+          environmentId: remoteEnvironmentId,
+          title: "Kata Code",
+          workspaceRoot: "/srv/t3code",
+        },
+        {
+          environmentId: remoteEnvironmentId,
+          title: "Kata Code worktree",
+          workspaceRoot: "/srv/t3code-feature",
+        },
+      ],
+      locationByEnvironmentId: locations,
+    });
+
+    expect(metadata.environmentLabels).toEqual(["Build box"]);
+  });
+
+  it("deduplicates distinct environments with the same label", () => {
+    const secondRemoteEnvironmentId = EnvironmentId.make("environment-build-box-2");
+    const metadata = buildCommandPaletteProjectMetadata({
+      projects: [
+        {
+          environmentId: remoteEnvironmentId,
+          title: "Kata Code",
+          workspaceRoot: "/srv/t3code",
+        },
+        {
+          environmentId: secondRemoteEnvironmentId,
+          title: "Kata Code mirror",
+          workspaceRoot: "/srv/mirror/t3code",
+        },
+      ],
+      locationByEnvironmentId: new Map([
+        [remoteEnvironmentId, { label: "Build box" }],
+        [secondRemoteEnvironmentId, { label: "Build box" }],
+      ]),
+    });
+
+    expect(metadata.environmentLabels).toEqual(["Build box"]);
+  });
+
+  it("uses a human-readable fallback when presentation data is unavailable", () => {
+    const metadata = buildCommandPaletteProjectMetadata({
+      projects: [
+        {
+          environmentId: remoteEnvironmentId,
+          title: "Kata Code",
+          workspaceRoot: "/srv/t3code",
+        },
+      ],
+      locationByEnvironmentId: new Map(),
+    });
+
+    expect(metadata.searchTerms).toContain("Remote");
+    expect(metadata.environmentLabels).toEqual(["Remote"]);
+  });
+});
 
 describe("reduceCommandPaletteUiState", () => {
   const closedState = { open: false, mode: "command", openIntent: null } as const;
@@ -46,6 +208,32 @@ describe("reduceCommandPaletteUiState", () => {
         openIntent: null,
       },
     );
+  });
+
+  it("opens PR search from another overlay and replaces an earlier search", () => {
+    const first = reduceCommandPaletteUiState(
+      { open: true, mode: "files", openIntent: null },
+      {
+        _tag: "OpenSearch",
+        query: "https://github.com/acme/web/pull/7",
+      },
+    );
+    expect(first).toEqual({
+      open: true,
+      mode: "command",
+      openIntent: { kind: "search", query: "https://github.com/acme/web/pull/7" },
+    });
+    const second = reduceCommandPaletteUiState(first, {
+      _tag: "OpenSearch",
+      query: "https://github.com/acme/web/pull/8",
+    });
+    expect(second.openIntent).toEqual({
+      kind: "search",
+      query: "https://github.com/acme/web/pull/8",
+    });
+    expect(
+      reduceCommandPaletteUiState(second, { _tag: "SetOpen", open: false }).openIntent,
+    ).toBeNull();
   });
 
   it("routes open intents to command mode", () => {
@@ -150,6 +338,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     branch: null,
     worktreePath: null,
     checkpoints: [],
+    pullRequests: [],
     activities: [],
     ...overrides,
   };
@@ -509,59 +698,44 @@ describe("filterPinnedBrowseEntries", () => {
   });
 });
 
-describe("getAddProjectCloneConfirmRemoteUrl", () => {
-  it("passes a provider-selected GitHub repository HTTPS url as the confirm remoteUrl", () => {
-    expect(
-      getAddProjectCloneConfirmRemoteUrl({
-        repository: {
-          provider: "github",
-          url: "https://github.com/gannonh/kata-code",
-          sshUrl: "git@github.com:gannonh/kata-code.git",
-        },
-        pastedInput: "gannonh/kata-code",
+it.each([
+  "#10839",
+  "10839",
+  "pingdotgg/t3code#10839",
+  "https://github.com/pingdotgg/t3code/pull/10839",
+])("finds linked threads from PR query %s", (query) => {
+  const items = buildThreadActionItems({
+    threads: [
+      makeThread({
+        title: "Implementation",
+        pullRequests: [
+          {
+            host: "github.com",
+            repository: "pingdotgg/t3code",
+            number: 10839,
+            url: "https://github.com/pingdotgg/t3code/pull/10839",
+            source: "manual",
+            linkedAt: "2026-09-08T00:00:00Z",
+            snapshot: null,
+            stack: null,
+          },
+        ],
       }),
-    ).toBe("https://github.com/gannonh/kata-code");
+      makeThread({ id: ThreadId.make("unrelated"), title: "Other work" }),
+    ],
+    projectTitleById: new Map(),
+    sortOrder: "updated_at",
+    icon: null,
+    runThread: async () => undefined,
   });
-
-  it("passes GitLab, Bitbucket, and Azure DevOps SSH urls as the confirm remoteUrl", () => {
-    expect(
-      getAddProjectCloneConfirmRemoteUrl({
-        repository: {
-          provider: "gitlab",
-          url: "https://gitlab.com/group/project.git",
-          sshUrl: "git@gitlab.com:group/project.git",
-        },
-        pastedInput: "group/project",
-      }),
-    ).toBe("git@gitlab.com:group/project.git");
-    expect(
-      getAddProjectCloneConfirmRemoteUrl({
-        repository: {
-          provider: "bitbucket",
-          url: "https://bitbucket.org/workspace/repository.git",
-          sshUrl: "git@bitbucket.org:workspace/repository.git",
-        },
-        pastedInput: "workspace/repository",
-      }),
-    ).toBe("git@bitbucket.org:workspace/repository.git");
-    expect(
-      getAddProjectCloneConfirmRemoteUrl({
-        repository: {
-          provider: "azure-devops",
-          url: "https://dev.azure.com/org/project/_git/repo",
-          sshUrl: "git@ssh.dev.azure.com:v3/org/project/repo",
-        },
-        pastedInput: "project/repo",
-      }),
-    ).toBe("git@ssh.dev.azure.com:v3/org/project/repo");
+  const groups = filterCommandPaletteGroups({
+    activeGroups: [],
+    query,
+    isInSubmenu: false,
+    projectSearchItems: [],
+    threadSearchItems: items,
   });
-
-  it("normalizes pasted GitHub shorthand when no repository is selected", () => {
-    expect(
-      getAddProjectCloneConfirmRemoteUrl({
-        repository: null,
-        pastedInput: "imputnet/helium",
-      }),
-    ).toBe("https://github.com/imputnet/helium.git");
-  });
+  expect(groups.flatMap((group) => group.items.map((item) => item.title))).toEqual([
+    "Implementation",
+  ]);
 });

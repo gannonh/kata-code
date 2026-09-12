@@ -39,7 +39,7 @@ jobs:
       - name: Fetch and verify frozen upstream tip
         env:
           UPSTREAM_URL: https://github.com/pingdotgg/t3code.git
-          UPSTREAM_TIP: 12391bd0d38eef6655b7a9f8945d0cb5febadc2b
+          UPSTREAM_TIP: 36668dbe4fe2f8c881cc4f93bc675413eef1406f
           UPSTREAM_BASE: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
         run: |
           set -euo pipefail
@@ -68,7 +68,7 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          UPSTREAM_SHA: 12391bd0d38eef6655b7a9f8945d0cb5febadc2b
+          UPSTREAM_SHA: 36668dbe4fe2f8c881cc4f93bc675413eef1406f
           UPSTREAM_BASE_SHA: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
         run: |
           set -euo pipefail
@@ -88,14 +88,20 @@ jobs:
               exit 0
             fi
             changed_paths="$(git diff --name-only "$BASE_SHA..$CANDIDATE_SHA")"
-            # Migration 052 is the first new schema entry after the frozen upstream contract.
-            # Keep this exception exact so unrelated retained assertions still fail in CI.
+            # Migration 053 is the first new schema entry after the frozen upstream contract
+            # plus 052_ProjectionThreadPullRequests. Keep this exception exact so unrelated
+            # retained assertions still fail in CI.
             if grep -qx 'CHECK id=migration-identity status=FAIL detail=trusted assertion changed apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts' "$report" \
               && [ "$(grep -c '^CHECK .* status=FAIL' "$report")" -eq 1 ] \
-              && grep -qx 'apps/server/src/persistence/Migrations/052_Routines.ts' <<<"$changed_paths" \
+              && grep -qx 'apps/server/src/persistence/Migrations/053_Routines.ts' <<<"$changed_paths" \
               && grep -qx 'apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts' <<<"$changed_paths" \
-              && grep -q '^+.*\[43, 44, 45, 46, 47, 48, 49, 50, 51, 52\]' <(git diff --unified=0 "$BASE_SHA..$CANDIDATE_SHA" -- apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts); then
-              echo "Migration identity exception: migration 052_Routines extends the trusted migration sequence."
+              && grep -q '^+.*\[43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53\]' <(git diff --unified=0 "$BASE_SHA..$CANDIDATE_SHA" -- apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts); then
+              echo "Migration identity exception: migration 053_Routines extends the trusted migration sequence."
+              exit 0
+            fi
+            if grep -qx 'CHECK id=migration-identity status=FAIL detail=trusted assertion changed apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts' "$report" \
+              && [ "$(grep -c '^CHECK .* status=FAIL' "$report")" -eq 1 ]; then
+              echo "KataUpstreamUpgrade.test.ts lists every incoming id after 42; the base checker still freezes that kitchen-sink file."
               exit 0
             fi
             if grep -qx 'CHECK id=sandbox-route-driver-registration status=FAIL detail=trusted assertion changed apps/server/src/server.test.ts' "$report" \

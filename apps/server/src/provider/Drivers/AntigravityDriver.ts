@@ -1,3 +1,4 @@
+import { withAgentDeviceEnvironment } from "../../mcp/McpProviderSession.ts";
 import {
   AntigravitySettings,
   ProviderDriverKind,
@@ -166,7 +167,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
             installation: executable,
             profile,
             cwd: input.cwd,
-            baseEnv: processEnvironment,
+            baseEnv: withAgentDeviceEnvironment(processEnvironment, input),
             auth,
           }),
         }).pipe(Effect.provideService(Crypto.Crypto, crypto));

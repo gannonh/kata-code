@@ -22,7 +22,7 @@ import {
   WIRE_WEB_CLIENT_ID,
 } from "./wireIdentity.ts";
 
-export const RelayAgentAwarenessPlatform = Schema.Literal("ios");
+export const RelayAgentAwarenessPlatform = Schema.Literals(["ios", "android"]);
 export type RelayAgentAwarenessPlatform = typeof RelayAgentAwarenessPlatform.Type;
 
 export const RelayAgentAwarenessPhase = Schema.Literals([
@@ -53,7 +53,8 @@ export const RelayDeviceRegistrationRequest = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
   platform: RelayAgentAwarenessPlatform,
-  iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
+  iosMajorVersion: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(18))),
+  androidApiLevel: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(24))),
   appVersion: Schema.optional(TrimmedNonEmptyString),
   // APNs routing for this install: the topic must match the app's bundle id
   // (dev/preview/prod variants differ) and development-signed builds receive
@@ -64,14 +65,24 @@ export const RelayDeviceRegistrationRequest = Schema.Struct({
   pushToken: Schema.optional(TrimmedNonEmptyString),
   pushToStartToken: Schema.optional(TrimmedNonEmptyString),
   preferences: RelayAgentAwarenessPreferences,
-});
+}).check(
+  Schema.makeFilter((device) =>
+    device.platform === "ios"
+      ? device.iosMajorVersion !== undefined
+      : device.androidApiLevel !== undefined &&
+        device.iosMajorVersion === undefined &&
+        device.apsEnvironment === undefined &&
+        device.pushToStartToken === undefined,
+  ),
+);
 export type RelayDeviceRegistrationRequest = typeof RelayDeviceRegistrationRequest.Type;
 
 export const RelayClientDeviceRecord = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
   label: TrimmedNonEmptyString,
   platform: RelayAgentAwarenessPlatform,
-  iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
+  iosMajorVersion: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(18))),
+  androidApiLevel: Schema.optional(Schema.NullOr(Schema.Int)),
   appVersion: Schema.NullOr(TrimmedNonEmptyString),
   notifications: Schema.Struct({
     enabled: Schema.Boolean,
@@ -91,6 +102,17 @@ export const RelayListDevicesResponse = Schema.Struct({
   devices: Schema.Array(RelayClientDeviceRecord),
 });
 export type RelayListDevicesResponse = typeof RelayListDevicesResponse.Type;
+
+// Installed clients decode v1 as iOS-only. Keep that response contract frozen.
+export const RelayListDevicesResponseV1 = Schema.Struct({
+  devices: Schema.Array(
+    Schema.Struct({
+      ...RelayClientDeviceRecord.fields,
+      platform: Schema.Literal("ios"),
+      iosMajorVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(18)),
+    }),
+  ),
+});
 
 export const RelayLiveActivityRegistrationRequest = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
@@ -970,6 +992,11 @@ const RelayClientGroup = HttpApiGroup.make("client")
       error: RelayAuthAndInternalErrors,
     }).annotate(OpenApi.Summary, "List linked environments"),
     HttpApiEndpoint.get("listDevices", "/v1/client/devices", {
+      headers: RelayBearerRequestHeaders,
+      success: RelayListDevicesResponseV1,
+      error: RelayAuthAndInternalErrors,
+    }).annotate(OpenApi.Summary, "List registered iOS devices (legacy clients)"),
+    HttpApiEndpoint.get("listDevicesV2", "/v2/client/devices", {
       headers: RelayBearerRequestHeaders,
       success: RelayListDevicesResponse,
       error: RelayAuthAndInternalErrors,

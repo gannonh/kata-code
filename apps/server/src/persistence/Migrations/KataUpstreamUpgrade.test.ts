@@ -14,7 +14,7 @@ it.layer(NodeSqliteClient.layerMemory())("Kata upstream upgrade", (it) => {
       const executed = yield* runMigrations();
       assert.deepEqual(
         executed.map(([id]) => id),
-        [43, 44, 45, 46, 47, 48, 49, 50, 51, 52],
+        [43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53],
       );
 
       const authColumns = yield* sql<{ readonly name: string }>`PRAGMA table_info(auth_sessions)`;
