@@ -85,33 +85,6 @@ function observedTransfer(run: TransferBudgetRun) {
   };
 }
 
-/** Machine-readable input for the trusted PR comment publisher. */
-export function formatTransferBudgetResult(runs: ReadonlyArray<TransferBudgetRun>): string {
-  const providers = Object.fromEntries(
-    runs.flatMap((run) => {
-      const ceiling = TRANSFER_BUDGETS[run.provider];
-      return ceiling ? [[run.provider, { observed: observedTransfer(run), ceiling }]] : [];
-    }),
-  );
-
-  return `${JSON.stringify(
-    {
-      schemaVersion: 1,
-      scenario: {
-        id: "thread-transfer-v1",
-        historyTurns: TRANSFER_HISTORY_TURN_COUNT,
-        historyCommandToolsPerTurn: TRANSFER_HISTORY_TOOLS_PER_TURN,
-        historyMcpResultBytes: TRANSFER_HISTORY_MCP_RESULT_BYTES,
-        measuredCommandTools: TRANSFER_MEASURED_TOOLS,
-        measuredMcpResultBytes: TRANSFER_MEASURED_MCP_RESULT_BYTES,
-      },
-      providers,
-    },
-    null,
-    2,
-  )}\n`;
-}
-
 function formatBytes(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`;
   if (bytes >= 1_024 * 1_024) {
