@@ -7,6 +7,7 @@
  * @module ProviderCommandReactor
  */
 import * as Context from "effect/Context";
+import type { RoutineProviderSubmission, RoutineRun } from "@kata-sh/code-contracts";
 import type * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
 
@@ -31,6 +32,12 @@ export interface ProviderCommandReactorShape {
    * Intended for test use to replace timing-sensitive sleeps.
    */
   readonly drain: Effect.Effect<void>;
+
+  /** Replays a durable routine turn-start with the caller's current fence. */
+  readonly recoverRoutineSubmission: (input: {
+    readonly run: RoutineRun;
+    readonly submission: RoutineProviderSubmission;
+  }) => Effect.Effect<void>;
 }
 
 /**

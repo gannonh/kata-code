@@ -996,6 +996,68 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
+  it("uses durable catch-up for decisions without replaying events to local reactors", async () => {
+    const directory = await NodeFSP.mkdtemp(
+      NodePath.join(NodeOS.tmpdir(), "t3-orchestration-engine-catch-up-"),
+    );
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    const first = await createOrchestrationSystem(databasePath);
+    const second = await createOrchestrationSystem(databasePath);
+    const projectId = ProjectId.make("catch-up-project");
+    try {
+      // Both workers start from the same head. The first worker then commits an
+      // event while the second worker is idle, leaving its local read model
+      // behind the durable event store.
+      await first.run(
+        first.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-catch-up-project-create"),
+          projectId,
+          title: "Catch-up Project",
+          workspaceRoot: "/tmp/catch-up-project",
+          createdAt: now(),
+        }),
+      );
+
+      const observedEvent = await second.run(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const events = yield* Queue.unbounded<OrchestrationEvent>();
+            yield* Effect.forkScoped(
+              Stream.take(second.engine.streamDomainEvents, 1).pipe(
+                Stream.runForEach((event) => Queue.offer(events, event).pipe(Effect.asVoid)),
+              ),
+            );
+            yield* Effect.sleep("10 millis");
+            yield* second.engine.dispatch({
+              type: "thread.create",
+              commandId: CommandId.make("cmd-catch-up-thread-create"),
+              threadId: ThreadId.make("catch-up-thread"),
+              projectId,
+              title: "Catch-up Thread",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-5-codex",
+              },
+              interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+              runtimeMode: "approval-required",
+              branch: null,
+              worktreePath: null,
+              createdAt: now(),
+            });
+            return yield* Queue.take(events);
+          }),
+        ),
+      );
+
+      expect(observedEvent.type).toBe("thread.created");
+    } finally {
+      await second.dispose();
+      await first.dispose();
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not regress a generated branch to a stale temporary worktree branch", async () => {
     const system = await createOrchestrationSystem();
     const { engine } = system;

@@ -9,6 +9,9 @@ import {
   type OrchestrationSession,
   ThreadId,
   type ProviderSession,
+  RoutineError,
+  type RoutineProviderSubmission,
+  type RoutineRun,
   type RuntimeMode,
   type TurnId,
 } from "@kata-sh/code-contracts";
@@ -35,6 +38,7 @@ import { increment, orchestrationEventsProcessedTotal } from "../../observabilit
 import {
   ProviderAdapterRequestError,
   ProviderAdapterValidationError,
+  ProviderValidationError,
   ProviderWorkspaceMissingError,
 } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
@@ -57,9 +61,12 @@ import {
 import { resolveProjectSettings } from "@kata-sh/code-shared/projectSettings";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import * as RoutineStoreService from "../../routines/RoutineStore.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderAdapterValidationError = Schema.is(ProviderAdapterValidationError);
+const isProviderValidationError = Schema.is(ProviderValidationError);
 const isProviderWorkspaceMissingError = Schema.is(ProviderWorkspaceMissingError);
+const isRoutineError = Schema.is(RoutineError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
 type ProviderIntentEvent = Extract<
@@ -235,6 +242,20 @@ function providerErrorLabel(value: string | undefined): string {
   return normalized && normalized.length > 0 ? normalized : "unknown";
 }
 
+function isLostFenceError(error: unknown): boolean {
+  if (isRoutineError(error) && error.code === "lost-fence") return true;
+  if (isProviderValidationError(error) && error.cause !== undefined) {
+    return isLostFenceError(error.cause);
+  }
+  return false;
+}
+
+export function isRoutineSubmissionFenceLoss(cause: Cause.Cause<unknown>): boolean {
+  return cause.reasons.some(
+    (reason) => Cause.isFailReason(reason) && isLostFenceError(reason.error),
+  );
+}
+
 export function providerErrorLabelFromInstanceHint(input: {
   readonly instanceId?: string | undefined;
   readonly modelSelectionInstanceId?: string | undefined;
@@ -325,6 +346,7 @@ const make = Effect.gen(function* () {
   const providerAuthService = yield* ProviderAuthService;
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
+  const routineStore = yield* Effect.serviceOption(RoutineStoreService.RoutineStore);
   const gitWorkflow = yield* GitWorkflowService;
   const fileSystem = yield* FileSystem.FileSystem;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
@@ -355,6 +377,34 @@ const make = Effect.gen(function* () {
         Cache.set(handledTurnStartKeys, key, true).pipe(Effect.as(Option.isSome(cached))),
       ),
     );
+
+  const markRoutineBlockedBeforeSubmission = (
+    submission: RoutineProviderSubmission | undefined,
+    detail: string,
+  ) => {
+    if (submission === undefined || Option.isNone(routineStore)) {
+      return Effect.void;
+    }
+    return Effect.gen(function* () {
+      yield* routineStore.value.markBlockedBeforeSubmission(
+        submission,
+        detail.slice(0, 4_000),
+        DateTime.toEpochMillis(yield* DateTime.now),
+      );
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("failed to mark routine submission blocked", {
+          routineRunId: submission.runId,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+  };
+
+  const markRoutineSubmissionFailure = (
+    submission: RoutineProviderSubmission | undefined,
+    cause: Cause.Cause<unknown>,
+  ) => markRoutineBlockedBeforeSubmission(submission, formatFailureDetail(cause));
 
   const threadModelSelections = new Map<string, ModelSelection>();
   const compactingThreadIds = new Set<ThreadId>();
@@ -933,6 +983,7 @@ const make = Effect.gen(function* () {
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
+    readonly routineSubmission?: RoutineProviderSubmission;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThreadShell(input.threadId);
@@ -984,6 +1035,9 @@ const make = Effect.gen(function* () {
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      ...(input.routineSubmission !== undefined
+        ? { routineSubmission: input.routineSubmission }
+        : {}),
     };
   });
 
@@ -1273,19 +1327,24 @@ const make = Effect.gen(function* () {
     processThreadTitleRegenerationSafely,
   );
 
-  const processTurnStartRequested = Effect.fn("processTurnStartRequested")(function* (
+  const processTurnStartRequestedUnsafe = Effect.fn("processTurnStartRequested")(function* (
     receivedEvent: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
+    options?: { readonly bypassDedup?: boolean; readonly awaitProvider?: boolean },
   ) {
     const resumed =
       receivedEvent.commandId !== null ? resumedTurnStarts.get(receivedEvent.commandId) : undefined;
     const event = resumed ? { ...receivedEvent, payload: resumed.event.payload } : receivedEvent;
     const key = turnStartKeyForEvent(event);
-    if (yield* hasHandledTurnStartRecently(key)) {
+    if (options?.bypassDedup !== true && (yield* hasHandledTurnStartRecently(key))) {
       return;
     }
 
     const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
+      yield* markRoutineBlockedBeforeSubmission(
+        event.payload.routineSubmission,
+        `Thread '${event.payload.threadId}' was not found for routine submission.`,
+      );
       return;
     }
     const turnStart = yield* projectionSnapshotQuery.getTurnStartMessage({
@@ -1302,6 +1361,10 @@ const make = Effect.gen(function* () {
         createdAt: event.payload.createdAt,
         requestId: event.payload.messageId,
       });
+      yield* markRoutineBlockedBeforeSubmission(
+        event.payload.routineSubmission,
+        `User message '${event.payload.messageId}' was not found for routine submission.`,
+      );
       return;
     }
     const { message, hasOtherUserMessages } = turnStart.value;
@@ -1397,6 +1460,10 @@ const make = Effect.gen(function* () {
       return true;
     }).pipe(Effect.catchCause((cause) => recoverTurnStartFailure(cause).pipe(Effect.as(true))));
     if (authCommandHandled) {
+      yield* markRoutineBlockedBeforeSubmission(
+        event.payload.routineSubmission,
+        "The routine instruction was handled as a provider account command and was not submitted.",
+      );
       return;
     }
 
@@ -1475,11 +1542,19 @@ const make = Effect.gen(function* () {
       );
     if (isCompactCommand) {
       if (!hasOtherUserMessages) {
+        yield* markRoutineBlockedBeforeSubmission(
+          event.payload.routineSubmission,
+          "Routine instructions cannot compact a conversation before the initial turn.",
+        );
         return yield* appendTurnStartFailure(
           "Context compaction failed",
           "Context compaction requires an existing conversation.",
         );
       }
+      yield* markRoutineBlockedBeforeSubmission(
+        event.payload.routineSubmission,
+        "Routine instructions cannot be used as context compaction commands.",
+      );
       const latestThread = yield* resolveThreadShell(event.payload.threadId);
       if (
         compactingThreadIds.has(event.payload.threadId) ||
@@ -1543,6 +1618,25 @@ const make = Effect.gen(function* () {
       turnsAfterCompaction.set(event.payload.threadId, queued);
       return;
     }
+    // A routine turn-start event can be delivered both from the hot event
+    // stream and from durable recovery. Claim preparation only once we are
+    // about to start a session, so a compaction-queued event can still resume.
+    if (event.payload.routineSubmission !== undefined && Option.isSome(routineStore)) {
+      const shouldProcess = yield* routineStore.value
+        .beginSessionPreparation(event.payload.routineSubmission)
+        .pipe(
+          Effect.matchEffect({
+            onFailure: (error) =>
+              error.code === "lost-fence" || error.code === "persistence"
+                ? Effect.succeed(false)
+                : Effect.fail(error),
+            onSuccess: (won) => Effect.succeed(won),
+          }),
+        );
+      if (!shouldProcess) {
+        return;
+      }
+    }
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
       messageText: message.text,
@@ -1551,26 +1645,95 @@ const make = Effect.gen(function* () {
         ? { modelSelection: event.payload.modelSelection }
         : {}),
       interactionMode: event.payload.interactionMode,
+      ...(event.payload.routineSubmission !== undefined
+        ? { routineSubmission: event.payload.routineSubmission }
+        : {}),
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.map(Option.some),
-      Effect.catchCause((cause) => handleTurnStartFailure(cause).pipe(Effect.as(Option.none()))),
+      Effect.catchCause((cause) =>
+        markRoutineSubmissionFailure(event.payload.routineSubmission, cause).pipe(
+          Effect.andThen(handleTurnStartFailure(cause)),
+          Effect.as(Option.none()),
+        ),
+      ),
     );
 
     if (Option.isNone(sendTurnRequest)) {
       return;
     }
 
-    const send = providerService
-      .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.asVoid, Effect.catchCause(recoverTurnStartFailure));
+    const send = providerService.sendTurn(sendTurnRequest.value).pipe(
+      Effect.asVoid,
+      Effect.catchCause((cause) =>
+        event.payload.routineSubmission !== undefined && isRoutineSubmissionFenceLoss(cause)
+          ? Effect.void
+          : markRoutineSubmissionFailure(event.payload.routineSubmission, cause).pipe(
+              Effect.andThen(recoverTurnStartFailure(cause)),
+            ),
+      ),
+    );
     // The forked send settles `sent` from here on, so drop the entry the post-processing hook uses.
     if (resumed && event.commandId !== null) resumedTurnStarts.delete(event.commandId);
-    yield* send.pipe(
-      Effect.ensuring(resumed ? Deferred.succeed(resumed.sent, undefined) : Effect.void),
-      Effect.forkScoped,
-    );
+    const settleResumed = resumed ? Deferred.succeed(resumed.sent, undefined) : Effect.void;
+    if (options?.awaitProvider === true) {
+      yield* send.pipe(Effect.ensuring(settleResumed));
+    } else {
+      yield* send.pipe(Effect.ensuring(settleResumed), Effect.forkScoped);
+    }
   });
+
+  const processTurnStartRequested = (
+    event: Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>,
+    options?: { readonly bypassDedup?: boolean; readonly awaitProvider?: boolean },
+  ) =>
+    processTurnStartRequestedUnsafe(event, options).pipe(
+      Effect.catchCause((cause) =>
+        markRoutineSubmissionFailure(event.payload.routineSubmission, cause).pipe(
+          Effect.andThen(Effect.failCause(cause)),
+        ),
+      ),
+    );
+
+  const recoverRoutineSubmission: ProviderCommandReactorShape["recoverRoutineSubmission"] = (
+    input,
+  ) =>
+    Effect.scoped(
+      processTurnStartRequested(
+        {
+          sequence: 0,
+          eventId: EventId.make(`routine-recovery:${input.run.id}:${input.submission.generation}`),
+          aggregateKind: "thread",
+          aggregateId: input.run.threadId,
+          occurredAt: input.run.updatedAt,
+          commandId: input.run.commandId,
+          causationEventId: null,
+          correlationId: input.run.commandId,
+          metadata: {},
+          type: "thread.turn-start-requested",
+          payload: {
+            threadId: input.run.threadId,
+            messageId: input.run.messageId,
+            modelSelection: input.run.configuration.modelSelection,
+            runtimeMode: input.run.configuration.runtimeMode,
+            interactionMode: "default",
+            routineSubmission: input.submission,
+            createdAt: input.run.updatedAt,
+          },
+        },
+        { bypassDedup: true, awaitProvider: true },
+      ).pipe(
+        Effect.asVoid,
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.interrupt
+            : Effect.logWarning("provider command reactor failed to recover routine submission", {
+                routineRunId: input.run.id,
+                cause: Cause.pretty(cause),
+              }),
+        ),
+      ),
+    );
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
@@ -1980,6 +2143,7 @@ const make = Effect.gen(function* () {
       yield* worker.drain;
       yield* threadTitleRegenerationWorker.drain;
     }),
+    recoverRoutineSubmission,
   } satisfies ProviderCommandReactorShape;
 });
 

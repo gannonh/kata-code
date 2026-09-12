@@ -171,6 +171,10 @@
       "types": "./src/state/server.ts",
       "default": "./src/state/server.ts"
     },
+    "./state/routines": {
+      "types": "./src/state/routines.ts",
+      "default": "./src/state/routines.ts"
+    },
     "./state/session": {
       "types": "./src/state/session.ts",
       "default": "./src/state/session.ts"

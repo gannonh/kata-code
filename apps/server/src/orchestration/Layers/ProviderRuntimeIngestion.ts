@@ -31,6 +31,7 @@ import { makeDrainableWorker } from "@kata-sh/code-shared/DrainableWorker";
 import { formatTokens } from "@kata-sh/code-shared/usageFormat";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import * as RoutineStoreService from "../../routines/RoutineStore.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -906,6 +907,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
+  const routineStore = yield* Effect.serviceOption(RoutineStoreService.RoutineStore);
   const projectionThreadMessages = yield* ProjectionThreadMessageRepository;
   const projectionThreadProposedPlans = yield* ProjectionThreadProposedPlanRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
@@ -1505,6 +1507,25 @@ const make = Effect.gen(function* () {
           : Option.none();
       const hasPendingTurnStart =
         Option.isSome(pendingTurnStart) && thread.session?.status === "starting";
+      const normalizedInitialMessageId =
+        isTerminalTurn && eventTurnId !== undefined
+          ? Option.getOrUndefined(
+              yield* projectionTurnRepository
+                .getByTurnId({
+                  threadId: thread.id,
+                  turnId: eventTurnId,
+                })
+                .pipe(
+                  Effect.map((turn) =>
+                    Option.flatMap(turn, (entry) =>
+                      entry.pendingMessageId === null
+                        ? Option.none<MessageId>()
+                        : Option.some(entry.pendingMessageId),
+                    ),
+                  ),
+                ),
+            )
+          : undefined;
 
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
@@ -1844,6 +1865,42 @@ const make = Effect.gen(function* () {
       if (isTerminalTurn) {
         const turnId = toTurnId(event.turnId);
         if (turnId) {
+          if (Option.isSome(routineStore) && normalizedInitialMessageId !== undefined) {
+            const status =
+              event.type === "turn.aborted"
+                ? "interrupted"
+                : event.payload.state === "completed"
+                  ? "succeeded"
+                  : event.payload.state === "failed"
+                    ? "failed"
+                    : "interrupted";
+            const detail =
+              event.type === "turn.aborted"
+                ? event.payload.reason
+                : (event.payload.errorMessage ?? event.payload.stopReason ?? null);
+            yield* routineStore.value
+              .recordProviderTerminal(
+                {
+                  eventId: event.eventId,
+                  threadId: event.threadId,
+                  turnId,
+                  messageId: normalizedInitialMessageId,
+                  status,
+                  detail,
+                },
+                DateTime.toEpochMillis(yield* DateTime.now),
+              )
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("failed to correlate routine initial provider terminal event", {
+                    threadId: event.threadId,
+                    turnId,
+                    messageId: normalizedInitialMessageId,
+                    cause: Cause.pretty(cause),
+                  }),
+                ),
+              );
+          }
           const userInputActivities =
             yield* projectionThreadActivityRepository.listUserInputLifecycleByThreadId({
               threadId: thread.id,

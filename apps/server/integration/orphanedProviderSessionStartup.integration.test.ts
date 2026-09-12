@@ -44,6 +44,7 @@ import * as ServerRuntimeStartup from "../src/serverRuntimeStartup.ts";
 import * as ServerSettings from "../src/serverSettings.ts";
 import * as AnalyticsService from "../src/telemetry/AnalyticsService.ts";
 import * as GitVcsDriver from "../src/vcs/GitVcsDriver.ts";
+import * as RoutineScheduler from "../src/routines/RoutineScheduler.ts";
 
 const providerInstanceId = ProviderInstanceId.make("codex");
 const projectId = ProjectId.make("project-startup-orphan");
@@ -78,6 +79,11 @@ const startupDependencies = Layer.mergeAll(
   }),
   Layer.succeed(ProviderSessionReaper.ProviderSessionReaper, {
     start: () => Effect.void,
+  }),
+  Layer.succeed(RoutineScheduler.RoutineScheduler, {
+    owner: "routine-startup-test",
+    tick: Effect.void,
+    start: Effect.void,
   }),
   ServerLifecycleEvents.layer,
   Layer.succeed(ServerEnvironment.ServerEnvironment, {

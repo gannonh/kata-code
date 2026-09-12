@@ -16,6 +16,7 @@ import {
   ASSISTANT_CITATION_MAX_TEXT_LENGTH,
   AssistantCitation,
   ApprovalRequestId,
+  CommandId,
   EnvironmentId,
   EventId,
   MessageId,
@@ -25,6 +26,10 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionStartInput,
+  RoutineId,
+  RoutineOwnerGeneration,
+  RoutineRequestId,
+  RoutineRunId,
   ThreadId,
   TurnId,
 } from "@kata-sh/code-contracts";
@@ -78,6 +83,7 @@ import * as ServerSettings from "../../serverSettings.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import { makeAdapterRegistryMock } from "../testUtils/providerAdapterRegistryMock.ts";
 import * as ProjectionSnapshotQuery from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as RoutineStoreService from "../../routines/RoutineStore.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const defaultServerSettingsLayer = ServerSettings.ServerSettingsService.layerTest();
@@ -444,24 +450,31 @@ function makeProviderServiceLayer(
       ? ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
       : Layer.succeed(ProviderSessionDirectory.ProviderSessionDirectory, input.directory);
 
+  const providerServiceLayer = makeProviderServiceLive().pipe(
+    Layer.provide(NodeServices.layer),
+    Layer.provide(providerAdapterLayer),
+    Layer.provide(directoryLayer),
+    Layer.provide(defaultServerSettingsLayer),
+    Layer.provide(serverConfigTestLayer),
+    Layer.provideMerge(input.analyticsLayer ?? AnalyticsService.layerTest),
+    Layer.provide(
+      Layer.succeed(
+        ProviderEventLoggers.ProviderEventLoggers,
+        ProviderEventLoggers.NoOpProviderEventLoggers,
+      ),
+    ),
+  );
+  // Keep the real SQLite routine store in this shared fixture. ProviderService
+  // consumes it optionally, so ordinary provider cases remain unchanged while
+  // routine fence cases exercise the production persistence path.
+  const routineStoreLayer = RoutineStoreService.RoutineStoreLive.pipe(
+    Layer.provide(SqlitePersistenceMemory),
+  );
+  const providerWithRoutineStore = providerServiceLayer.pipe(Layer.provideMerge(routineStoreLayer));
   const layer = it.layer(
     Layer.mergeAll(
-      makeProviderServiceLive().pipe(
-        Layer.provide(NodeServices.layer),
-        Layer.provide(providerAdapterLayer),
-        Layer.provide(directoryLayer),
-        Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(serverConfigTestLayer),
-        Layer.provideMerge(input.analyticsLayer ?? AnalyticsService.layerTest),
-        Layer.provide(
-          Layer.succeed(
-            ProviderEventLoggers.ProviderEventLoggers,
-            ProviderEventLoggers.NoOpProviderEventLoggers,
-          ),
-        ),
-      ),
+      providerWithRoutineStore,
       directoryLayer,
-
       runtimeRepositoryLayer,
       NodeServices.layer,
     ),
@@ -987,6 +1000,228 @@ it.effect("ProviderServiceLive rejects new sessions for disabled custom instance
 );
 
 const routing = makeProviderServiceLayer();
+const routineProvider = makeProviderServiceLayer();
+
+const routineProviderConfiguration = {
+  name: "Routine provider fence",
+  instruction: "Run the durable initial prompt.",
+  projectId: ProjectId.make("routine-provider-project"),
+  modelSelection: createModelSelection(codexInstanceId, "gpt-5.4"),
+  runtimeMode: "full-access" as const,
+  workspace: { kind: "shared" as const, directory: "/tmp" },
+  trigger: { kind: "daily" as const, time: "09:00", timezone: "UTC" },
+};
+
+const routineSubmissionForTest = (
+  run: {
+    readonly id: RoutineRunId;
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
+    readonly commandId: CommandId;
+  },
+  claim: { readonly owner: string; readonly generation: number },
+) => ({
+  runId: run.id,
+  owner: claim.owner,
+  generation: RoutineOwnerGeneration.make(claim.generation),
+  threadId: run.threadId,
+  messageId: run.messageId,
+  commandId: run.commandId,
+});
+
+routineProvider.layer("ProviderService routine provider fence", (it) => {
+  it.effect("buffers a wrong early terminal and settles only the returned provider turn", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const store = yield* RoutineStoreService.RoutineStore;
+      const routine = yield* store.save(
+        EnvironmentId.make("routine-provider-environment"),
+        {
+          id: RoutineId.make("routine-provider-wrong-early"),
+          expectedRevision: 0,
+          configuration: routineProviderConfiguration,
+        },
+        60_000,
+      );
+      const run = yield* store.testRun(
+        EnvironmentId.make("routine-provider-environment"),
+        {
+          id: routine.id,
+          expectedRevision: routine.revision,
+          requestId: RoutineRequestId.make("routine-provider-wrong-early-request"),
+        },
+        60_001,
+      );
+      const threadId = run.threadId;
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const claim = yield* store.claim("routine-provider-wrong-early-owner", 60_001);
+      assert.isNotNull(claim);
+      const submission = routineSubmissionForTest(run, claim!);
+      const release = yield* Deferred.make<void>();
+      const expectedTurnId = asTurnId("routine-provider-expected-turn");
+      const wrongTerminalObserved = yield* provider.streamEvents.pipe(
+        Stream.filter((event) => event.eventId === asEventId("routine-provider-wrong-early-event")),
+        Stream.take(1),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      routineProvider.codex.sendTurn.mockImplementationOnce(() =>
+        Effect.gen(function* () {
+          routineProvider.codex.emit({
+            type: "turn.completed",
+            eventId: asEventId("routine-provider-wrong-early-event"),
+            provider: CODEX_DRIVER,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            threadId,
+            turnId: asTurnId("routine-provider-manual-turn"),
+            payload: { state: "completed" },
+          });
+          yield* Deferred.await(release);
+          return { threadId, turnId: expectedTurnId };
+        }),
+      );
+      const sending = yield* provider
+        .sendTurn({
+          threadId,
+          input: run.configuration.instruction,
+          attachments: [],
+          routineSubmission: submission,
+        })
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      // streamEvents is published only after recordProviderTerminal commits,
+      // so this barrier proves the wrong turn was durable before the adapter
+      // returned its actual turn id.
+      const wrongEvent = yield* Fiber.join(wrongTerminalObserved);
+      assert.isTrue(wrongEvent._tag === "Some");
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(sending);
+      yield* Effect.forEach([1, 2, 3, 4], () => Effect.yieldNow);
+      const afterReturn = yield* store.history(EnvironmentId.make("routine-provider-environment"), {
+        id: routine.id,
+      });
+      assert.equal(afterReturn.runs[0]?.status, "running");
+      assert.equal(afterReturn.runs[0]?.turnId, expectedTurnId);
+      const expectedEvent = yield* provider.streamEvents.pipe(
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* Effect.yieldNow;
+      routineProvider.codex.emit({
+        type: "turn.completed",
+        eventId: asEventId("routine-provider-expected-event"),
+        provider: CODEX_DRIVER,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId,
+        turnId: expectedTurnId,
+        payload: { state: "completed" },
+      });
+      yield* Fiber.join(expectedEvent);
+      yield* advanceTestClock(25);
+      const directReconcile = yield* store.recordProviderTerminal(
+        {
+          eventId: asEventId("routine-provider-expected-direct-event"),
+          threadId,
+          turnId: expectedTurnId,
+          status: "succeeded",
+        },
+        60_010,
+      );
+      // The provider event handler may already have consumed this exact
+      // durable evidence. Replaying it must remain idempotent.
+      assert.isFalse(directReconcile);
+      const completed = yield* store.history(EnvironmentId.make("routine-provider-environment"), {
+        id: routine.id,
+      });
+      assert.equal(completed.runs[0]?.status, "succeeded");
+      assert.equal(routineProvider.codex.sendTurn.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect("settles a matching terminal event that arrives before sendTurn returns", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const store = yield* RoutineStoreService.RoutineStore;
+      const environmentId = EnvironmentId.make("routine-provider-early-environment");
+      const routine = yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-provider-early"),
+          expectedRevision: 0,
+          configuration: routineProviderConfiguration,
+        },
+        70_000,
+      );
+      const run = yield* store.testRun(
+        environmentId,
+        {
+          id: routine.id,
+          expectedRevision: routine.revision,
+          requestId: RoutineRequestId.make("routine-provider-early-request"),
+        },
+        70_001,
+      );
+      const threadId = run.threadId;
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const claim = yield* store.claim("routine-provider-early-owner", 70_001);
+      assert.isNotNull(claim);
+      const submission = routineSubmissionForTest(run, claim!);
+      const release = yield* Deferred.make<void>();
+      const turnId = asTurnId("routine-provider-early-turn");
+      const terminalObserved = yield* provider.streamEvents.pipe(
+        Stream.filter((event) => event.eventId === asEventId("routine-provider-early-event")),
+        Stream.take(1),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+      routineProvider.codex.sendTurn.mockImplementationOnce(() =>
+        Effect.gen(function* () {
+          routineProvider.codex.emit({
+            type: "turn.completed",
+            eventId: asEventId("routine-provider-early-event"),
+            provider: CODEX_DRIVER,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            threadId,
+            turnId,
+            payload: { state: "completed" },
+          });
+          yield* Deferred.await(release);
+          return { threadId, turnId };
+        }),
+      );
+      const sending = yield* provider
+        .sendTurn({
+          threadId,
+          input: run.configuration.instruction,
+          attachments: [],
+          routineSubmission: submission,
+        })
+        .pipe(Effect.forkChild);
+      yield* Effect.yieldNow;
+      const terminalEvent = yield* Fiber.join(terminalObserved);
+      assert.isTrue(terminalEvent._tag === "Some");
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(sending);
+      yield* advanceTestClock(25);
+      const completed = yield* store.history(environmentId, { id: routine.id });
+      assert.equal(completed.runs[0]?.stage, "terminal");
+      assert.equal(completed.runs[0]?.status, "succeeded");
+      assert.equal(completed.runs[0]?.turnId, turnId);
+      assert.equal(routineProvider.codex.sendTurn.mock.calls.at(-1)?.[0]?.threadId, threadId);
+    }),
+  );
+});
 
 const customCompactionDriver = ProviderDriverKind.make("custom-compaction-provider");
 const nativeCompactionInstanceId = ProviderInstanceId.make("native-compaction");
