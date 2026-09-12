@@ -1,4 +1,4 @@
-import { type LiveActivity } from "expo-widgets";
+import { addPushToStartTokenListener, type LiveActivity } from "expo-widgets";
 import {
   configureAndroidAgentNotifications,
   clearAndroidAgentNotifications,
@@ -88,6 +88,7 @@ let androidDeviceReplayedAt: number | null = null;
 let pushTokenSubscription: { remove: () => void } | null = null;
 let pushToStartTokenSubscription: { remove: () => void } | null = null;
 let appStateSubscription: { remove: () => void } | null = null;
+const agentAwarenessRegistrationLock = Semaphore.makeUnsafe(1);
 
 // Whether the relay has actually accepted this device's registration. The
 // notification/Live Activity settings toggles must reflect this rather than
@@ -291,8 +292,12 @@ function nativePushTokenRegistration(input?: {
         ...(input?.pushToStartToken ? { pushToStartToken: input.pushToStartToken } : {}),
       };
     }
-    if (observedPushToken) {
-      return { notificationsEnabled: true, pushToken: observedPushToken };
+    if (input?.pushToken) {
+      return {
+        notificationsEnabled: true,
+        pushToken: input.pushToken,
+        ...(input.pushToStartToken ? { pushToStartToken: input.pushToStartToken } : {}),
+      };
     }
     const token = yield* Effect.tryPromise({
       try: () => Notifications.getDevicePushTokenAsync(),
@@ -794,7 +799,10 @@ function registerDevice(
         preferences.liveActivitiesEnabled !== false,
       );
     }
-    const pushTokenRegistration = yield* nativePushTokenRegistration(input?.observedPushToken);
+    const pushTokenRegistration = yield* nativePushTokenRegistration({
+      pushToken: input.observedPushToken,
+      pushToStartToken: input.observedPushToStartToken,
+    });
     logRegistrationDebug("device registration local state ready", {
       expectedGeneration,
       notificationsEnabled: pushTokenRegistration.notificationsEnabled,

@@ -556,6 +556,9 @@ importers:
       '@kata-sh/code-shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@kata-sh/code-ssh':
+        specifier: workspace:*
+        version: link:../../packages/ssh
       '@kata-sh/code-tailscale':
         specifier: workspace:*
         version: link:../../packages/tailscale
