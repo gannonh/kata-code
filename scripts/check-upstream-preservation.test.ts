@@ -12,6 +12,7 @@ import {
   parseNameStatusDiff,
   matchesOwnerPath,
   resolveRefs,
+  resolveCommitRef,
   resolveEvidenceArtifact,
   validateEvidenceBinding,
   runPreservation,
@@ -680,9 +681,10 @@ describe("upstream preservation CLI", () => {
   });
 
   it("reports live checks as PASS only with exact-ref manual evidence", () => {
+    const headSha = resolveCommitRef(repositoryRoot, "HEAD");
     const refs = {
-      candidate: currentSha,
-      base: currentSha,
+      candidate: headSha,
+      base: headSha,
       upstream: upstreamSha,
       upstreamBase: upstreamBaseSha,
     };
