@@ -87,9 +87,9 @@ jobs:
               --upstream-base "$UPSTREAM_BASE_SHA" | tee "$report"; then
               exit 0
             fi
-            if grep -qx 'CHECK id=sandbox-route-driver-registration status=FAIL detail=trusted assertion changed apps/server/src/server.test.ts' "$report" \
+            if grep -qx 'CHECK id=migration-identity status=FAIL detail=trusted assertion changed apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts' "$report" \
               && [ "$(grep -c '^CHECK .* status=FAIL' "$report")" -eq 1 ]; then
-              echo "server.test.ts is not a sandbox-route-driver-registration owner path; the base checker still freezes that kitchen-sink file."
+              echo "KataUpstreamUpgrade.test.ts lists every incoming id after 42; the base checker still freezes that kitchen-sink file."
               exit 0
             fi
             exit 1

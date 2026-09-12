@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   requireModule: vi.fn(),
 }));
 
-vi.mock("expo", () => ({ requireOptionalNativeModule: mocks.requireModule }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: mocks.config } }));
 vi.mock("react-native", () => ({
   Platform: {
@@ -27,8 +26,12 @@ beforeEach(() => {
 
 describe("Android native notification capability", () => {
   it("uses the installed module and the build variant's deep-link scheme", async () => {
-    const { configureAndroidAgentNotifications, clearAndroidAgentNotifications } =
-      await import("./androidNotifications");
+    const {
+      configureAndroidAgentNotifications,
+      clearAndroidAgentNotifications,
+      __setAndroidNotificationsNativeLoaderForTest,
+    } = await import("./androidNotifications");
+    __setAndroidNotificationsNativeLoaderForTest(mocks.requireModule);
     const { supportsAgentAwarenessPush } = await import("./capabilities");
     // An iOS-only signing restriction must not disable Android notifications.
     mocks.config.extra.iosPersonalTeamBuild = true;
@@ -43,8 +46,12 @@ describe("Android native notification capability", () => {
     "disables push when the native binary is missing required methods (%j)",
     async (native) => {
       mocks.native = native;
-      const { configureAndroidAgentNotifications, clearAndroidAgentNotifications } =
-        await import("./androidNotifications");
+      const {
+        configureAndroidAgentNotifications,
+        clearAndroidAgentNotifications,
+        __setAndroidNotificationsNativeLoaderForTest,
+      } = await import("./androidNotifications");
+      __setAndroidNotificationsNativeLoaderForTest(mocks.requireModule);
       const { supportsAgentAwarenessPush } = await import("./capabilities");
       expect(supportsAgentAwarenessPush()).toBe(false);
       expect(() => configureAndroidAgentNotifications("device", "user", true)).not.toThrow();
