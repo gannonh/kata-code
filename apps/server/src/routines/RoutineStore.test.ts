@@ -173,6 +173,62 @@ it.layer(storeLayer)("RoutineStore", (it) => {
     }),
   );
 
+  it.effect("keeps a handed-off submission when late preparation writes arrive", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const routine = yield* store.save(
+        environmentId,
+        { id: RoutineId.make("routine-handoff"), expectedRevision: 0, configuration },
+        Date.parse("2026-01-01T00:00:00.000Z"),
+      );
+      const run = yield* store.testRun(
+        environmentId,
+        {
+          id: routine.id,
+          expectedRevision: routine.revision,
+          requestId: RoutineRequestId.make("request-handoff"),
+        },
+        10_000,
+      );
+      const claim = yield* store.claim("worker-a", 10_000);
+      assert.isNotNull(claim);
+      yield* store.consumeSubmissionForProvider(
+        {
+          runId: run.id,
+          owner: "worker-a",
+          generation: RoutineOwnerGeneration.make(claim!.generation),
+          threadId: run.threadId,
+          messageId: run.messageId,
+          commandId: run.commandId,
+        },
+        10_001,
+      );
+
+      assert.equal(yield* store.renew(claim!, 45_000), "handed-off");
+      yield* store.updatePreparation(
+        claim!,
+        { stage: "prompt-accepted", status: "starting", detail: null },
+        10_002,
+      );
+      yield* store.updatePreparation(
+        claim!,
+        { stage: "terminal", status: "blocked", detail: "late dispatcher failure" },
+        10_003,
+      );
+      const markSetup = yield* store
+        .markSetupComplete(claim!, 10_004)
+        .pipe(Effect.match({ onFailure: (error) => error.code, onSuccess: () => "success" }));
+
+      assert.equal(markSetup, "lost-fence");
+      const history = yield* store.history(environmentId, { id: routine.id });
+      assert.deepEqual(
+        history.runs.map(({ stage, status }) => ({ stage, status })),
+        [{ stage: "submitting", status: "starting" }],
+      );
+      assert.isTrue((yield* store.activeRuns()).some((active) => active.id === run.id));
+    }),
+  );
+
   it.effect("persists worktree setup completion across a reclaimed preparation lease", () =>
     Effect.gen(function* () {
       const store = yield* RoutineStore;

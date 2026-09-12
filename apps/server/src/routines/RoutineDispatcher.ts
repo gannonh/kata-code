@@ -362,9 +362,15 @@ const makeRoutineDispatcher = Effect.gen(function* () {
   });
 
   const dispatchClaim: RoutineDispatcherShape["dispatchClaim"] = (claim) => {
-    const keepLease = Effect.forever(
-      Effect.sleep("5 seconds").pipe(Effect.andThen(renew(claim))),
-    ).pipe(
+    const keepLease = Effect.gen(function* () {
+      let lease: "held" | "handed-off" = "held";
+      while (lease === "held") {
+        yield* Effect.sleep("5 seconds");
+        lease = yield* renew(claim);
+      }
+      // The provider path owns the consumed submission; a lease loss must not interrupt its turn.
+      return yield* Effect.never;
+    }).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause as Cause.Cause<never>)

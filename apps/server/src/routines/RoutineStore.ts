@@ -390,22 +390,36 @@ export const makeRoutineStore = Effect.gen(function* () {
           : null;
       }),
     );
-  const assertClaim = (claim: RoutineClaim, now: number) =>
+  const lostPreparation = () =>
+    failure("lost-fence", "Routine preparation ownership expired or was canceled.");
+  // Reclaims only match unconsumed runs, so a consumed run keeps the owner and
+  // generation that submitted it. That claim has handed preparation to the
+  // provider path; every other mismatch is a lost fence.
+  const preparationLease = (claim: RoutineClaim, now: number) =>
     Effect.gen(function* () {
-      const rows =
-        yield* sql`SELECT id FROM routine_runs WHERE id=${claim.run.id} AND owner=${claim.owner} AND generation=${claim.generation}
-      AND lease_until>${now} AND submission_consumed=0 AND active=1`;
-      if (!rows.length)
-        return yield* failure(
-          "lost-fence",
-          "Routine preparation ownership expired or was canceled.",
-        );
+      const rows = yield* sql<{
+        leaseUntil: number;
+        submissionConsumed: number;
+        active: number;
+      }>`SELECT lease_until AS leaseUntil, submission_consumed AS submissionConsumed, active FROM routine_runs
+      WHERE id=${claim.run.id} AND owner=${claim.owner} AND generation=${claim.generation}`;
+      const row = rows[0];
+      if (row?.submissionConsumed === 1) return "handed-off" as const;
+      if (row?.active === 1 && row.leaseUntil > now) return "held" as const;
+      return yield* lostPreparation();
     });
+  const assertClaim = (claim: RoutineClaim, now: number) =>
+    preparationLease(claim, now).pipe(
+      Effect.flatMap((lease) => (lease === "held" ? Effect.void : lostPreparation())),
+    );
   const renew = (claim: RoutineClaim, now: number) =>
     transaction(
       Effect.gen(function* () {
-        yield* assertClaim(claim, now);
-        yield* sql`UPDATE routine_runs SET lease_until=${now + 30_000} WHERE id=${claim.run.id}`;
+        const lease = yield* preparationLease(claim, now);
+        if (lease === "held") {
+          yield* sql`UPDATE routine_runs SET lease_until=${now + 30_000} WHERE id=${claim.run.id}`;
+        }
+        return lease;
       }),
     );
   const consumeSubmission = (claim: RoutineClaim, now: number) =>
@@ -435,7 +449,10 @@ export const makeRoutineStore = Effect.gen(function* () {
   ) =>
     transaction(
       Effect.gen(function* () {
-        yield* assertClaim(claim, now);
+        // After handoff the provider path owns the run. Late preparation
+        // progress or a dispatcher failure must not overwrite a turn that may
+        // already be running.
+        if ((yield* preparationLease(claim, now)) === "handed-off") return;
         // A dispatcher may spend time preparing a workspace while another
         // transaction records a thread or command receipt. Re-read the current
         // record so this progress update cannot erase those durable fields.
