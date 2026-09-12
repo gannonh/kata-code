@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import {
   CommandId,
   EnvironmentId,
@@ -225,7 +225,7 @@ export const makeRoutineStore = Effect.gen(function* () {
       const reason =
         skipReason ??
         (active.length ? "Previous run is active or waiting for attention." : undefined);
-      const id = RoutineRunId.make(randomUUID());
+      const id = RoutineRunId.make(NodeCrypto.randomUUID());
       const timestamp = isoAt(now);
       const run: RoutineRun = {
         id,

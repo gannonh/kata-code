@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 import { RoutineError } from "@kata-sh/code-contracts";
 
 import * as Context from "effect/Context";
@@ -24,7 +24,7 @@ export class RoutineScheduler extends Context.Service<RoutineScheduler, RoutineS
 const makeRoutineScheduler = Effect.gen(function* () {
   const store = yield* RoutineStore;
   const dispatcher = yield* RoutineDispatcher;
-  const owner = `routine-worker:${randomUUID()}`;
+  const owner = `routine-worker:${NodeCrypto.randomUUID()}`;
 
   // Admission owns the short scheduler lease and must keep running while
   // workspace preparation or setup scripts are waiting on external work.
