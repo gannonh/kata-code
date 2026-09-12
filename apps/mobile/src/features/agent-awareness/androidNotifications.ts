@@ -36,7 +36,7 @@ export function configureAndroidAgentNotifications(
   nativeLoader()?.configure?.(
     deviceId,
     userId,
-    (Array.isArray(scheme) ? scheme[0] : scheme) ?? "t3code",
+    (Array.isArray(scheme) ? scheme[0] : scheme) ?? "katacode",
     ongoingEnabled,
   );
 }
