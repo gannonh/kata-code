@@ -191,9 +191,3 @@ Manual evidence must point to an artifact describing the disposable
 browser/device/provider run and the inspected result. It must not claim
 unsupported providers or Linux Icon Composer output. Icon Composer evidence is
 reported separately from device/provider evidence and is required on macOS.
-
-## Current baseline
-
-The recorded current-main run is
-[kat-3307-baseline.md](./kat-3307-baseline.md). Re-run it when the candidate
-changes; preserve the exact refs and status lines in the new artifact.

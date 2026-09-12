@@ -18,7 +18,6 @@
     "screenshots:mobile": "node scripts/mobile-showcase.ts",
     "icons:export": "node scripts/export-brand-icons.ts",
     "icons:check": "node scripts/export-brand-icons.ts --check",
-    "icons:export:android": "node scripts/export-android-icons.ts",
     "build": "vp run --filter './apps/*' --filter './packages/*' --filter './oxlint-plugin-kata-code' --filter './scripts' build",
     "build:marketing": "vp run --filter @kata-sh/code-marketing build",
     "build:desktop": "vp run --filter @kata-sh/code-desktop --filter @kata-sh/code-cli build",

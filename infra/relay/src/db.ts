@@ -50,8 +50,12 @@ export const PlanetscaleDatabase = Effect.gen(function* () {
           name: "katacoderelay",
           region: { slug: "us-west" },
           clusterSize: "PS_20",
+          arch: "arm",
+          replicas: 0,
           migrations: { dir: schema.out, table: "relay_migrations" },
-          replicas: 2,
+          // ponytail: match the last completed Alchemy generation
+          // (replicas 0, arch arm). HA scale is KAT-3335. Cluster size
+          // PS_20 updates in place after a stuck replace is aborted.
         }).pipe(RemovalPolicy.retain())
       : yield* Planetscale.PostgresDatabase.ref("RelayPostgresDatabase", {
           stage: "prod",
