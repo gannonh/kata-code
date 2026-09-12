@@ -510,7 +510,9 @@ export const makeRoutineStore = Effect.gen(function* () {
         const rows = yield* sql<{ record: string }>`SELECT record FROM routine_runs
       WHERE thread_id=${input.threadId} AND active=1 AND submission_consumed=1
       ORDER BY admitted_at DESC, id DESC`;
-        const current = rows.map((row) => decodeRun(row.record)).find((run) => run.stage !== "terminal");
+        const current = rows
+          .map((row) => decodeRun(row.record))
+          .find((run) => run.stage !== "terminal");
         if (!current) return false;
         if (current.stage === "submitting" || current.turnId === null) {
           yield* writeRun(
@@ -518,8 +520,7 @@ export const makeRoutineStore = Effect.gen(function* () {
               ...current,
               status: "needs-attention",
               detail:
-                input.detail ??
-                "The provider session exited before this routine turn was bound.",
+                input.detail ?? "The provider session exited before this routine turn was bound.",
               updatedAt: isoAt(now),
             },
             true,

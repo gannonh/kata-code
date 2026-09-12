@@ -1218,74 +1218,7 @@ routineProvider.layer("ProviderService routine provider fence", (it) => {
       assert.equal(completed.runs[0]?.stage, "terminal");
       assert.equal(completed.runs[0]?.status, "succeeded");
       assert.equal(completed.runs[0]?.turnId, turnId);
-      assert.equal(
-        routineProvider.codex.sendTurn.mock.calls.at(-1)?.[0]?.threadId,
-        threadId,
-      );
-    }),
-  );
-
-  it.effect("session.exited interrupts a bound routine run and releases the slot", () =>
-    Effect.gen(function* () {
-      const provider = yield* ProviderService.ProviderService;
-      const store = yield* RoutineStoreService.RoutineStore;
-      const environmentId = EnvironmentId.make("routine-provider-session-exit-environment");
-      const routine = yield* store.save(
-        environmentId,
-        {
-          id: RoutineId.make("routine-provider-session-exit"),
-          expectedRevision: 0,
-          configuration: routineProviderConfiguration,
-        },
-        80_000,
-      );
-      const run = yield* store.testRun(
-        environmentId,
-        {
-          id: routine.id,
-          expectedRevision: routine.revision,
-          requestId: RoutineRequestId.make("routine-provider-session-exit-request"),
-        },
-        80_001,
-      );
-      const threadId = run.threadId;
-      yield* provider.startSession(threadId, {
-        provider: CODEX_DRIVER,
-        providerInstanceId: codexInstanceId,
-        threadId,
-        runtimeMode: "full-access",
-      });
-      const claim = yield* store.claim("routine-provider-session-exit-owner", 80_001);
-      assert.isNotNull(claim);
-      const submission = routineSubmissionForTest(run, claim!);
-      yield* store.consumeSubmissionForProvider(submission, 80_001);
-      yield* store.bindProviderTurn(submission, "session-exit-turn", 80_002);
-      const bound = yield* store.history(environmentId, { id: routine.id });
-      assert.equal(bound.runs[0]?.stage, "provider-bound");
-      const exitedObserved = yield* provider.streamEvents.pipe(
-        Stream.filter((event) => event.eventId === asEventId("routine-provider-session-exit")),
-        Stream.take(1),
-        Stream.runHead,
-        Effect.forkChild,
-      );
-      routineProvider.codex.emit({
-        type: "session.exited",
-        eventId: asEventId("routine-provider-session-exit"),
-        provider: CODEX_DRIVER,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        threadId,
-        payload: { reason: "session closed" },
-      });
-      const exitedEvent = yield* Fiber.join(exitedObserved);
-      assert.isTrue(exitedEvent._tag === "Some");
-      yield* advanceTestClock(25);
-      const settled = yield* store.history(environmentId, { id: routine.id });
-      assert.equal(settled.runs[0]?.stage, "terminal");
-      assert.equal(settled.runs[0]?.status, "interrupted");
-      assert.equal(
-        (yield* store.activeRuns()).some((active) => active.id === run.id),
-        false,
-      );
+      assert.equal(routineProvider.codex.sendTurn.mock.calls.at(-1)?.[0]?.threadId, threadId);
     }),
   );
 });

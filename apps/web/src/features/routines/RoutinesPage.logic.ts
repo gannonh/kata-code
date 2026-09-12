@@ -8,9 +8,7 @@ import * as Schema from "effect/Schema";
 
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
 
-export function remoteRefBranchName(
-  ref: Pick<VcsRef, "name" | "remoteName" | "isRemote">,
-): string {
+export function remoteRefBranchName(ref: Pick<VcsRef, "name" | "remoteName" | "isRemote">): string {
   if (ref.isRemote && ref.remoteName && ref.name.startsWith(`${ref.remoteName}/`)) {
     return ref.name.slice(ref.remoteName.length + 1);
   }
@@ -29,9 +27,7 @@ export function worktreeBaseExists(refs: ReadonlyArray<VcsRef>, branch: string):
   return refs.some((ref) => remoteRefBranchName(ref) === branch);
 }
 
-export function enabledProviders(
-  providers: readonly ServerProvider[],
-): readonly ServerProvider[] {
+export function enabledProviders(providers: readonly ServerProvider[]): readonly ServerProvider[] {
   return providers.filter(
     (provider) =>
       provider.enabled &&

@@ -211,7 +211,15 @@ function RoutineEnvironmentRows({
       return;
     }
     onLoaded(environmentId, { status: "pending", routines: EMPTY_ROUTINES });
-  }, [connectionPhase, environmentId, onLoaded, ownerLabel, query.data, query.error, query.isPending]);
+  }, [
+    connectionPhase,
+    environmentId,
+    onLoaded,
+    ownerLabel,
+    query.data,
+    query.error,
+    query.isPending,
+  ]);
   return null;
 }
 
@@ -1052,11 +1060,7 @@ export function RoutinesPage() {
     const providerOk = enabledProviders(selectedProviders ?? []).some(
       (candidate) => candidate.instanceId === draft.configuration.modelSelection.instanceId,
     );
-    if (
-      projectOk &&
-      (providerOk || enabledProviders(selectedProviders ?? []).length === 0)
-    )
-      return;
+    if (projectOk && (providerOk || enabledProviders(selectedProviders ?? []).length === 0)) return;
     const next = defaultDraft(draft.environmentId, environmentProjects, selectedProviders ?? []);
     if (!next) return;
     setDraft({

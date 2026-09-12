@@ -58,7 +58,10 @@ describe("preferredWorktreeBaseBranch", () => {
 
   it("falls back to the current local branch when no default is advertised", () => {
     expect(
-      preferredWorktreeBaseBranch([ref("trunk", { current: true }), ref("origin/main", { isRemote: true, remoteName: "origin" })]),
+      preferredWorktreeBaseBranch([
+        ref("trunk", { current: true }),
+        ref("origin/main", { isRemote: true, remoteName: "origin" }),
+      ]),
     ).toBe("trunk");
   });
 });
@@ -86,7 +89,9 @@ describe("enabledProviders", () => {
 
 describe("firstEnabledProviderModel", () => {
   it("returns null when no enabled provider has a model", () => {
-    expect(firstEnabledProviderModel([provider({ instanceId: "codex", enabled: false })])).toBeNull();
+    expect(
+      firstEnabledProviderModel([provider({ instanceId: "codex", enabled: false })]),
+    ).toBeNull();
   });
 });
 
@@ -110,8 +115,8 @@ describe("routinesLibraryEmptyKind", () => {
     expect(
       routinesLibraryEmptyKind({ routineCount: 0, unavailableCount: 1, pendingCount: 0 }),
     ).toBe("unavailable");
-    expect(routinesLibraryEmptyKind({ routineCount: 0, unavailableCount: 0, pendingCount: 0 })).toBe(
-      "empty",
-    );
+    expect(
+      routinesLibraryEmptyKind({ routineCount: 0, unavailableCount: 0, pendingCount: 0 }),
+    ).toBe("empty");
   });
 });

@@ -369,7 +369,9 @@ export const makeRoutineDispatcher = Effect.gen(function* () {
   });
 
   const dispatchClaim: RoutineDispatcherShape["dispatchClaim"] = (claim) => {
-    const keepLease = Effect.forever(Effect.sleep("5 seconds").pipe(Effect.andThen(renew(claim)))).pipe(
+    const keepLease = Effect.forever(
+      Effect.sleep("5 seconds").pipe(Effect.andThen(renew(claim))),
+    ).pipe(
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.failCause(cause)
