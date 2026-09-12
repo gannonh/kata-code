@@ -37,7 +37,12 @@ describe("Android native notification capability", () => {
     mocks.config.extra.iosPersonalTeamBuild = true;
     expect(supportsAgentAwarenessPush()).toBe(true);
     configureAndroidAgentNotifications("device", "user", false);
-    expect(mocks.native?.configure).toHaveBeenCalledWith("device", "user", "katacode-preview", false);
+    expect(mocks.native?.configure).toHaveBeenCalledWith(
+      "device",
+      "user",
+      "katacode-preview",
+      false,
+    );
     clearAndroidAgentNotifications();
     expect(mocks.native?.clear).toHaveBeenCalledOnce();
   });

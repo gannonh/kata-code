@@ -529,7 +529,7 @@ describe("ApnsDeliveries", () => {
         makeLayer({
           attempts,
           currentTargets: [
-            { ...target, bundle_id: "com.t3tools.t3code.preview", aps_environment: "sandbox" },
+            { ...target, bundle_id: "com.katacode.preview", aps_environment: "sandbox" },
           ],
           config: signingConfig,
           execute,
