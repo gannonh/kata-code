@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Factory on Cursor Projects</title>
+  <style>
+    :root {
+      --bg: #111214;
+      --ink: #f4f1ea;
+      --mute: #8b877c;
+      --line: #2a2b2e;
+      --card: #1a1b1e;
+      --event: #3dd6c6;
+      --desk: #7eb6ff;
+      --child: #c9a6ff;
+      --you: #f0c14b;
+      --gap: #ff7a7a;
+      --keep: #9ad27a;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.35 ui-sans-serif, system-ui, sans-serif; }
+    main { max-width: 1080px; margin: 0 auto; padding: 40px 24px 80px; }
+    h1 { font-size: 34px; letter-spacing: -0.02em; margin: 0 0 8px; font-weight: 650; }
+    .lede { color: var(--mute); font-size: 16px; margin: 0 0 36px; }
+    h2 { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--mute); margin: 48px 0 16px; font-weight: 600; }
+    .row { display: grid; gap: 16px; }
+    .row.two { grid-template-columns: 1fr 1fr; }
+    .row.three { grid-template-columns: 1fr 1fr 1fr; }
+    .row.six { grid-template-columns: repeat(6, 1fr); }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+    .card h3 { margin: 0 0 14px; font-size: 15px; font-weight: 600; }
+    .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .pill { display: inline-flex; align-items: center; justify-content: center; padding: 8px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+    .box { border-radius: 10px; padding: 10px 12px; font-size: 13px; font-weight: 600; text-align: center; min-height: 40px; display: flex; align-items: center; justify-content: center; }
+    .e { background: color-mix(in oklab, var(--event) 18%, #000); color: var(--event); border: 1px solid color-mix(in oklab, var(--event) 40%, #000); }
+    .d { background: color-mix(in oklab, var(--desk) 18%, #000); color: var(--desk); border: 1px solid color-mix(in oklab, var(--desk) 40%, #000); }
+    .c { background: color-mix(in oklab, var(--child) 18%, #000); color: var(--child); border: 1px solid color-mix(in oklab, var(--child) 40%, #000); }
+    .y { background: color-mix(in oklab, var(--you) 18%, #000); color: var(--you); border: 1px solid color-mix(in oklab, var(--you) 40%, #000); }
+    .g { background: color-mix(in oklab, var(--gap) 16%, #000); color: var(--gap); border: 1px solid color-mix(in oklab, var(--gap) 40%, #000); }
+    .k { background: color-mix(in oklab, var(--keep) 16%, #000); color: var(--keep); border: 1px solid color-mix(in oklab, var(--keep) 40%, #000); }
+    .m { color: var(--mute); border: 1px dashed var(--line); }
+    .arrow { color: var(--mute); font-size: 18px; }
+    .stack { display: grid; gap: 8px; }
+    .rail { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+    .rail .box { min-height: 72px; flex-direction: column; gap: 6px; }
+    .rail small { font-weight: 500; opacity: 0.75; font-size: 11px; }
+    .ops { margin-bottom: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    th { color: var(--mute); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 20px; }
+    .note { color: var(--mute); font-size: 13px; margin: 10px 0 0; }
+    .steps { counter-reset: step; display: grid; gap: 10px; }
+    .steps li { list-style: none; display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; }
+    .steps li::before { counter-increment: step; content: counter(step); width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--card); border: 1px solid var(--line); font-weight: 700; }
+    ul.plain { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+    ul.plain li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+    ul.plain span { color: var(--mute); }
+    .choice { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: stretch; }
+    .or { align-self: center; color: var(--mute); font-size: 12px; letter-spacing: 0.12em; }
+    @media (max-width: 800px) {
+      .row.two, .row.three, .row.six, .rail, .choice { grid-template-columns: 1fr; }
+      .or { text-align: center; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Same rail. One desk.</h1>
+  <p class="lede">Do not clone seven Grok bots. This Project is Program Ops. Events wake it. Child cloud agents do the work.</p>
+
+  <div class="legend">
+    <span class="pill e">Event</span>
+    <span class="pill d">This Project</span>
+    <span class="pill c">Child VM</span>
+    <span class="pill y">You</span>
+    <span class="pill g">Gap</span>
+  </div>
+
+  <h2>Shape</h2>
+  <div class="row two">
+    <section class="card">
+      <h3>Grokbot today</h3>
+      <div class="stack">
+        <div class="box e">Linear / GitHub / cron</div>
+        <div class="arrow">↓</div>
+        <div class="box m">7 bots × own routines</div>
+        <div class="arrow">↓</div>
+        <div class="box c">Cursor cloud agents</div>
+      </div>
+    </section>
+    <section class="card">
+      <h3>Cursor Projects</h3>
+      <div class="stack">
+        <div class="box e">Subscriptions + timers</div>
+        <div class="arrow">↓</div>
+        <div class="box d">One Project coordinator</div>
+        <div class="arrow">↓</div>
+        <div class="box c">Child cloud agents</div>
+      </div>
+    </section>
+  </div>
+
+  <h2>Rail stays</h2>
+  <div class="box d ops">Product Operations = this chat</div>
+  <div class="rail">
+    <div class="box e">Research<small>child if needed</small></div>
+    <div class="box e">Plan<small>child writes spec</small></div>
+    <div class="box c">Build<small>1 child / Linear id</small></div>
+    <div class="box c">Review<small>child on same PR</small></div>
+    <div class="box c">Verify<small>child after merge</small></div>
+    <div class="box y">Ship<small>only if you say</small></div>
+  </div>
+  <p class="note">Columns unchanged. Linear still hops draft PR → In Progress, open PR → Agent Review, merge → Done.</p>
+
+  <h2>Seats collapse</h2>
+  <div class="row two">
+    <section class="card">
+      <h3>Desk keeps</h3>
+      <ul class="plain">
+        <li>Program Manager <span>board, OWN, brief</span></li>
+        <li>Eng Manager <span>dispatch only</span></li>
+        <li>Release watch <span>route, don’t cut</span></li>
+      </ul>
+    </section>
+    <section class="card">
+      <h3>Children run</h3>
+      <ul class="plain">
+        <li>Build <span>Start / In Progress</span></li>
+        <li>PR Reviewer <span>Agent Review + Merging</span></li>
+        <li>Verifier <span>Done</span></li>
+        <li>Product Manager <span>Backlog spec</span></li>
+        <li>Nightly audit <span>paused until you say</span></li>
+      </ul>
+    </section>
+  </div>
+  <p class="note"><span class="pill y">gannon-drive</span> → desk hops Start → In Progress, no Build child. Review / Verify still run.</p>
+
+  <h2>Wake → work</h2>
+  <section class="card">
+    <table>
+      <thead>
+        <tr><th>When</th><th>Listener</th><th>Desk</th><th>Who works</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>You drag Start</td>
+          <td class="e">linear_issue</td>
+          <td>In Progress + OWN</td>
+          <td class="c">Build child</td>
+        </tr>
+        <tr>
+          <td>PR comments / ready</td>
+          <td class="e">github_pr</td>
+          <td>Stay in Agent Review</td>
+          <td class="c">Review child</td>
+        </tr>
+        <tr>
+          <td>CI on a branch</td>
+          <td class="e">github_ci</td>
+          <td>Fix or hop</td>
+          <td class="c">Same child</td>
+        </tr>
+        <tr>
+          <td>You drag Merging</td>
+          <td class="e">linear_issue</td>
+          <td>Land ping</td>
+          <td class="c">Review child</td>
+        </tr>
+        <tr>
+          <td>PR merged</td>
+          <td class="e">github_pr</td>
+          <td>Verify ping</td>
+          <td class="c">Verify child</td>
+        </tr>
+        <tr>
+          <td>Weekday 9:00 PT</td>
+          <td class="e">timer</td>
+          <td>Brief or silence</td>
+          <td class="d">Desk only</td>
+        </tr>
+        <tr>
+          <td>Review stall</td>
+          <td class="e">timer + pr</td>
+          <td>Nudge if dirty / red</td>
+          <td class="c">Review child</td>
+        </tr>
+        <tr>
+          <td>Nightly on main</td>
+          <td class="g">no webhook</td>
+          <td>Timer after the window</td>
+          <td class="c">Release child</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <h2>Turn on</h2>
+  <div class="row two">
+    <section class="card">
+      <h3>Always</h3>
+      <div class="stack">
+        <div class="box e">linear_issue · live projects</div>
+        <div class="box e">linear_comment · same</div>
+        <div class="box e">github_pr · each live repo</div>
+        <div class="box e">timer · 0 9 * * 1-5 America/Los_Angeles</div>
+      </div>
+    </section>
+    <section class="card">
+      <h3>Per ticket in flight</h3>
+      <div class="stack">
+        <div class="box e">github_pr · that PR</div>
+        <div class="box e">github_ci · that branch</div>
+        <div class="box e">timer · stall backstop 9–18 weekdays</div>
+        <div class="box m">unsubscribe when Done</div>
+      </div>
+    </section>
+  </div>
+  <p class="note">No GitHub or Linear webhooks to build. No cron host. Subscriptions live on this conversation and expire — desk renews them.</p>
+
+  <h2>Skills</h2>
+  <div class="row three">
+    <section class="card">
+      <h3 class="k" style="display:inline-block;padding:4px 8px;border-radius:8px;">Keep here</h3>
+      <ul class="plain">
+        <li>product-lifecycle <span>already in rules</span></li>
+        <li>live-product-roster <span>read Linear</span></li>
+        <li>dispatch-runtimes <span>→ CreateAgent</span></li>
+        <li>resolve-pr-reviews</li>
+        <li>cut-a-stable-release</li>
+        <li>cheap-routines <span>cadence</span></li>
+        <li>ground-a-spec-in-data</li>
+      </ul>
+    </section>
+    <section class="card">
+      <h3 class="d" style="display:inline-block;padding:4px 8px;border-radius:8px;">Already in Cursor</h3>
+      <ul class="plain">
+        <li>poteto-mode</li>
+        <li>babysit <span>≈ PR Reviewer</span></li>
+        <li>unslop</li>
+        <li>verify-katacode</li>
+      </ul>
+    </section>
+    <section class="card">
+      <h3 class="g" style="display:inline-block;padding:4px 8px;border-radius:8px;">Drop</h3>
+      <ul class="plain">
+        <li>design-grok-bot</li>
+        <li>make-bot-ui <span>webhook pages</span></li>
+        <li>github-on-grok-bot <span>children use gh</span></li>
+      </ul>
+    </section>
+  </div>
+
+  <h2>Gaps</h2>
+  <div class="row three">
+    <section class="card">
+      <div class="box g">Linear edits</div>
+      <p class="note">Create + status only. No label / assignee / title wake.</p>
+    </section>
+    <section class="card">
+      <div class="box g">Scheduled Actions</div>
+      <p class="note">Nightly workflows do not ping us. Timer after the window.</p>
+    </section>
+    <section class="card">
+      <div class="box g">Long desk chat</div>
+      <p class="note">Grokbot split cheap routines onto short bots. Stay quiet. Coarse timers. Split later if cost hurts.</p>
+    </section>
+  </div>
+
+  <h2>One choice</h2>
+  <div class="choice">
+    <section class="card">
+      <h3>A · One factory Project</h3>
+      <p class="note">This desk watches every live Linear project + repo. Closest to today’s Program Manager.</p>
+    </section>
+    <div class="or">OR</div>
+    <section class="card">
+      <h3>B · One Project per product</h3>
+      <p class="note">Kata Code stays here. Agentis / Devbox get their own desks. A later factory Project only briefs.</p>
+    </section>
+  </div>
+
+  <h2>First week</h2>
+  <ol class="steps">
+    <li><div>Subscribe live Linear projects + <code>gannonh/kata-code</code> (add other live repos if you pick A).</div></li>
+    <li><div>Weekday 9am PT timer. Quiet if nothing stuck.</div></li>
+    <li><div>Next Start you drag: desk launches one Build child on that Linear branch. Model from labels, else Grok 4.6 extra-high.</div></li>
+    <li><div>While a PR is up: PR + CI subscriptions. Human Review = full stop.</div></li>
+    <li><div>Ship and nightly audit stay off until you ask.</div></li>
+  </ol>
+</main>
+</body>
+</html>
