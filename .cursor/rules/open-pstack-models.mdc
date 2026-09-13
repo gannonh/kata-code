@@ -2,7 +2,6 @@
 description: pstack per-role model choices (overrides skill defaults)
 alwaysApply: true
 ---
-<!-- pstack:models:begin -->
 # pstack model configuration
 
 Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one panel lane.
@@ -10,19 +9,17 @@ Provider-qualified per-role choices. Read the installed pstack provider-dispatch
 feature, refactoring: cursor:cursor-grok-4.6@xhigh
 bug-fix: cursor:cursor-grok-4.6@xhigh
 perf-issue: cursor:cursor-grok-4.6@xhigh
-hillclimb: cursor:cursor-grok-4.6@xhig
-judgment and prose: cursor:cursor-grok-4.6@xhigh
-hardest tasks: codex:gpt-6-astra@max
-how explorer: cursor:cursor-grok-4.6@xhigh
+hillclimb: cursor:cursor-grok-4.6@medium
+judgment and prose: cursor:cursor-grok-4.6@high
+hardest tasks: claude:fable@xhigh
+how explorer: cursor:cursor-grok-4.6@medium
 how explainer: cursor:cursor-grok-4.6@xhigh
-how critics: cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, ccursor:cursor-grok-4.6@xhigh
 why investigators: inherit-parent
 why synthesizer: inherit-parent
 reflect tooling: inherit-parent
 reflect judgment, divergent, synthesizer: inherit-parent
-arena runners: cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, ccursor:cursor-grok-4.6@xhigh
-arena cross-judge pool: cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, ccursor:cursor-grok-4.6@xhigh
-swarm workers: cursor:cursor-grok-4.6@xhigh
-architect runners: cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, ccursor:cursor-grok-4.6@xhigh
-interrogate reviewers: cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, cursor:cursor-grok-4.6@xhigh, ccursor:cursor-grok-4.6@xhigh
-<!-- pstack:models:end -->
+arena runners: cursor:cursor-grok-4.6@xhigh, claude:fable@xhigh, codex:gpt-5.6-sol@max, claude:opus@xhigh
+arena cross-judge pool: cursor:cursor-grok-4.6@xhigh, claude:fable@xhigh, codex:gpt-5.6-sol@max, claude:opus@xhigh
+swarm workers: cursor:cursor-grok-4.6@medium
+architect runners: cursor:cursor-grok-4.6@xhigh, claude:fable@xhigh, codex:gpt-5.6-sol@max, claude:opus@xhigh
+interrogate reviewers: cursor:cursor-grok-4.6@xhigh, claude:fable@xhigh, codex:gpt-5.6-sol@max, claude:opus@xhigh

@@ -4,11 +4,12 @@ alwaysApply: true
 ---
 ## Sub-agents
 
-Use sub-agents to delegate work. Focus on coordination, review and integration. Use the following guidance when dispatching tasks:
+Use sub-agents to delegate work. Focus on coordination, review, and integration. Cursor's first-party models are Grok 4.6 and Composer 2.5, and they are the only models a Task may name: the Cursor subscription bills them at a lower rate than the Claude and OpenAI models it also serves.
 
-- `inherit`: Default. Keep the child on this chat’s model when you want the same judgment, context, and Auto routing.
-- `cursor-grok-4.6-xhigh`: Hard implementation, refactors, and bugs where you want Composer’s stronger coding pass over speed.
-- `composer-2.5-fast`: Mechanical, high-volume, or latency-sensitive work: targeted fixes, perf/hillclimb loops, tooling, and swarm workers.
-- `cursor-grok-4.6-xhigh`: Exploration, explanation, judgment, and prose when you want current Grok at extra-high reasoning.
+- `inherit`: Default. Keep the child on this chat's model when it needs the same judgment, context, tools, and MCP servers. Required for anything that queries Linear, GitHub, or another MCP.
+- `cursor-grok-4.6-xhigh`: Implementation with a named scope, bug and perf fixes after the cause is known, refactors against a pinned contract, and explanatory synthesis.
+- `cursor-grok-4.6-high`: Planning exploration, judgment, and prose. The lean tier for implementation.
+- `cursor-grok-4.6-medium`: Narrow read-only work and work the parent verifies mechanically: exploration angles, hillclimb hypotheses, swarm verification lanes.
+- `composer-2.5`: Mechanical, high-volume, or latency-sensitive edits the parent checks itself: targeted fixes, tooling, and swarm workers. Not for implementation that needs design judgment or for synthesis.
 
-Never pass any other Task `model` slug. `claude-*`, `gpt-*`, `gemini-*`, `pstack-fable-max`, and `pstack-opus-xhigh` are forbidden even when listed in the Task schema.
+Never pass any other Task `model` slug. `claude-*`, `gpt-*`, `gemini-*`, `pstack-fable-max`, and `pstack-opus-xhigh` are forbidden even when listed in the Task schema. When a role needs Fable, Opus, Sol, or Astra, run it as a pstack external lane through that provider's own CLI, where it bills to that provider's subscription. The pstack model sheet already does this for panel roles.
