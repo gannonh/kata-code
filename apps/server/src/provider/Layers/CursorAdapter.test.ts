@@ -1222,90 +1222,94 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
     }).pipe(TestClock.withLive),
   );
 
-  it.effect("does not cancel the active prompt approval when a queued sendTurn is interrupted", () =>
-    Effect.gen(function* () {
-      const adapter = yield* CursorAdapter;
-      const serverSettings = yield* ServerSettingsService;
-      const threadId = ThreadId.make("cursor-queued-sendturn-interrupt");
-      const wrapperPath = yield* Effect.promise(() =>
-        makeMockAgentWrapper({ T3_ACP_EMIT_TOOL_CALLS: "1" }),
-      );
-      yield* serverSettings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
-
-      const approvalOpened = yield* Deferred.make<ProviderRuntimeEvent>();
-      const requestResolved = yield* Deferred.make<ProviderRuntimeEvent>();
-      const turnCompletedReady = yield* Deferred.make<ProviderRuntimeEvent>();
-      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
-        if (String(event.threadId) !== String(threadId)) {
-          return Effect.void;
-        }
-        if (event.type === "request.opened") {
-          return Deferred.succeed(approvalOpened, event).pipe(Effect.ignore);
-        }
-        if (event.type === "request.resolved") {
-          return Deferred.succeed(requestResolved, event).pipe(Effect.ignore);
-        }
-        if (event.type === "turn.completed") {
-          return Deferred.succeed(turnCompletedReady, event).pipe(Effect.ignore);
-        }
-        return Effect.void;
-      }).pipe(Effect.forkChild);
-
-      yield* adapter.startSession({
-        threadId,
-        provider: ProviderDriverKind.make("cursor"),
-        cwd: process.cwd(),
-        runtimeMode: "approval-required",
-        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
-      });
-
-      const firstTurnFiber = yield* adapter
-        .sendTurn({
-          threadId,
-          input: "wait for approval",
-          attachments: [],
-        })
-        .pipe(Effect.forkChild);
-
-      const opened = yield* Deferred.await(approvalOpened).pipe(Effect.timeout("5 seconds"));
-      assert.equal(opened.type, "request.opened");
-
-      const queuedTurnFiber = yield* adapter
-        .sendTurn({
-          threadId,
-          input: "steer while the first prompt is waiting",
-          attachments: [],
-        })
-        .pipe(Effect.forkChild);
-
-      yield* Effect.sleep("300 millis");
-      yield* Fiber.interrupt(queuedTurnFiber);
-
-      const resolvedEarly = yield* Deferred.await(requestResolved).pipe(
-        Effect.timeoutOption("300 millis"),
-      );
-      assert.isTrue(Option.isNone(resolvedEarly));
-
-      if (opened.type === "request.opened" && opened.requestId) {
-        yield* adapter.respondToRequest(
-          threadId,
-          ApprovalRequestId.make(String(opened.requestId)),
-          "accept",
+  it.effect(
+    "does not cancel the active prompt approval when a queued sendTurn is interrupted",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* CursorAdapter;
+        const serverSettings = yield* ServerSettingsService;
+        const threadId = ThreadId.make("cursor-queued-sendturn-interrupt");
+        const wrapperPath = yield* Effect.promise(() =>
+          makeMockAgentWrapper({ T3_ACP_EMIT_TOOL_CALLS: "1" }),
         );
-      }
+        yield* serverSettings.updateSettings({
+          providers: { cursor: { binaryPath: wrapperPath } },
+        });
 
-      const turnCompleted = yield* Deferred.await(turnCompletedReady).pipe(
-        Effect.timeout("5 seconds"),
-      );
-      assert.equal(turnCompleted.type, "turn.completed");
-      if (turnCompleted.type === "turn.completed") {
-        assert.equal(turnCompleted.payload.state, "completed");
-      }
+        const approvalOpened = yield* Deferred.make<ProviderRuntimeEvent>();
+        const requestResolved = yield* Deferred.make<ProviderRuntimeEvent>();
+        const turnCompletedReady = yield* Deferred.make<ProviderRuntimeEvent>();
+        const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) => {
+          if (String(event.threadId) !== String(threadId)) {
+            return Effect.void;
+          }
+          if (event.type === "request.opened") {
+            return Deferred.succeed(approvalOpened, event).pipe(Effect.ignore);
+          }
+          if (event.type === "request.resolved") {
+            return Deferred.succeed(requestResolved, event).pipe(Effect.ignore);
+          }
+          if (event.type === "turn.completed") {
+            return Deferred.succeed(turnCompletedReady, event).pipe(Effect.ignore);
+          }
+          return Effect.void;
+        }).pipe(Effect.forkChild);
 
-      yield* Fiber.join(firstTurnFiber);
-      yield* Fiber.interrupt(runtimeEventsFiber);
-      yield* adapter.stopSession(threadId);
-    }).pipe(TestClock.withLive),
+        yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("cursor"),
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+          modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+        });
+
+        const firstTurnFiber = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "wait for approval",
+            attachments: [],
+          })
+          .pipe(Effect.forkChild);
+
+        const opened = yield* Deferred.await(approvalOpened).pipe(Effect.timeout("5 seconds"));
+        assert.equal(opened.type, "request.opened");
+
+        const queuedTurnFiber = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "steer while the first prompt is waiting",
+            attachments: [],
+          })
+          .pipe(Effect.forkChild);
+
+        yield* Effect.sleep("300 millis");
+        yield* Fiber.interrupt(queuedTurnFiber);
+
+        const resolvedEarly = yield* Deferred.await(requestResolved).pipe(
+          Effect.timeoutOption("300 millis"),
+        );
+        assert.isTrue(Option.isNone(resolvedEarly));
+
+        if (opened.type === "request.opened" && opened.requestId) {
+          yield* adapter.respondToRequest(
+            threadId,
+            ApprovalRequestId.make(String(opened.requestId)),
+            "accept",
+          );
+        }
+
+        const turnCompleted = yield* Deferred.await(turnCompletedReady).pipe(
+          Effect.timeout("5 seconds"),
+        );
+        assert.equal(turnCompleted.type, "turn.completed");
+        if (turnCompleted.type === "turn.completed") {
+          assert.equal(turnCompleted.payload.state, "completed");
+        }
+
+        yield* Fiber.join(firstTurnFiber);
+        yield* Fiber.interrupt(runtimeEventsFiber);
+        yield* adapter.stopSession(threadId);
+      }).pipe(TestClock.withLive),
   );
 
   it.effect("stopping a session settles pending approval waits", () =>
