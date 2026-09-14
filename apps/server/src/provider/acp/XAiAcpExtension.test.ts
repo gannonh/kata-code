@@ -1,12 +1,17 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as TestClock from "effect/testing/TestClock";
 import { describe, expect } from "vite-plus/test";
 
 import {
@@ -43,6 +48,18 @@ const makePromptCompletionRuntime = (env: NodeJS.ProcessEnv) =>
   });
 
 const decodeXAiAskUserQuestionRequest = Schema.decodeUnknownSync(XAiAskUserQuestionRequest);
+
+const recordedRequestMethods = (requestLogPath: string) => {
+  if (!NodeFS.existsSync(requestLogPath)) {
+    return [];
+  }
+  return NodeFS.readFileSync(requestLogPath, "utf8")
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as { method?: string })
+    .map((entry) => entry.method);
+};
 
 describe("XAiAcpExtension", () => {
   it("extracts questions from the real xAI ask_user_question payload shape", () => {
@@ -282,10 +299,13 @@ describe("XAiAcpExtension", () => {
     });
   });
 
-  it.effect("resolves a hung standard prompt from xAI prompt completion", () =>
-    Effect.gen(function* () {
+  it.effect("resolves a hung standard prompt from xAI prompt completion", () => {
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "xai-prompt-complete-"));
+    const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+    return Effect.gen(function* () {
       const runtime = yield* makePromptCompletionRuntime({
         T3_ACP_EMIT_XAI_PROMPT_COMPLETE_THEN_HANG: "1",
+        T3_ACP_REQUEST_LOG_PATH: requestLogPath,
       });
       yield* runtime.start();
 
@@ -303,8 +323,54 @@ describe("XAiAcpExtension", () => {
           requestId: promptId,
         },
       });
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
+      yield* Effect.sleep("500 millis");
+      expect(recordedRequestMethods(requestLogPath)).toContain("session/prompt");
+      expect(recordedRequestMethods(requestLogPath)).not.toContain("session/cancel");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+      TestClock.withLive,
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
+    );
+  });
+
+  it.effect("sends session/cancel when an xAI-wrapped prompt caller is interrupted", () => {
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "xai-prompt-interrupt-"));
+    const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+    return Effect.gen(function* () {
+      const dispatched = yield* Deferred.make<void>();
+      const runtime = yield* makePromptCompletionRuntime({
+        T3_ACP_HANG_FIRST_PROMPT_FOREVER: "1",
+        T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+      });
+      yield* runtime.start();
+      const prompt = yield* runtime
+        .prompt(
+          {
+            prompt: [{ type: "text", text: "hang" }],
+          },
+          { dispatched },
+        )
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(dispatched);
+      yield* Fiber.interrupt(prompt);
+      const cancelLogged = yield* Effect.gen(function* () {
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          if (recordedRequestMethods(requestLogPath).includes("session/cancel")) {
+            return true;
+          }
+          yield* Effect.sleep("50 millis");
+        }
+        return false;
+      }).pipe(Effect.timeoutOption("3 seconds"));
+      expect(Option.getOrElse(cancelLogged, () => false)).toBe(true);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+      TestClock.withLive,
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
+    );
+  });
 
   it.effect("fails a hung standard prompt from an xAI rate-limit completion", () =>
     Effect.gen(function* () {
