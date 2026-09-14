@@ -92,7 +92,9 @@ Required `production` environment secrets:
 The account-scoped repository credentials are consumed by Alchemy while provisioning relay stages; they
 are not bound into the relay Worker. The production deployment uses an Axiom personal access token,
 so `AXIOM_ORG_ID` must accompany `AXIOM_TOKEN`. The `prod` stage owns the retained PlanetScale
-database. Local personal stages provision isolated branches from it and are never deployed by CI.
+database. To raise its replica count without replacing the database, follow
+[Scale production relay Postgres to HA](relay-planetscale-ha.md). Local personal stages provision
+isolated branches from it and are never deployed by CI.
 Production adopts the configured relay API and tunnel DNS zones as retained Cloudflare resources.
 Personal stages reference the production-owned zones.
 
