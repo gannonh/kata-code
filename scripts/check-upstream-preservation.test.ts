@@ -16,6 +16,7 @@ import {
   resolveEvidenceArtifact,
   validateEvidenceBinding,
   runPreservation,
+  PRESERVATION_CHECKS,
   validateIntegrationRecord,
   validateInventory,
   validateManualEvidence,
@@ -287,6 +288,7 @@ describe("upstream preservation CLI", () => {
     expect(workflow).toContain(
       'git cat-file -e "$BASE_SHA:scripts/check-upstream-preservation.ts"',
     );
+    expect(workflow).not.toContain("KataUpstreamUpgrade.test.ts");
   });
 
   it("loads an isolated trusted checker through the installed workspace dependencies", () => {
@@ -800,6 +802,70 @@ describe("upstream preservation CLI", () => {
         reason: "trusted assertion changed apps/server/src/kataSandbox/sandboxFeature.test.ts",
       });
     });
+  });
+
+  it("does not freeze KataUpstreamUpgrade.test.ts as a trusted assertion", () => {
+    const check = PRESERVATION_CHECKS.find((candidate) => candidate.id === "migration-identity");
+    expect(check?.id).toBe("migration-identity");
+    const command = check?.commands[0];
+    if (command === undefined) throw new Error("migration-identity has no command");
+    expect(check?.ownerPaths).toEqual([
+      "apps/server/src/persistence/Migrations.ts",
+      "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
+      "apps/server/src/kataSandbox/migrations.ts",
+    ]);
+    expect(command.trustedPaths).toEqual(["apps/server/src/kataSandbox/migrations.test.ts"]);
+    expect(command.requiredPaths).toEqual([
+      "apps/server/src/persistence/Migrations.ts",
+      "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
+      "apps/server/src/kataSandbox/migrations.test.ts",
+    ]);
+    const emptyRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kat-3340-required-"));
+    try {
+      expect(missingRequiredPaths(emptyRoot, command)).toEqual(command.requiredPaths);
+    } finally {
+      NodeFS.rmSync(emptyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts a KataUpstreamUpgrade.test.ts catalog-range edit", () => {
+    withSandboxRegressionWorktree((temporaryRoot, candidateSha) => {
+      const assertionPath = NodePath.join(
+        temporaryRoot,
+        "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
+      );
+      const original = NodeFS.readFileSync(assertionPath, "utf8");
+      const mutated = original.replace(
+        "[43, 44, 45, 46, 47, 48, 49, 50, 51]",
+        "[43, 44, 45, 46, 47, 48, 49, 50, 51, 52]",
+      );
+      if (mutated === original) throw new Error("Upgrade test range fixture did not mutate.");
+      NodeFS.writeFileSync(assertionPath, mutated);
+      const report = runPreservation({
+        mode: "ci",
+        repositoryRoot: temporaryRoot,
+        candidate: candidateSha,
+        base: currentSha,
+        upstream: upstreamSha,
+        upstreamBase: upstreamBaseSha,
+        commandExecutor: () => "PASS",
+        executionTreeCheck: () => undefined,
+      });
+      expect(report.lines).toContain("CHECK id=migration-identity status=PASS");
+      expect(report.lines).not.toContain(
+        "CHECK id=migration-identity status=FAIL detail=trusted assertion changed apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
+      );
+    }, false);
+  });
+
+  it("keeps shipped migration catalog IDs 41 through 51", () => {
+    const catalog = NodeFS.readFileSync(
+      NodePath.join(repositoryRoot, "apps/server/src/persistence/Migrations.ts"),
+      "utf8",
+    );
+    for (const id of [41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51]) {
+      expect(catalog).toContain(`[${id},`);
+    }
   });
 
   it("requires exact machine-verifiable evidence bindings", () => {
