@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 import { describe, expect, it } from "@effect/vitest";
 
 import {
@@ -247,8 +247,13 @@ describe("confirmRestoredPostgresGeneration", () => {
 
 describe("patched alchemy PostgresDatabase", () => {
   it("plans replica count changes as in-place updates", () => {
-    const alchemyPlanetscale = dirname(fileURLToPath(import.meta.resolve("alchemy/Planetscale")));
-    const source = readFileSync(join(alchemyPlanetscale, "Postgres/PostgresDatabase.js"), "utf8");
+    const alchemyPlanetscale = NodePath.dirname(
+      NodeURL.fileURLToPath(import.meta.resolve("alchemy/Planetscale")),
+    );
+    const source = NodeFS.readFileSync(
+      NodePath.join(alchemyPlanetscale, "Postgres/PostgresDatabase.js"),
+      "utf8",
+    );
     expect(source).toMatch(
       /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "update", stables \}/,
     );
@@ -260,7 +265,7 @@ describe("patched alchemy PostgresDatabase", () => {
   });
 
   it("targets two replicas on the prod shared database", () => {
-    const source = readFileSync(new URL("./db.ts", import.meta.url), "utf8");
+    const source = NodeFS.readFileSync(new URL("./db.ts", import.meta.url), "utf8");
     expect(source).toMatch(/replicas:\s*2/);
   });
 });
