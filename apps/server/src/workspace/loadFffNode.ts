@@ -15,7 +15,7 @@ function isEsmOnlyLoadError(cause: unknown): boolean {
 }
 
 export async function loadFffNode(
-  requireFn: NodeJS.Require = requireForFff,
+  requireFn: (id: string) => unknown = requireForFff,
 ): Promise<typeof FffNode> {
   try {
     return requireFn(FFF_NODE_SPECIFIER) as typeof FffNode;

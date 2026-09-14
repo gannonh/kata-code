@@ -11,14 +11,11 @@ it("loads FileFinder through the patched require export", async () => {
 });
 
 it("falls back to import when package exports block require", async () => {
-  const requireFn = Object.assign(
-    () => {
-      const error = new Error("Package path not exported") as Error & { code: string };
-      error.code = "ERR_PACKAGE_PATH_NOT_EXPORTED";
-      throw error;
-    },
-    { main: undefined },
-  ) as NodeJS.Require;
+  const requireFn = () => {
+    const error = new Error("Package path not exported") as Error & { code: string };
+    error.code = "ERR_PACKAGE_PATH_NOT_EXPORTED";
+    throw error;
+  };
 
   const loaded = await loadFffNode(requireFn);
   expect(typeof loaded.FileFinder.create).toBe("function");
