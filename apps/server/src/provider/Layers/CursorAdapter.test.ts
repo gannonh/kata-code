@@ -1194,6 +1194,11 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         .pipe(Effect.forkChild);
 
       yield* Deferred.await(turnStarted);
+      const promptStarted = yield* waitForJsonLogMatch(
+        requestLogPath,
+        (entry) => entry.method === "session/prompt",
+      );
+      assert.isTrue(promptStarted.some((entry) => entry.method === "session/prompt"));
       yield* Fiber.interrupt(sendTurnFiber);
 
       const turnCompleted = yield* Deferred.await(turnCompletedReady).pipe(

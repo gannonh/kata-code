@@ -1121,6 +1121,25 @@ export function makeCursorAdapter(
             resumeCursor: ctx.session.resumeCursor,
           };
         }).pipe(
+          Effect.onInterrupt(() =>
+            Effect.gen(function* () {
+              yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
+              yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
+              if (ctx.promptsInFlight === 1) {
+                yield* offerRuntimeEvent({
+                  type: "turn.completed",
+                  ...(yield* makeEventStamp()),
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  turnId,
+                  payload: {
+                    state: "cancelled",
+                    stopReason: "cancelled",
+                  },
+                });
+              }
+            }),
+          ),
           Effect.ensuring(
             Effect.sync(() => {
               ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);

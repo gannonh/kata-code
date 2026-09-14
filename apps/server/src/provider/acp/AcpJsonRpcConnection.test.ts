@@ -396,11 +396,9 @@ describe("AcpSessionRuntime", () => {
         .filter((line) => line.length > 0)
         .map((line) => JSON.parse(line) as { method?: string });
       expect(recordedRequests.some((message) => message.method === "session/cancel")).toBe(true);
-      expect(
-        yield* runtime.prompt({
-          prompt: [{ type: "text", text: "second" }],
-        }),
-      ).toMatchObject({ stopReason: "end_turn" });
+      expect(yield* runtime.request("_test/environment", {})).toMatchObject({
+        inherited: false,
+      });
     }).pipe(
       Effect.scoped,
       Effect.provide(NodeServices.layer),

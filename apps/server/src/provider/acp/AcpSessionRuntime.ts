@@ -1017,18 +1017,23 @@ export const make = (
               ),
             (activePrompt, result) =>
               Effect.gen(function* () {
-                if (
-                  options.cancelBehavior === "wait-for-prompt" &&
-                  Exit.isFailure(result) &&
-                  Cause.hasInterrupts(result.cause)
-                ) {
-                  yield* retireRuntime(
-                    new EffectAcpErrors.AcpTransportError({
-                      method: "session/prompt",
-                      detail: "The ACP prompt stopped before the agent confirmed completion.",
-                      cause: undefined,
-                    }),
-                  );
+                if (Exit.isFailure(result) && Cause.hasInterrupts(result.cause)) {
+                  if (options.cancelBehavior === "wait-for-prompt") {
+                    yield* retireRuntime(
+                      new EffectAcpErrors.AcpTransportError({
+                        method: "session/prompt",
+                        detail: "The ACP prompt stopped before the agent confirmed completion.",
+                        cause: undefined,
+                      }),
+                    );
+                  } else {
+                    yield* getStartedState.pipe(
+                      Effect.flatMap((started) =>
+                        acp.agent.cancel({ sessionId: started.sessionId }),
+                      ),
+                      Effect.ignore,
+                    );
+                  }
                 }
                 yield* Fiber.interrupt(activePrompt.fiber).pipe(Effect.ignore);
                 yield* Ref.set(activePromptRef, Option.none());
