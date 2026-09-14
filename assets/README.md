@@ -55,6 +55,23 @@ Kata Android launcher foregrounds use the existing variant universal PNGs from `
 `assets/nightly`, and `assets/prod`. Splash screens use each variant's iOS 1024 PNG.
 `apps/mobile/app.config.ts` selects these assets through `BRAND_ASSET_PATHS`.
 
-The upstream `icons:export:android` script renders T3 Icon Composer layers into separate files in
-`apps/mobile/assets`. Those outputs are not used by Kata's configuration or checked in.
-The existing `android-icon-mark.png` monochrome asset remains unchanged in this update.
+All three variants share two white silhouettes of the Kata mark in `apps/mobile/assets`:
+
+- `android-icon-mark.png` is the 432×432 themed (monochrome) launcher icon. The mark fills 44% of the canvas height so it stays inside the circular launcher mask.
+- `android-notification-icon.png` is the 96×96 notification small icon. The mark fills the 20dp live area of the 24dp icon.
+
+`vp run icons:export` does not write these files. After changing the mark in
+`dev/app-icon.icon/Assets/text.svg`, rerender both from the repository root with `rsvg-convert`
+(`brew install librsvg`):
+
+```sh
+render() {
+  sed "s|width=\"128\" height=\"128\" viewBox=\"0 0 128 128\"|width=\"$1\" height=\"$1\" viewBox=\"$2\"|" \
+    assets/dev/app-icon.icon/Assets/text.svg | rsvg-convert -f png -o "$3"
+}
+render 432 "-44.545 -40.545 209.09 209.09" apps/mobile/assets/android-icon-mark.png
+render 96 "4.8 8.8 110.4 110.4" apps/mobile/assets/android-notification-icon.png
+```
+
+Each viewBox centers the mark's 88×92 bounds in the source's 128-unit space and scales the canvas
+so the mark reaches the target height.
