@@ -1,6 +1,6 @@
 # Verified history and gotchas
 
-These observations were checked against Kata main `0c2aa608219f35ae1254092fa81a25ff26aac6d3` on September 10, 2026. Resolve current paths and issue states before applying them. Repository documents are the detailed evidence; this file preserves lessons that change integration decisions.
+These observations were checked against Kata main `0c2aa608219f35ae1254092fa81a25ff26aac6d3` on September 10, 2026. The last-integration record was checked on merge `9926bc3db3ee0edc0579c289f7d9ce7f5c71bdbe` on September 12, 2026. Resolve current paths and issue states before applying them. Repository documents are the detailed evidence; this file preserves lessons that change integration decisions.
 
 ## Last upstream integration
 
@@ -8,7 +8,7 @@ These observations were checked against Kata main `0c2aa608219f35ae1254092fa81a2
 
 Read `docs/upstream/kat-3329-intake.md` and `docs/upstream/kat-3329-decisions.tsv`.
 
-The previous integration [KAT-3297 / PR #194](https://github.com/gannonh/kata-code/pull/194) squashed to `31828c7463c75197e288c6f52bff77c2c99a93fe`, so pin `12391bd0d38eef6655b7a9f8945d0cb5febadc2b` was not an ancestor of main. That run's dry merge reported 443 content conflicts. Its intake, decisions, and verification files remain the prior-run record. KAT-3329 recorded the squash-lost pin with `git merge --strategy=ours --no-ff` before merging the frozen tip, then landed with GitHub's merge-commit method. Prefer that path. Check ancestry after landing, not just on the PR branch.
+The previous integration [KAT-3297 / PR #194](https://github.com/gannonh/kata-code/pull/194) squashed to `31828c7463c75197e288c6f52bff77c2c99a93fe`, so pin `12391bd0d38eef6655b7a9f8945d0cb5febadc2b` was not an ancestor of main. That run's dry merge reported 443 content conflicts. Its intake, decisions, and verification files remain the prior-run record. KAT-3329 recorded that lost pin with `git merge --strategy=ours --no-ff` before merging the frozen tip, then landed with GitHub's merge-commit method. Pin `36668dbe4fe2f8c881cc4f93bc675413eef1406f` is now an ancestor of that merge, so the next run omits the squash-recovery anchor unless a later squash loses ancestry. Check ancestry after landing, not just on the PR branch.
 
 ## Preserve behavior through refactors
 
