@@ -1,0 +1,243 @@
+diff --git a/lib/Planetscale/Database.d.ts b/lib/Planetscale/Database.d.ts
+index f629551..36f0655 100644
+--- a/lib/Planetscale/Database.d.ts
++++ b/lib/Planetscale/Database.d.ts
+@@ -27,8 +27,7 @@ export interface BaseDatabaseProps {
+     region?: DatabaseRegion;
+     /**
+      * Number of replicas for the database. `0` for non-HA, `2+` for HA.
+-     * Create-only for PostgreSQL databases; MySQL databases reconcile
+-     * changes in place ({@link MySQLDatabaseProps.replicas}).
++     * PostgreSQL and MySQL databases both reconcile replica changes in place.
+      */
+     replicas?: number;
+     /**
+diff --git a/lib/Planetscale/Postgres/PostgresDatabase.d.ts b/lib/Planetscale/Postgres/PostgresDatabase.d.ts
+index e572f23..b356a01 100644
+--- a/lib/Planetscale/Postgres/PostgresDatabase.d.ts
++++ b/lib/Planetscale/Postgres/PostgresDatabase.d.ts
+@@ -37,6 +37,13 @@ export interface PostgresDatabaseProps extends BaseDatabaseProps {
+ export interface PostgresDatabaseAttributes extends BaseDatabaseAttributes {
+     /** PostgreSQL CPU architecture. */
+     arch: "x86" | "arm";
++    /**
++     * Desired replica count from the last reconcile, when known.
++     * PlanetScale branch reads expose only `has_replicas`.
++     */
++    desiredReplicas?: number;
++    /** Whether the default branch currently has HA replicas. */
++    hasReplicas?: boolean;
+ }
+ /**
+  * A PostgreSQL PlanetScale database. For MySQL, use {@link MySQLDatabase}
+diff --git a/lib/Planetscale/Postgres/PostgresDatabase.js b/lib/Planetscale/Postgres/PostgresDatabase.js
+index e779446..6be5518 100644
+--- a/lib/Planetscale/Postgres/PostgresDatabase.js
++++ b/lib/Planetscale/Postgres/PostgresDatabase.js
+@@ -10,7 +10,7 @@ import { hashImports, hashMigrations } from "../../SQL/SqlFile.js";
+ import { diffMigrations, migrationsAttrs, migrationsInputOf, stampedOf, } from "../../SQL/Migrations/index.js";
+ import { recordsEqual } from "../../Util/equal.js";
+ import { PlanetscaleConflict, waitForBranchReady, waitForDatabaseReady, } from "../Util.js";
+-import { ensurePostgresProductionBranchClusterSize, toPostgresClusterSku, } from "./PostgresClusterSize.js";
++import { ensurePostgresProductionBranchClusterSize, toPostgresClusterSku, waitForPendingPostgresChanges, } from "./PostgresClusterSize.js";
+ import { runPostgresImports, runPostgresMigrations, } from "./PostgresMigrations.js";
+ /** @resource */
+ export const PostgresDatabase = Resource("Planetscale.PostgresDatabase");
+@@ -42,7 +42,7 @@ export const PostgresDatabaseProvider = () => Provider.succeed(PostgresDatabase,
+             return { action: "replace" };
+         }
+         if (news.replicas !== olds.replicas) {
+-            return { action: "replace" };
++            return { action: "update", stables };
+         }
+         const oldArch = output?.arch ?? olds.arch ?? "x86";
+         if (news.arch && news.arch !== oldArch) {
+@@ -118,6 +118,8 @@ export const PostgresDatabaseProvider = () => Provider.succeed(PostgresDatabase,
+             requireApprovalForDeploy: data.require_approval_for_deploy ?? false,
+             restrictBranchRegion: data.restrict_branch_region ?? false,
+             productionBranchWebConsole: data.production_branch_web_console ?? false,
++            desiredReplicas: output?.desiredReplicas ?? olds?.replicas,
++            hasReplicas: branch?.has_replicas,
+         };
+     }),
+     reconcile: Effect.fn(function* ({ id, news, output, session }) {
+@@ -207,6 +209,37 @@ export const PostgresDatabaseProvider = () => Provider.succeed(PostgresDatabase,
+         // Sync cluster size on the active default branch.
+         const branch = news.defaultBranch ?? updated.default_branch ?? "main";
+         yield* ensurePostgresProductionBranchClusterSize(organization, updated.name, branch, news.clusterSize);
++        let hasReplicas = output?.hasReplicas;
++        if (news.replicas !== undefined) {
++            const current = yield* planetscale.getBranch({
++                organization,
++                database: updated.name,
++                branch,
++            });
++            const desiredReplicas = news.replicas;
++            const desiredHasReplicas = desiredReplicas > 0;
++            const shouldApplyReplicaChange = current.has_replicas !== desiredHasReplicas ||
++                (desiredHasReplicas && output?.desiredReplicas !== desiredReplicas);
++            if (shouldApplyReplicaChange) {
++                yield* waitForPendingPostgresChanges(organization, updated.name, branch);
++                const change = yield* planetscale.updateBranchChangeRequest({
++                    organization,
++                    database: updated.name,
++                    branch,
++                    replicas: desiredReplicas,
++                });
++                yield* waitForPendingPostgresChanges(organization, updated.name, branch, change.id);
++                const after = yield* planetscale.getBranch({
++                    organization,
++                    database: updated.name,
++                    branch,
++                });
++                hasReplicas = after.has_replicas;
++            }
++            else {
++                hasReplicas = current.has_replicas;
++            }
++        }
+         const migrationTarget = {
+             organization,
+             database: updated.name,
+@@ -240,6 +273,8 @@ export const PostgresDatabaseProvider = () => Provider.succeed(PostgresDatabase,
+             requireApprovalForDeploy: updated.require_approval_for_deploy ?? false,
+             restrictBranchRegion: updated.restrict_branch_region ?? false,
+             productionBranchWebConsole: updated.production_branch_web_console ?? false,
++            desiredReplicas: news.replicas ?? output?.desiredReplicas,
++            hasReplicas,
+         };
+     }),
+     delete: Effect.fn(function* ({ output }) {
+@@ -286,6 +321,8 @@ export const PostgresDatabaseProvider = () => Provider.succeed(PostgresDatabase,
+                 requireApprovalForDeploy: data.require_approval_for_deploy ?? false,
+                 restrictBranchRegion: data.restrict_branch_region ?? false,
+                 productionBranchWebConsole: data.production_branch_web_console ?? false,
++                desiredReplicas: undefined,
++                hasReplicas: branch?.has_replicas,
+             };
+             return attrs;
+         }), { concurrency: 10 });
+diff --git a/src/Planetscale/Database.ts b/src/Planetscale/Database.ts
+index 987db9d..e9c7823 100644
+--- a/src/Planetscale/Database.ts
++++ b/src/Planetscale/Database.ts
+@@ -31,8 +31,7 @@ export interface BaseDatabaseProps {
+ 
+   /**
+    * Number of replicas for the database. `0` for non-HA, `2+` for HA.
+-   * Create-only for PostgreSQL databases; MySQL databases reconcile
+-   * changes in place ({@link MySQLDatabaseProps.replicas}).
++   * PostgreSQL and MySQL databases both reconcile replica changes in place.
+    */
+   replicas?: number;
+ 
+diff --git a/src/Planetscale/Postgres/PostgresDatabase.ts b/src/Planetscale/Postgres/PostgresDatabase.ts
+index a8831b2..5be85b8 100644
+--- a/src/Planetscale/Postgres/PostgresDatabase.ts
++++ b/src/Planetscale/Postgres/PostgresDatabase.ts
+@@ -24,6 +24,7 @@ import {
+ import {
+   ensurePostgresProductionBranchClusterSize,
+   toPostgresClusterSku,
++  waitForPendingPostgresChanges,
+   type PostgresClusterSize,
+ } from "./PostgresClusterSize.ts";
+ import {
+@@ -67,6 +68,13 @@ export interface PostgresDatabaseProps extends BaseDatabaseProps {
+ export interface PostgresDatabaseAttributes extends BaseDatabaseAttributes {
+   /** PostgreSQL CPU architecture. */
+   arch: "x86" | "arm";
++  /**
++   * Desired replica count from the last reconcile, when known.
++   * PlanetScale branch reads expose only `has_replicas`.
++   */
++  desiredReplicas?: number;
++  /** Whether the default branch currently has HA replicas. */
++  hasReplicas?: boolean;
+ }
+ 
+ /**
+@@ -157,7 +165,7 @@ export const PostgresDatabaseProvider = () =>
+       }
+ 
+       if (news.replicas !== olds.replicas) {
+-        return { action: "replace" } as const;
++        return { action: "update", stables } as const;
+       }
+ 
+       const oldArch = output?.arch ?? olds.arch ?? "x86";
+@@ -251,6 +259,8 @@ export const PostgresDatabaseProvider = () =>
+         requireApprovalForDeploy: data.require_approval_for_deploy ?? false,
+         restrictBranchRegion: data.restrict_branch_region ?? false,
+         productionBranchWebConsole: data.production_branch_web_console ?? false,
++        desiredReplicas: output?.desiredReplicas ?? olds?.replicas,
++        hasReplicas: branch?.has_replicas,
+       };
+     }),
+ 
+@@ -360,6 +370,47 @@ export const PostgresDatabaseProvider = () =>
+         news.clusterSize,
+       );
+ 
++      let hasReplicas = output?.hasReplicas;
++      if (news.replicas !== undefined) {
++        const current = yield* planetscale.getBranch({
++          organization,
++          database: updated.name,
++          branch,
++        });
++        const desiredReplicas = news.replicas;
++        const desiredHasReplicas = desiredReplicas > 0;
++        const shouldApplyReplicaChange =
++          current.has_replicas !== desiredHasReplicas ||
++          (desiredHasReplicas && output?.desiredReplicas !== desiredReplicas);
++        if (shouldApplyReplicaChange) {
++          yield* waitForPendingPostgresChanges(
++            organization,
++            updated.name,
++            branch,
++          );
++          const change = yield* planetscale.updateBranchChangeRequest({
++            organization,
++            database: updated.name,
++            branch,
++            replicas: desiredReplicas,
++          });
++          yield* waitForPendingPostgresChanges(
++            organization,
++            updated.name,
++            branch,
++            change.id,
++          );
++          const after = yield* planetscale.getBranch({
++            organization,
++            database: updated.name,
++            branch,
++          });
++          hasReplicas = after.has_replicas;
++        } else {
++          hasReplicas = current.has_replicas;
++        }
++      }
++
+       const migrationTarget = {
+         organization,
+         database: updated.name,
+@@ -404,6 +455,8 @@ export const PostgresDatabaseProvider = () =>
+         restrictBranchRegion: updated.restrict_branch_region ?? false,
+         productionBranchWebConsole:
+           updated.production_branch_web_console ?? false,
++        desiredReplicas: news.replicas ?? output?.desiredReplicas,
++        hasReplicas,
+       } satisfies PostgresDatabaseAttributes;
+     }),
+ 
+@@ -471,6 +524,8 @@ export const PostgresDatabaseProvider = () =>
+               restrictBranchRegion: data.restrict_branch_region ?? false,
+               productionBranchWebConsole:
+                 data.production_branch_web_console ?? false,
++              desiredReplicas: undefined,
++              hasReplicas: branch?.has_replicas,
+             };
+             return attrs;
+           }),

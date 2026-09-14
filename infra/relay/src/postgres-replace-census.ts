@@ -1,4 +1,4 @@
-export type PostgresReplaceActor = "region" | "replicas" | "arch" | "status" | "providerMode";
+export type PostgresReplaceActor = "region" | "arch" | "status" | "providerMode";
 
 export interface PostgresIdentity {
   readonly name?: unknown;
@@ -58,10 +58,6 @@ function archOf(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/**
- * Mirrors alchemy/Planetscale PostgresDatabase.diff replace guards plus
- * Plan mode-switch and in-flight status recovery.
- */
 export function alchemyPostgresReplaceActors(input: {
   readonly news: unknown;
   readonly olds: unknown;
@@ -88,9 +84,6 @@ export function alchemyPostgresReplaceActors(input: {
   const outputRegion = regionSlug(output.region);
   if (newsRegion && outputRegion && newsRegion !== outputRegion) {
     actors.push("region");
-  }
-  if (news.replicas !== olds.replicas) {
-    actors.push("replicas");
   }
   const newsArch = archOf(news.arch);
   const oldArch = archOf(output.arch) ?? archOf(olds.arch) ?? "x86";

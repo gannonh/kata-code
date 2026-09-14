@@ -96,6 +96,7 @@ patchedDependencies:
   '@react-native-ai/apple@0.12.0': 2d09870c2848d185cb05b53ed823a46e12dba519324d8dd8e584e28731990f9d
   '@react-native-menu/menu@2.0.0': f63d256bf6a97a873b5e628eb595bd6ef0075ddd5bdd890fc920f7a6024290dd
   '@react-navigation/native-stack@7.17.6': e667c3cef8c78bb9ff4882ee5bd23a432247b843060a9499eb5f07e9e2295552
+  alchemy@2.0.0-beta.76: 33928db4c9b3b0b304d4e56add1846f8dd43cc9802b9b18cd3ce9b18e7ea5ed8
   dbus-next@0.10.2: cfff57561b0ee59b5addb3b2e6c6f20906e967507a530ab67e8db8108e520ba4
   effect@4.0.0-rc.112: 8bef799f35729cf3465eb428196f617b434a7c9f658d56acb2874d74b21b98b2
   expo-audio@57.0.4: fa9a3e0442ed395d4071bb406e08c3a471c9a84700bdfa0b9ad7ff144c96041a
@@ -796,7 +797,7 @@ importers:
         version: 1.8.0
       alchemy:
         specifier: 2.0.0-beta.76
-        version: 2.0.0-beta.76(197b68e0d20fdf20cf352009eca17c9f)
+        version: 2.0.0-beta.76(patch_hash=33928db4c9b3b0b304d4e56add1846f8dd43cc9802b9b18cd3ce9b18e7ea5ed8)(197b68e0d20fdf20cf352009eca17c9f)
       drizzle-orm:
         specifier: 1.0.0-rc.5-ab785fc
         version: 1.0.0-rc.5-ab785fc(8ab70e2706da13c78d64d8a92fef1884)
@@ -16610,7 +16611,7 @@ snapshots:
       json-schema-traverse: 1.0.0
       require-from-string: 2.0.2
 
-  alchemy@2.0.0-beta.76(197b68e0d20fdf20cf352009eca17c9f):
+  alchemy@2.0.0-beta.76(patch_hash=33928db4c9b3b0b304d4e56add1846f8dd43cc9802b9b18cd3ce9b18e7ea5ed8)(197b68e0d20fdf20cf352009eca17c9f):
     dependencies:
       '@alchemy.run/cloudflare-runtime': 2.0.0-beta.76(@distilled.cloud/cloudflare@1.0.0-rc.8(effect@4.0.0-rc.112(patch_hash=8bef799f35729cf3465eb428196f617b434a7c9f658d56acb2874d74b21b98b2)))(@effect/platform-bun@4.0.0-rc.112(bufferutil@4.1.0)(effect@4.0.0-rc.112(patch_hash=8bef799f35729cf3465eb428196f617b434a7c9f658d56acb2874d74b21b98b2))(utf-8-validate@6.0.6))(@effect/platform-node@4.0.0-rc.112(bufferutil@4.1.0)(effect@4.0.0-rc.112(patch_hash=8bef799f35729cf3465eb428196f617b434a7c9f658d56acb2874d74b21b98b2))(redis@6.2.1)(utf-8-validate@6.0.6))(@types/node@24.12.4)(@voidzero-dev/vite-plus-core@0.3.0(@types/node@24.12.4)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(typescript@7.0.2)(unrun@0.2.39)(yaml@2.9.0))(effect@4.0.0-rc.112(patch_hash=8bef799f35729cf3465eb428196f617b434a7c9f658d56acb2874d74b21b98b2))(rolldown@1.2.5)(typescript@7.0.2)
       '@alchemy.run/floci': 2.0.0-beta.76(effect@4.0.0-rc.112(patch_hash=8bef799f35729cf3465eb428196f617b434a7c9f658d56acb2874d74b21b98b2))

@@ -164,6 +164,7 @@ packageExtensions:
       vite: "catalog:"
 
 patchedDependencies:
+  alchemy@2.0.0-beta.76: patches/alchemy@2.0.0-beta.76.patch
   "@clerk/expo@4.2.0": patches/@clerk__expo@4.2.0.patch
   "@effect/vitest@4.0.0-rc.112": patches/@effect__vitest@4.0.0-rc.112.patch
   "@expo/metro-config@57.0.12": patches/@expo__metro-config@57.0.12.patch

@@ -77,7 +77,7 @@ describe("postgresReplaceCensusFromPlan", () => {
         deletions: {},
       } as never),
     ).toEqual({
-      actors: ["region", "replicas"],
+      actors: ["region"],
       status: "updated",
       providerMode: "live",
       planMode: "live",
@@ -85,6 +85,28 @@ describe("postgresReplaceCensusFromPlan", () => {
       olds: { name: "katacoderelay", replicas: 2 },
       output: { name: "katacoderelay", region: { slug: "us-east" } },
     });
+  });
+
+  it("does not census a replica-only database update", () => {
+    expect(
+      postgresReplaceCensusFromPlan({
+        resources: {
+          RelayPostgresDatabase: {
+            resource: { LogicalId: "RelayPostgresDatabase" },
+            action: "update",
+            mode: "live",
+            props: { name: "katacoderelay", replicas: 2 },
+            state: {
+              status: "updated",
+              providerMode: "live",
+              props: { name: "katacoderelay", replicas: 0 },
+              attr: { id: "s5mpblbu2m4s", name: "katacoderelay" },
+            },
+          },
+        },
+        deletions: {},
+      } as never),
+    ).toBeUndefined();
   });
 
   it("names a stuck replace from the live old generation, not the in-flight props", () => {

@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@effect/vitest";
 
 import {
@@ -19,21 +22,21 @@ describe("alchemyPostgresReplaceActors", () => {
     ).toEqual(["region"]);
   });
 
-  it("names replicas when news and olds differ, including 0 vs missing", () => {
+  it("does not treat replica count as a replace actor", () => {
+    expect(
+      alchemyPostgresReplaceActors({
+        news: { replicas: 2 },
+        olds: { replicas: 0 },
+        output: { region: { slug: "us-west" } },
+      }),
+    ).toEqual([]);
     expect(
       alchemyPostgresReplaceActors({
         news: { replicas: 0 },
         olds: {},
-        output: { region: { slug: "us-west" } },
-      }),
-    ).toEqual(["replicas"]);
-    expect(
-      alchemyPostgresReplaceActors({
-        news: {},
-        olds: { replicas: 0 },
         output: {},
       }),
-    ).toEqual(["replicas"]);
+    ).toEqual([]);
   });
 
   it("names arch only when news.arch is set and differs from output, olds, or x86", () => {
@@ -239,5 +242,30 @@ describe("confirmRestoredPostgresGeneration", () => {
       kind: "refuse",
       reason: "post-write generation state is sleeping",
     });
+  });
+});
+
+describe("patched alchemy PostgresDatabase", () => {
+  it("plans replica count changes as in-place updates", () => {
+    const alchemyPlanetscale = dirname(
+      fileURLToPath(import.meta.resolve("alchemy/Planetscale")),
+    );
+    const source = readFileSync(
+      join(alchemyPlanetscale, "Postgres/PostgresDatabase.js"),
+      "utf8",
+    );
+    expect(source).toMatch(
+      /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "update", stables \}/,
+    );
+    expect(source).not.toMatch(
+      /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "replace" \}/,
+    );
+    expect(source).toContain("updateBranchChangeRequest");
+    expect(source).toContain("replicas: desiredReplicas");
+  });
+
+  it("targets two replicas on the prod shared database", () => {
+    const source = readFileSync(new URL("./db.ts", import.meta.url), "utf8");
+    expect(source).toMatch(/replicas:\s*2/);
   });
 });
