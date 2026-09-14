@@ -1,8 +1,8 @@
-// @effect-diagnostics nodeBuiltinImport:off
-import * as NodeFS from "node:fs";
-import * as NodePath from "node:path";
-import * as NodeURL from "node:url";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
 import {
   abortInFlightPostgresReplace,
@@ -247,26 +247,32 @@ describe("confirmRestoredPostgresGeneration", () => {
 });
 
 describe("patched alchemy PostgresDatabase", () => {
-  it("plans replica count changes as in-place updates", () => {
-    const alchemyPlanetscale = NodePath.dirname(
-      NodeURL.fileURLToPath(import.meta.resolve("alchemy/Planetscale")),
-    );
-    const source = NodeFS.readFileSync(
-      NodePath.join(alchemyPlanetscale, "Postgres/PostgresDatabase.js"),
-      "utf8",
-    );
-    expect(source).toMatch(
-      /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "update", stables \}/,
-    );
-    expect(source).not.toMatch(
-      /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "replace" \}/,
-    );
-    expect(source).toContain("updateBranchChangeRequest");
-    expect(source).toContain("replicas: desiredReplicas");
-  });
+  it.effect("plans replica count changes as in-place updates", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const databasePath = yield* path.fromFileUrl(
+        new URL("./Postgres/PostgresDatabase.js", import.meta.resolve("alchemy/Planetscale")),
+      );
+      const source = yield* fileSystem.readFileString(databasePath);
+      expect(source).toMatch(
+        /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "update", stables \}/,
+      );
+      expect(source).not.toMatch(
+        /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "replace" \}/,
+      );
+      expect(source).toContain("updateBranchChangeRequest");
+      expect(source).toContain("replicas: desiredReplicas");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 
-  it("targets two replicas on the prod shared database", () => {
-    const source = NodeFS.readFileSync(new URL("./db.ts", import.meta.url), "utf8");
-    expect(source).toMatch(/replicas:\s*2/);
-  });
+  it.effect("targets two replicas on the prod shared database", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dbPath = yield* path.fromFileUrl(new URL("./db.ts", import.meta.url));
+      const source = yield* fileSystem.readFileString(dbPath);
+      expect(source).toMatch(/replicas:\s*2/);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });
