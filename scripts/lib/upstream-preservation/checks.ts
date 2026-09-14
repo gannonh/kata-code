@@ -196,6 +196,11 @@ export const PRESERVATION_CHECKS = [
           "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
           "apps/server/src/kataSandbox/migrations.test.ts",
         ]),
+        requiredPaths: [
+          "apps/server/src/persistence/Migrations.ts",
+          "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
+          "apps/server/src/kataSandbox/migrations.test.ts",
+        ],
         trustedPaths: ["apps/server/src/kataSandbox/migrations.test.ts"],
       },
     ],
