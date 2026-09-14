@@ -124,7 +124,7 @@ class SubscriptionUsageWidget : AppWidgetProvider() {
         context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return null
       intent.action = Intent.ACTION_VIEW
       val deepLink = snapshot?.optString("url")?.takeIf { it.isNotBlank() }
-        ?: "t3code://settings/usage?tab=limits"
+        ?: "katacode://settings/usage?tab=limits"
       intent.data = Uri.parse(deepLink)
       intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
       return PendingIntent.getActivity(
