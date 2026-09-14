@@ -247,13 +247,8 @@ describe("confirmRestoredPostgresGeneration", () => {
 
 describe("patched alchemy PostgresDatabase", () => {
   it("plans replica count changes as in-place updates", () => {
-    const alchemyPlanetscale = dirname(
-      fileURLToPath(import.meta.resolve("alchemy/Planetscale")),
-    );
-    const source = readFileSync(
-      join(alchemyPlanetscale, "Postgres/PostgresDatabase.js"),
-      "utf8",
-    );
+    const alchemyPlanetscale = dirname(fileURLToPath(import.meta.resolve("alchemy/Planetscale")));
+    const source = readFileSync(join(alchemyPlanetscale, "Postgres/PostgresDatabase.js"), "utf8");
     expect(source).toMatch(
       /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "update", stables \}/,
     );
