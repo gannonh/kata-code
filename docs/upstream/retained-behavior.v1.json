@@ -362,7 +362,7 @@
     {
       "id": "mobile-android-asset-live-evidence",
       "title": "Mobile Android asset artwork evidence",
-      "retainedOutcome": "Android artwork is inspected on a supported device or asset review surface; the pre-existing monochrome asset defect remains linked to KAT-3301.",
+      "retainedOutcome": "Android themed launcher and notification artwork shows the Kata mark on a supported device or emulator for every app variant.",
       "ownerPaths": [
         "apps/mobile/assets/android-icon-mark.png",
         "apps/mobile/assets/android-notification-icon.png"

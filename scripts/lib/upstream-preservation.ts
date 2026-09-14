@@ -115,7 +115,7 @@ const runCheck = (
       check.id === "icon-composer-live-evidence"
         ? "requires macOS Icon Composer evidence"
         : check.id === "mobile-android-asset-live-evidence"
-          ? "requires Android asset/device evidence; KAT-3301 remains open"
+          ? "requires Android asset/device evidence"
           : "requires device/provider evidence";
     return { id: check.id, status: "NOT RUN", reason };
   }
