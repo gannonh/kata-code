@@ -323,10 +323,13 @@ describe("XAiAcpExtension", () => {
           requestId: promptId,
         },
       });
+      yield* Effect.sleep("500 millis");
+      expect(recordedRequestMethods(requestLogPath)).toContain("session/prompt");
       expect(recordedRequestMethods(requestLogPath)).not.toContain("session/cancel");
     }).pipe(
       Effect.scoped,
       Effect.provide(NodeServices.layer),
+      TestClock.withLive,
       Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
     );
   });
