@@ -74,6 +74,7 @@ export const HOSTED_WEB_CHANNEL_PATH = "/__katacode/channel" as const;
 export const HOSTED_WEB_CHANNEL_COOKIE = "katacode_web_channel" as const;
 
 const NIGHTLY_SERVER_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/;
+const SERVER_BACKED_NIGHTLY_VERSION_PATTERN = /^[^-+]+-(?:nightly|preview)\.\d{8}\.\d+$/;
 
 export type AppStageLabel = "Dev" | "Alpha" | "Nightly" | "Latest";
 
@@ -108,7 +109,7 @@ export function resolveServerBackedAppStageLabel(input: {
   readonly fallbackStageLabel: string;
 }): string {
   return input.primaryServerVersion &&
-    NIGHTLY_SERVER_VERSION_PATTERN.test(input.primaryServerVersion)
+    SERVER_BACKED_NIGHTLY_VERSION_PATTERN.test(input.primaryServerVersion)
     ? "Nightly"
     : input.fallbackStageLabel;
 }

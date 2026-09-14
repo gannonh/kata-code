@@ -79,7 +79,7 @@ function makeWindowsRevealWindow() {
     show: vi.fn(),
     moveTop: vi.fn(),
     focus: vi.fn(),
-    getTitle: vi.fn(() => "T3 Code (Dev)"),
+    getTitle: vi.fn(() => "Kata Code (Dev)"),
     getBounds: vi.fn(() => ({ x: 100, y: 50, width: 1_200, height: 800 })),
     getContentBounds: vi.fn(() => ({ x: 108, y: 50, width: 1_184, height: 792 })),
     getNativeWindowHandle: vi.fn(() => Buffer.from([41, 0, 0, 0])),
@@ -305,7 +305,7 @@ describe("ElectronWindow", () => {
           {
             windowId: 41,
             processId: process.pid,
-            title: "T3 Code (Dev)",
+            title: "Kata Code (Dev)",
             bounds: { x: 100, y: 50, width: 1_200, height: 800 },
             contentBounds: { x: 108, y: 50, width: 1_184, height: 792 },
           },
@@ -330,7 +330,7 @@ describe("ElectronWindow", () => {
           {
             windowId: 41,
             processId: process.pid,
-            title: "T3 Code (Dev)",
+            title: "Kata Code (Dev)",
             bounds: { x: 100, y: 50, width: 1_200, height: 800 },
             contentBounds: { x: 108, y: 50, width: 1_184, height: 792 },
           },

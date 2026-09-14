@@ -43,7 +43,8 @@ function detectCliRunner(entryPath: string): CliRunner | null {
  * anything else suggests the bare package.
  */
 function suggestedPackageSpec(version: string): string {
-  return version.includes("-nightly.") ? "@kata-sh/code-cli@nightly" : "@kata-sh/code-cli";
+  const channel = /^[^-+]+-(nightly|preview)\./.exec(version)?.[1];
+  return channel === undefined ? "@kata-sh/code-cli" : `@kata-sh/code-cli@${channel}`;
 }
 
 /**

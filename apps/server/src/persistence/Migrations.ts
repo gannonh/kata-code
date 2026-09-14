@@ -52,6 +52,8 @@ import Migration0037 from "./Migrations/037_ProjectionTurnsKeysetIndex.ts";
 import Migration0038 from "./Migrations/038_ProjectionThreadsPinOrderKey.ts";
 import Migration0039 from "./Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts";
 import Migration0040 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
+import Migration0041 from "./Migrations/041_RepairProjectionSchemaMigrationIdCollision.ts";
+import Migration0042 from "./Migrations/042_RepairProjectionSchemaAfterLegacyRepair.ts";
 import Migration0043 from "./Migrations/043_AuthSessionClientConnection.ts";
 import Migration0044 from "./Migrations/044_ProjectionThreadLinkedPullRequest.ts";
 import Migration0045 from "./Migrations/045_ProjectionThreadsUnsettledAt.ts";
@@ -63,6 +65,7 @@ import Migration0050 from "./Migrations/050_ProjectionThreadBranchPullRequest.ts
 import Migration0051 from "./Migrations/051_ProjectionThreadsActiveOrderKey.ts";
 import Migration0052 from "./Migrations/052_ProjectionThreadPullRequests.ts";
 import Migration0053 from "./Migrations/053_Routines.ts";
+import Migration0054 from "./Migrations/054_ProjectionThreadMessageContext.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -74,10 +77,6 @@ import Migration0053 from "./Migrations/053_Routines.ts";
  * Uses Migrator.fromRecord which parses the key format and
  * returns migrations sorted by ID.
  */
-import Migration0041 from "./Migrations/041_RepairProjectionSchemaMigrationIdCollision.ts";
-
-import Migration0042 from "./Migrations/042_RepairProjectionSchemaAfterLegacyRepair.ts";
-
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
   [2, "OrchestrationCommandReceipts", Migration0002],
@@ -132,6 +131,7 @@ const migrationEntries = [
   [51, "ProjectionThreadsActiveOrderKey", Migration0051],
   [52, "ProjectionThreadPullRequests", Migration0052],
   [53, "Routines", Migration0053],
+  [54, "ProjectionThreadMessageContext", Migration0054],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

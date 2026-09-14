@@ -11,11 +11,11 @@ import {
   type ProviderSession,
   RoutineError,
   type RoutineProviderSubmission,
-  type RoutineRun,
   type RuntimeMode,
   type TurnId,
 } from "@kata-sh/code-contracts";
 import { assistantCitationsToPlainText } from "@kata-sh/code-shared/assistantCitations";
+import { projectComposerContextForProvider } from "@kata-sh/code-shared/composerContextReferences";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@kata-sh/code-shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
@@ -1639,7 +1639,10 @@ const make = Effect.gen(function* () {
     }
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
-      messageText: message.text,
+      messageText: projectComposerContextForProvider({
+        text: message.text,
+        records: message.context?.records ?? [],
+      }),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }

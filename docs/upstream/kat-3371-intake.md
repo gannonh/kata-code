@@ -2,10 +2,10 @@
 
 ## Frozen refs
 
-| Value | Commit |
-| --- | --- |
-| Kata base | `b22872bd59d85b0ff64ad2cd7d5837c256057155` |
-| Previous upstream pin | `36668dbe4fe2f8c881cc4f93bc675413eef1406f` |
+| Value                  | Commit                                     |
+| ---------------------- | ------------------------------------------ |
+| Kata base              | `b22872bd59d85b0ff64ad2cd7d5837c256057155` |
+| Previous upstream pin  | `36668dbe4fe2f8c881cc4f93bc675413eef1406f` |
 | Frozen upstream target | `47ace94962a714a561d7cfbdbaa4c721ef6b0598` |
 | Original upstream root | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f` |
 
