@@ -1,5 +1,5 @@
 diff --git a/lib/Planetscale/Database.d.ts b/lib/Planetscale/Database.d.ts
-index f629551..36f0655 100644
+index f629551f7e1fdc0780fd2653efff75ec54ec2243..36f065537712099f074c4b53568d22e9da3bcafa 100644
 --- a/lib/Planetscale/Database.d.ts
 +++ b/lib/Planetscale/Database.d.ts
 @@ -27,8 +27,7 @@ export interface BaseDatabaseProps {
@@ -13,7 +13,7 @@ index f629551..36f0655 100644
      replicas?: number;
      /**
 diff --git a/lib/Planetscale/Postgres/PostgresDatabase.d.ts b/lib/Planetscale/Postgres/PostgresDatabase.d.ts
-index e572f23..b356a01 100644
+index e572f23279158d5a0f4c9ea9a00cefb0765cc35f..b356a01a249654e130c1d2c9d23fe196bc872a1c 100644
 --- a/lib/Planetscale/Postgres/PostgresDatabase.d.ts
 +++ b/lib/Planetscale/Postgres/PostgresDatabase.d.ts
 @@ -37,6 +37,13 @@ export interface PostgresDatabaseProps extends BaseDatabaseProps {
@@ -31,7 +31,7 @@ index e572f23..b356a01 100644
  /**
   * A PostgreSQL PlanetScale database. For MySQL, use {@link MySQLDatabase}
 diff --git a/lib/Planetscale/Postgres/PostgresDatabase.js b/lib/Planetscale/Postgres/PostgresDatabase.js
-index e779446..6be5518 100644
+index e77944632aa537ae18c0a7f457dd9353682ccbee..9eb280b0d47acc96bda9f601a700c09c15d9fbdb 100644
 --- a/lib/Planetscale/Postgres/PostgresDatabase.js
 +++ b/lib/Planetscale/Postgres/PostgresDatabase.js
 @@ -10,7 +10,7 @@ import { hashImports, hashMigrations } from "../../SQL/SqlFile.js";
@@ -43,15 +43,23 @@ index e779446..6be5518 100644
  import { runPostgresImports, runPostgresMigrations, } from "./PostgresMigrations.js";
  /** @resource */
  export const PostgresDatabase = Resource("Planetscale.PostgresDatabase");
-@@ -42,7 +42,7 @@ export const PostgresDatabaseProvider = () => Provider.succeed(PostgresDatabase,
+@@ -41,13 +41,13 @@ export const PostgresDatabaseProvider = () => Provider.succeed(PostgresDatabase,
+             news.region.slug !== output.region.slug) {
              return { action: "replace" };
          }
-         if (news.replicas !== olds.replicas) {
+-        if (news.replicas !== olds.replicas) {
 -            return { action: "replace" };
-+            return { action: "update", stables };
-         }
+-        }
          const oldArch = output?.arch ?? olds.arch ?? "x86";
          if (news.arch && news.arch !== oldArch) {
+             return { action: "replace" };
+         }
++        if (news.replicas !== undefined && news.replicas !== olds.replicas) {
++            return { action: "update", stables };
++        }
+         if (yield* diffMigrations({ news, output })) {
+             return { action: "update", stables };
+         }
 @@ -118,6 +118,8 @@ export const PostgresDatabaseProvider = () => Provider.succeed(PostgresDatabase,
              requireApprovalForDeploy: data.require_approval_for_deploy ?? false,
              restrictBranchRegion: data.restrict_branch_region ?? false,
@@ -118,7 +126,7 @@ index e779446..6be5518 100644
              return attrs;
          }), { concurrency: 10 });
 diff --git a/src/Planetscale/Database.ts b/src/Planetscale/Database.ts
-index 987db9d..e9c7823 100644
+index 987db9d95d0a59941bda6fafed80f5cbaa6b8df2..e9c7823fb93372b4e33aba767c23fd6664c003ca 100644
 --- a/src/Planetscale/Database.ts
 +++ b/src/Planetscale/Database.ts
 @@ -31,8 +31,7 @@ export interface BaseDatabaseProps {
@@ -132,7 +140,7 @@ index 987db9d..e9c7823 100644
    replicas?: number;
  
 diff --git a/src/Planetscale/Postgres/PostgresDatabase.ts b/src/Planetscale/Postgres/PostgresDatabase.ts
-index a8831b2..5be85b8 100644
+index a8831b299af1a4b99682f2791e8da7e37ebf8d37..8da1be6e52da07e8777b3c63c4fb0335c9a4bf4c 100644
 --- a/src/Planetscale/Postgres/PostgresDatabase.ts
 +++ b/src/Planetscale/Postgres/PostgresDatabase.ts
 @@ -24,6 +24,7 @@ import {
@@ -157,15 +165,26 @@ index a8831b2..5be85b8 100644
  }
  
  /**
-@@ -157,7 +165,7 @@ export const PostgresDatabaseProvider = () =>
+@@ -156,15 +164,15 @@ export const PostgresDatabaseProvider = () =>
+         return { action: "replace" } as const;
        }
  
-       if (news.replicas !== olds.replicas) {
+-      if (news.replicas !== olds.replicas) {
 -        return { action: "replace" } as const;
-+        return { action: "update", stables } as const;
+-      }
+-
+       const oldArch = output?.arch ?? olds.arch ?? "x86";
+       if (news.arch && news.arch !== oldArch) {
+         return { action: "replace" } as const;
        }
  
-       const oldArch = output?.arch ?? olds.arch ?? "x86";
++      if (news.replicas !== undefined && news.replicas !== olds.replicas) {
++        return { action: "update", stables } as const;
++      }
++
+       if (yield* diffMigrations({ news, output })) {
+         return { action: "update", stables } as const;
+       }
 @@ -251,6 +259,8 @@ export const PostgresDatabaseProvider = () =>
          requireApprovalForDeploy: data.require_approval_for_deploy ?? false,
          restrictBranchRegion: data.restrict_branch_region ?? false,

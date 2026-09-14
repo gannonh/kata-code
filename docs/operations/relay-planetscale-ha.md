@@ -17,7 +17,8 @@ Raise replica count on the retained production database without Alchemy replacin
 Alchemy `2.0.0-beta.76` treats a `replicas` change as a database replace. This repository patches
 that package so a replica change uses the same change-request API `PostgresBranch` already uses.
 
-Do not change `region` or `arch`. Those still replace the database.
+Do not change `region` or `arch`. Those still replace the database. Omitting
+`replicas` leaves the live replica count unchanged. Set `replicas: 0` to drop HA.
 
 ## Dry-run
 

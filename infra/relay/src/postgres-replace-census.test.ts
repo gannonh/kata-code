@@ -255,9 +255,14 @@ describe("patched alchemy PostgresDatabase", () => {
         new URL("./Postgres/PostgresDatabase.js", import.meta.resolve("alchemy/Planetscale")),
       );
       const source = yield* fileSystem.readFileString(databasePath);
-      expect(source).toMatch(
-        /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "update", stables \}/,
+      const archReplace = source.search(
+        /if \(news\.arch && news\.arch !== oldArch\) \{\s*return \{ action: "replace" \}/,
       );
+      const replicaUpdate = source.search(
+        /if \(news\.replicas !== undefined && news\.replicas !== olds\.replicas\) \{\s*return \{ action: "update", stables \}/,
+      );
+      expect(archReplace).toBeGreaterThan(-1);
+      expect(replicaUpdate).toBeGreaterThan(archReplace);
       expect(source).not.toMatch(
         /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "replace" \}/,
       );
