@@ -1,5 +1,3 @@
-import * as NodeModule from "node:module";
-
 import type {
   DirItem,
   DirSearchResult,
@@ -26,13 +24,7 @@ import type {
   ProjectSearchEntriesResult,
 } from "@kata-sh/code-contracts";
 import { isWorkspaceImagePreviewPath } from "@kata-sh/code-shared/filePreview";
-
-// fff-node stays external to the CLI bundle because it dlopens a native
-// library. A static `import` of an external package is a hard error inside a
-// Node single-executable (only built-ins resolve there), so load it through
-// `require`, which reads from the real filesystem in every runtime.
-const requireForFff = NodeModule.createRequire(import.meta.url);
-const { FileFinder } = requireForFff("@ff-labs/fff-node") as typeof import("@ff-labs/fff-node");
+import { loadFffNode } from "./loadFffNode.ts";
 
 const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
 const WORKSPACE_INDEX_PAGE_SIZE = WORKSPACE_INDEX_MAX_ENTRIES + 2;
@@ -310,9 +302,18 @@ const createFinder = Effect.fn("WorkspaceSearchIndex.createFinder")(function* (
   cwd: string,
   variant: WorkspaceSearchIndexVariant,
 ) {
+  const fffNode = yield* Effect.tryPromise({
+    try: () => loadFffNode(),
+    catch: (cause) =>
+      new WorkspaceSearchIndexCreateFailed({
+        cwd,
+        reason: "Failed to load the workspace search native module.",
+        cause,
+      }),
+  });
   const result = yield* Effect.try({
     try: () =>
-      FileFinder.create({
+      fffNode.FileFinder.create({
         basePath: cwd,
         disableMmapCache: true,
         // Content indexing costs scan CPU and memory, so only the on-demand
