@@ -1,4 +1,8 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
 import {
   abortInFlightPostgresReplace,
@@ -19,21 +23,21 @@ describe("alchemyPostgresReplaceActors", () => {
     ).toEqual(["region"]);
   });
 
-  it("names replicas when news and olds differ, including 0 vs missing", () => {
+  it("does not treat replica count as a replace actor", () => {
+    expect(
+      alchemyPostgresReplaceActors({
+        news: { replicas: 2 },
+        olds: { replicas: 0 },
+        output: { region: { slug: "us-west" } },
+      }),
+    ).toEqual([]);
     expect(
       alchemyPostgresReplaceActors({
         news: { replicas: 0 },
         olds: {},
-        output: { region: { slug: "us-west" } },
-      }),
-    ).toEqual(["replicas"]);
-    expect(
-      alchemyPostgresReplaceActors({
-        news: {},
-        olds: { replicas: 0 },
         output: {},
       }),
-    ).toEqual(["replicas"]);
+    ).toEqual([]);
   });
 
   it("names arch only when news.arch is set and differs from output, olds, or x86", () => {
@@ -240,4 +244,40 @@ describe("confirmRestoredPostgresGeneration", () => {
       reason: "post-write generation state is sleeping",
     });
   });
+});
+
+describe("patched alchemy PostgresDatabase", () => {
+  it.effect("plans replica count changes as in-place updates", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const databasePath = yield* path.fromFileUrl(
+        new URL("./Postgres/PostgresDatabase.js", import.meta.resolve("alchemy/Planetscale")),
+      );
+      const source = yield* fileSystem.readFileString(databasePath);
+      const archReplace = source.search(
+        /if \(news\.arch && news\.arch !== oldArch\) \{\s*return \{ action: "replace" \}/,
+      );
+      const replicaUpdate = source.search(
+        /if \(news\.replicas !== undefined && news\.replicas !== olds\.replicas\) \{\s*return \{ action: "update", stables \}/,
+      );
+      expect(archReplace).toBeGreaterThan(-1);
+      expect(replicaUpdate).toBeGreaterThan(archReplace);
+      expect(source).not.toMatch(
+        /if \(news\.replicas !== olds\.replicas\) \{\s*return \{ action: "replace" \}/,
+      );
+      expect(source).toContain("updateBranchChangeRequest");
+      expect(source).toContain("replicas: desiredReplicas");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("targets two replicas on the prod shared database", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dbPath = yield* path.fromFileUrl(new URL("./db.ts", import.meta.url));
+      const source = yield* fileSystem.readFileString(dbPath);
+      expect(source).toMatch(/replicas:\s*2/);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });
