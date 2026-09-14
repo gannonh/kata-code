@@ -944,8 +944,19 @@ export function makeCursorAdapter(
         const turnId = steeringTurnId ?? TurnId.make(yield* randomUUIDv4);
         // Count this prompt immediately so a superseded in-flight prompt
         // resolving from here on does not settle the turn; the matching
-        // decrement is the `ensuring` below.
+        // decrement is `releasePromptSlot` below.
         ctx.promptsInFlight += 1;
+        const promptDispatched = yield* Deferred.make<void>();
+        let promptSlotReleased = false;
+        const releasePromptSlot = (): boolean => {
+          if (promptSlotReleased) {
+            return false;
+          }
+          promptSlotReleased = true;
+          const last = ctx.promptsInFlight === 1;
+          ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
+          return last;
+        };
 
         return yield* Effect.gen(function* () {
           const turnModelSelection =
@@ -1059,15 +1070,18 @@ export function makeCursorAdapter(
 
           // ACP has no system-message field; keep runtime context separate from the user's text.
           const result = yield* ctx.acp
-            .prompt({
-              prompt: [
-                ...promptParts,
-                {
-                  type: "text",
-                  text: buildRuntimeInstructions({ harness: "Cursor", model: resolvedModel }),
-                },
-              ],
-            })
+            .prompt(
+              {
+                prompt: [
+                  ...promptParts,
+                  {
+                    type: "text",
+                    text: buildRuntimeInstructions({ harness: "Cursor", model: resolvedModel }),
+                  },
+                ],
+              },
+              { dispatched: promptDispatched },
+            )
             .pipe(
               Effect.mapError((error) =>
                 mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
@@ -1123,9 +1137,12 @@ export function makeCursorAdapter(
         }).pipe(
           Effect.onInterrupt(() =>
             Effect.gen(function* () {
-              yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
-              yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
-              if (ctx.promptsInFlight === 1) {
+              const last = releasePromptSlot();
+              if (last || (yield* Deferred.isDone(promptDispatched))) {
+                yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals);
+                yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs);
+              }
+              if (last) {
                 yield* offerRuntimeEvent({
                   type: "turn.completed",
                   ...(yield* makeEventStamp()),
@@ -1142,7 +1159,7 @@ export function makeCursorAdapter(
           ),
           Effect.ensuring(
             Effect.sync(() => {
-              ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
+              releasePromptSlot();
             }),
           ),
         );

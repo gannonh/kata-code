@@ -470,9 +470,13 @@ export const makeXAiPromptCompletionRuntime = Effect.fn("makeXAiPromptCompletion
           } satisfies Omit<EffectAcpSchema.PromptRequest, "sessionId">;
 
           return yield* Effect.raceFirst(
-            runtime.prompt(requestPayload, promptOptions),
+            runtime.prompt(requestPayload, {
+              ...promptOptions,
+              nativeCancelOnInterrupt: false,
+            }),
             Deferred.await(fallback.deferred),
           ).pipe(
+            Effect.onInterrupt(() => runtime.cancel.pipe(Effect.ignore)),
             Effect.tap((response) =>
               rememberCompletedXAiPromptId(completedPromptIdsRef, response, fallback.promptId),
             ),

@@ -235,11 +235,17 @@ export class AcpSessionRuntime extends Context.Service<
      * Sends a prompt turn to the active session. `options.dispatched` settles once the
      * `session/prompt` RPC is registered as the active prompt, so a caller that forks this
      * effect knows when a later `cancel` will target this prompt.
+     * `nativeCancelOnInterrupt` defaults to true. Wrappers that interrupt this effect to
+     * take a fallback result should pass false and send `session/cancel` from their own
+     * caller-interrupt finalizer.
      * @see https://agentclientprotocol.com/protocol/schema#session/prompt
      */
     readonly prompt: (
       payload: Omit<EffectAcpSchema.PromptRequest, "sessionId">,
-      options?: { readonly dispatched?: Deferred.Deferred<void> },
+      options?: {
+        readonly dispatched?: Deferred.Deferred<void>;
+        readonly nativeCancelOnInterrupt?: boolean;
+      },
     ) => Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>;
     /**
      * Sends a real ACP `session/cancel` notification for the active session.
@@ -1026,7 +1032,7 @@ export const make = (
                         cause: undefined,
                       }),
                     );
-                  } else {
+                  } else if (promptOptions?.nativeCancelOnInterrupt !== false) {
                     yield* getStartedState.pipe(
                       Effect.flatMap((started) =>
                         acp.agent.cancel({ sessionId: started.sessionId }),
