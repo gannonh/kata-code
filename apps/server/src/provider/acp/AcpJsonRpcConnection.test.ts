@@ -346,6 +346,69 @@ describe("AcpSessionRuntime", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("sends session/cancel when an interrupt-behavior prompt caller is interrupted", () => {
+    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "acp-runtime-"));
+    const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+    return Effect.gen(function* () {
+      const dispatched = yield* Deferred.make<void>();
+      const cancelReceived = yield* Deferred.make<void>();
+      const runtime = yield* AcpSessionRuntime.make({
+        ...mockRuntimeOptions,
+        spawn: {
+          ...mockRuntimeOptions.spawn,
+          env: {
+            T3_ACP_COMPLETE_FIRST_PROMPT_ON_CANCEL: "1",
+            T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+          },
+        },
+      });
+      yield* runtime.getEvents().pipe(
+        Stream.runForEach((event) => {
+          if (event._tag === "EventStreamBarrier") {
+            return Deferred.succeed(event.acknowledge, undefined);
+          }
+          if (event._tag === "ThoughtDelta" && event.text === "native-cancel-received") {
+            return Deferred.succeed(cancelReceived, undefined);
+          }
+          return Effect.void;
+        }),
+        Effect.forkChild,
+      );
+      yield* runtime.start();
+      const prompt = yield* runtime
+        .prompt(
+          {
+            prompt: [{ type: "text", text: "first" }],
+          },
+          { dispatched },
+        )
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(dispatched);
+      yield* Fiber.interrupt(prompt);
+      const cancelReceivedOnTime = yield* Deferred.await(cancelReceived).pipe(
+        Effect.timeoutOption("3 seconds"),
+      );
+      expect(Option.isSome(cancelReceivedOnTime)).toBe(true);
+
+      const recordedRequests = NodeFS.readFileSync(requestLogPath, "utf8")
+        .trim()
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as { method?: string });
+      expect(recordedRequests.some((message) => message.method === "session/cancel")).toBe(true);
+      expect(
+        yield* runtime.prompt({
+          prompt: [{ type: "text", text: "second" }],
+        }),
+      ).toMatchObject({ stopReason: "end_turn" });
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+      TestClock.withLive,
+      Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
+    );
+  });
+
   it.effect("fails a pending request when the stderr handler rejects the runtime", () =>
     Effect.gen(function* () {
       const failure = new EffectAcpErrors.AcpTransportError({
