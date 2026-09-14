@@ -21,6 +21,7 @@ export interface SubscriptionUsageSnapshot {
 // separate authenticated transport while the mobile app is suspended.
 const SNAPSHOT_MAX_AGE = 15 * 60_000;
 export const WIDGET_REFRESH_INTERVAL = 5 * 60_000;
+const STALE_USAGE_DETAIL = "Open Kata Code to refresh";
 
 /** Bound probes across config updates, reconnects, and foreground transitions. */
 export function createWidgetRefresher<Id>(refresh: (id: Id) => Promise<unknown>) {
@@ -81,7 +82,7 @@ function subscriptionUsageProps(
       return {
         name,
         detail: !fresh
-          ? "Open T3 to refresh"
+          ? STALE_USAGE_DETAIL
           : pool.accounts.length > 1
             ? `${pool.accounts.length} accounts · pooled`
             : "Subscription remaining",
@@ -126,7 +127,7 @@ export function subscriptionUsageTimeline(snapshot: SubscriptionUsageSnapshot, n
       ...snapshot,
       providers: snapshot.providers.map((provider) =>
         provider.windows.length > 0 && provider.expiresAt <= date
-          ? { ...provider, detail: "Open T3 to refresh", windows: [], totalWindows: 0 }
+          ? { ...provider, detail: STALE_USAGE_DETAIL, windows: [], totalWindows: 0 }
           : provider,
       ),
     },

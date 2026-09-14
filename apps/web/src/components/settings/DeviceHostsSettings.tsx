@@ -37,7 +37,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
     setBusy(true);
     try {
       const results = await Promise.allSettled(
-        environments.map(async (environment) => {
+        connectedEnvironments.map(async (environment) => {
           if (environment.connection.phase !== "connected" || !environment.serverConfig) {
             throw new Error("Environment disconnected");
           }
@@ -56,7 +56,7 @@ export function DeviceHostsSettings(props: { environmentId: EnvironmentId | null
           });
         }),
       );
-      const failed = environments.filter((_, index) => {
+      const failed = connectedEnvironments.filter((_, index) => {
         const result = results[index];
         return result?.status !== "fulfilled" || result.value._tag === "Failure";
       });

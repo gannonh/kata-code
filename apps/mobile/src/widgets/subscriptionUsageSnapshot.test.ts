@@ -23,7 +23,7 @@ const window = {
   resetsAt: "2026-09-05T12:10:00.000Z",
 } as const;
 const limits = { checkedAt, windows: [window] };
-const deepLink = "t3code-dev://settings/usage?tab=limits";
+const deepLink = "katacode-dev://settings/usage?tab=limits";
 function provider(overrides: Partial<ServerProvider> = {}): ServerProvider {
   return {
     instanceId: ProviderInstanceId.make("codex"),
@@ -166,6 +166,7 @@ describe("subscription widget snapshots", () => {
     const timeline = subscriptionUsageTimeline(snapshot, now);
     expect(timeline.map((entry) => entry.date.getTime())).toEqual([now, now + 10 * 60_000]);
     expect(timeline[1]?.props.providers[0]?.windows).toEqual([]);
+    expect(timeline[1]?.props.providers[0]?.detail).toBe("Open Kata Code to refresh");
     expect(subscriptionUsageTimeline(snapshot, now + 60 * 60_000)).toHaveLength(1);
   });
   it("expires providers independently without inventing a refill", () => {
