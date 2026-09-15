@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rebase Kata upstream"
+  short_description: "Integrate T3 updates while retaining Kata behavior"
+  default_prompt: "Use $rebase-kata-upstream in preflight mode to assess the next T3 upstream update and its verification requirements."

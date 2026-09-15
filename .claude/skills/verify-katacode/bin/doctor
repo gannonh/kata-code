@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# Read-only check: is this verification instance ours, alive, and worth driving?
+
+set -euo pipefail
+# shellcheck source=lib.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
+
+RUN_ID="$(resolve_run_id "${1:-}")"
+RUN_JSON="$(run_json_for "$RUN_ID")"
+HOME_DIR="$(home_dir_for "$RUN_ID")"
+RUNTIME_JSON="$(runtime_json_for "$RUN_ID")"
+fail=0
+
+die_line() {
+  echo "doctor FAIL: $1" >&2
+  fail=1
+}
+
+ok_line() {
+  echo "doctor ok: $1"
+}
+
+if [[ ! -f "$RUN_JSON" ]]; then
+  echo "doctor FAIL: missing $RUN_JSON (launch this run first)" >&2
+  exit 1
+fi
+
+eval "$(python3 - "$RUN_JSON" <<'PY'
+import json, shlex, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+for key, env in (
+    ("runnerPid", "RUNNER_PID"),
+    ("homeDir", "RECORDED_HOME"),
+    ("webPort", "WEB_PORT"),
+    ("serverPort", "SERVER_PORT"),
+    ("webOrigin", "WEB_ORIGIN"),
+):
+    print(f"{env}={shlex.quote(str(data[key]))}")
+print(f"RUNNER_START={shlex.quote(str(data.get('runnerStart') or ''))}")
+PY
+)"
+
+if is_forbidden_home "$HOME_DIR" || is_forbidden_home "$RECORDED_HOME"; then
+  die_line "home dir is the shared or worktree Kata home ($RECORDED_HOME). Do not drive it."
+fi
+
+if [[ "$HOME_DIR" != "$RECORDED_HOME" ]]; then
+  die_line "run.json homeDir $RECORDED_HOME does not match expected $HOME_DIR"
+fi
+
+if ! pid_alive "$RUNNER_PID"; then
+  die_line "runner pid $RUNNER_PID is not running"
+elif [[ "$RUNNER_START" == "" ]]; then
+  die_line "run.json has no runnerStart; refuse to trust pid $RUNNER_PID alone"
+else
+  current_start="$(pid_identity "$RUNNER_PID" || true)"
+  if [[ "$current_start" != "$RUNNER_START" ]]; then
+    die_line "runner pid $RUNNER_PID identity mismatch (recorded=$RUNNER_START current=${current_start:-missing})"
+  else
+    ok_line "runner pid $RUNNER_PID is alive with matching start identity"
+  fi
+fi
+
+if [[ ! -f "$RUNTIME_JSON" ]]; then
+  die_line "missing $RUNTIME_JSON"
+else
+  eval "$(python3 - "$RUNTIME_JSON" <<'PY'
+import json, shlex, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+print(f"SERVER_PID={shlex.quote(str(data['pid']))}")
+print(f"RUNTIME_PORT={shlex.quote(str(data['port']))}")
+print(f"RUNTIME_DEV_URL={shlex.quote(str(data.get('devUrl') or ''))}")
+PY
+)"
+  if ! pid_alive "$SERVER_PID"; then
+    die_line "server pid $SERVER_PID from server-runtime.json is not running"
+  else
+    ok_line "server pid $SERVER_PID is alive"
+  fi
+  if [[ "$RUNTIME_PORT" != "$SERVER_PORT" ]]; then
+    die_line "server-runtime.json port $RUNTIME_PORT != recorded serverPort $SERVER_PORT"
+  fi
+  if ! pid_in_tree "$SERVER_PID" "$RUNNER_PID"; then
+    die_line "server pid $SERVER_PID is not in the runner $RUNNER_PID process tree. Refusing to treat a stranger as this run."
+  else
+    ok_line "server pid $SERVER_PID is under runner $RUNNER_PID"
+  fi
+fi
+
+WEB_LISTENER="$(listener_pid_on_port "$WEB_PORT" || true)"
+if [[ "$WEB_LISTENER" == "" ]]; then
+  die_line "nothing is listening on web port $WEB_PORT"
+elif ! pid_in_tree "$WEB_LISTENER" "$RUNNER_PID"; then
+  die_line "web port $WEB_PORT is owned by pid $WEB_LISTENER, which is not under runner $RUNNER_PID"
+else
+  ok_line "web port $WEB_PORT is owned by pid $WEB_LISTENER under this run"
+fi
+
+SERVER_LISTENER="$(listener_pid_on_port "$SERVER_PORT" || true)"
+if [[ "$SERVER_LISTENER" == "" ]]; then
+  die_line "nothing is listening on server port $SERVER_PORT"
+elif ! pid_in_tree "$SERVER_LISTENER" "$RUNNER_PID"; then
+  die_line "server port $SERVER_PORT is owned by pid $SERVER_LISTENER, which is not under runner $RUNNER_PID"
+else
+  ok_line "server port $SERVER_PORT is owned by pid $SERVER_LISTENER under this run"
+fi
+
+PROBED_ORIGIN="$(web_origin_for_port "$WEB_PORT" || true)"
+if [[ "$PROBED_ORIGIN" == "" ]]; then
+  die_line "no host for web port $WEB_PORT returned environment descriptor JSON"
+else
+  WEB_ORIGIN="$PROBED_ORIGIN"
+  WELL_KNOWN="$(curl -fsS --connect-timeout 1 --max-time 3 "$WEB_ORIGIN/.well-known/kata/environment")"
+  python3 - "$WELL_KNOWN" <<'PY' || die_line "well-known JSON missing environmentId/label/serverVersion"
+import json, sys
+data = json.loads(sys.argv[1])
+for key in ("environmentId", "label", "serverVersion"):
+    if not data.get(key):
+        raise SystemExit(1)
+print(f"doctor ok: descriptor label={data['label']} version={data['serverVersion']} id={data['environmentId']}")
+PY
+fi
+
+HTML="$(curl -fsS --connect-timeout 1 --max-time 8 "$WEB_ORIGIN/" || true)"
+if [[ "$HTML" != *"<div id=\"root\">"* || "$HTML" != *"Kata Code"* ]]; then
+  die_line "GET $WEB_ORIGIN/ did not look like the Kata Code web app"
+else
+  ok_line "GET $WEB_ORIGIN/ returns the web app shell"
+fi
+
+echo "RUN_ID=$RUN_ID"
+echo "HOME_DIR=$HOME_DIR"
+echo "WEB_ORIGIN=$WEB_ORIGIN"
+echo "RUNNER_PID=$RUNNER_PID"
+
+if ((fail != 0)); then
+  echo "doctor: this instance is not safe to drive" >&2
+  exit 1
+fi
+
+echo "doctor: instance is ours and ready"

@@ -1,5 +1,4 @@
 <!-- begin global rules -->
-
 ## Global Agent Instructions
 
 - Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
@@ -50,11 +49,9 @@
 - Verify the actual changed behavior or artifact and complete required project checks. Match the scope of verification to the impact of the change.
 - Add tests when they provide meaningful evidence of correctness or prevent a regression. Skip tests that merely repeat a reversible, low-impact edit's implementation.
 - Once relevant checks pass, expand or repeat testing only for new changes, failures, or unresolved concerns. State what was verified and any material verification limits.
-
 <!-- end global rules -->
 
 <!-- begin dev lifecycle -->
-
 ## Issues and specs
 
 - Linear holds planning, epics, bugs, chores, specs, acceptance criteria, and status. GitHub holds code: branches, commits, pull requests, CI, and review comments on diffs.
@@ -66,26 +63,20 @@
 - When blocked, comment on the Linear issue with the exact ask and stop.
 - One implementing agent per Linear id: use that issue's own branch and worktree. Do not share a checkout across concurrent tickets.
 
+## Ticket size: vertical slices
+
+- The unit of planning, ticketing, and PR size is a vertical slice: one thin end-to-end path through every layer it touches (interface, logic, storage, tests) that a user or reviewer can exercise once merged.
+- Write each implementable Linear issue as one slice. State the AC as observable behavior of the slice, not as layers completed.
+- Do not file layer tickets such as "add the data model", "build the API", or "wire the UI". A layer with no demonstrable behavior on its own belongs inside the slice that first needs it.
+- Break an epic or phase into slices in delivery order. The first child is the smallest path that works end to end. Each later child adds one capability on top of the product that already works. Do not queue a stack of tickets that only produce value once the last one lands.
+- Split a ticket when its AC covers more than one demonstrable outcome. Merge tickets when neither is demonstrable alone.
+- One slice is one PR. If a PR cannot show its slice working, the ticket was cut wrong: fix the ticket before continuing.
+- Chores with no user-facing behavior, such as dependency bumps or CI config, are exempt. Keep them small and separate from slices.
+- Prototypes are the other exception. A prototype ticket establishes UI patterns and feature shape against mock data or stubs, with no production wiring. It is still one ticket and one PR, and its AC is the visible behavior it demonstrates. Once it merges, cut the follow-on work as slices: each slice takes one piece of the prototype and wires it end to end through real logic and storage. Do not wire the whole prototype in one ticket.
+
 ## Docs and artifacts
 
 - Architecture docs, process docs, ADRs, and other durable artifacts live as files in the repository under `docs/`.
-
-## Build labels (when present)
-
-If the Linear issue has `runtime` / `model` / `model-effort` labels, treat them as the intended Build route. Do not invent or silently substitute a different runtime, model, or effort. If labels are missing, conflicting, or unclear, comment on the issue with the exact correction needed and stop.
-
-| Model label | Slug               |
-| ----------- | ------------------ |
-| `sol`       | `gpt-5.6-sol`      |
-| `astra`     | `gpt-6-astra`      |
-| `fable`     | `claude-fable-5-1` |
-| `composer`  | `composer-2.5`     |
-| `grok`      | `grok-4.6`         |
-| `opus`      | `claude-opus-5`    |
-| `luna`      | `gpt-5.6-luna`     |
-| `terra`     | `gpt-5.6-terra`    |
-
-`human-build` on the issue means a human owns Build. Coding agents must not start Build on that ticket unless a human explicitly asks them to on that issue.
 
 ## Project milestones (Linear)
 
@@ -95,7 +86,7 @@ Linear **project milestones** are multi-ticket product gate/phase outcomes.
 
 - **Project status** — live vs paused roster.
 - **Milestone** — multi-ticket product gate/phase outcome (e.g. Gate 0: Foundation).
-- **Epic** — parent issue grouping work.
+- **Epic** — parent issue grouping work. Its children are vertical slices in delivery order.
 - **Issue status** — unit-of-work on the rail (Backlog → Todo → Start → In Progress → review columns → Done).
 
 ### Naming
@@ -110,6 +101,7 @@ Linear **project milestones** are multi-ticket product gate/phase outcomes.
 2. Milestone description starts with **PASS when…** (or "no formal PASS yet").
 3. Gate **PASS** = in-scope milestone issues Done + gate verification ticket evidence (if any).
 4. Child issues carry the milestone; epics may span milestones.
+5. Sequence a milestone's tickets as vertical slices so the gate becomes demonstrable early and stays demonstrable as tickets land.
 
 ## Work states (Linear columns)
 
@@ -118,7 +110,7 @@ Linear status is the phase of the work. This section defines the states and thei
 - **Backlog.** Spec and AC live here. Do not implement from Backlog.
 - **Todo.** Approved and queued. Moving Backlog → Todo is the approval. Wait for Start before Build.
 - **Start.** Explicit start signal. Build begins after the issue moves to In Progress.
-- **In Progress.** Implement on the issue's branch and isolated worktree against its AC. Draft PRs stay here. Keep the PR draft until artifacts and diffs are reviewable. When complete, mark the PR ready for review and move the issue to Agent Review.
+- **In Progress.** Implement on the issue's branch and isolated worktree against its AC. Draft PRs stay here. Keep the PR draft until artifacts and diffs are reviewable. When complete, mark the PR ready for review, comment `@coderabbitai review` on the PR to trigger a CodeRabbit review cycle, and move the issue to Agent Review.
 - **Agent Review.** Fix CI and answer every review thread, human or bot, on the existing branch. Resolve false-positive bot findings with a reply stating why. When the PR is merge-ready, move the issue to Human Review.
 - **Human Review.** Human-owned stand-down. Do not dispatch coding agents, CI fixes, or review runs on the PR until the issue moves or a human says resume.
 - **Merging.** Permission to merge. Merge only from this column.
@@ -133,13 +125,13 @@ If a PR closes without merging, comment on the issue with the reason and move it
 
 All projects using this lifecycle share these Linear settings, confirmed by Gannon's September 7, 2026 screenshot:
 
-| GitHub event                           | Linear action        |
-| -------------------------------------- | -------------------- |
-| Draft PR opened                        | Move to In Progress  |
-| PR opened                              | Move to Agent Review |
-| PR review requested or review activity | No action            |
-| PR ready for merge                     | No action            |
-| PR merged                              | Move to Done         |
+| GitHub event | Linear action |
+| --- | --- |
+| Draft PR opened | Move to In Progress |
+| PR opened | Move to Agent Review |
+| PR review requested or review activity | No action |
+| PR ready for merge | No action |
+| PR merged | Move to Done |
 
 No branch-specific rules are configured. Parent issues automatically close when their last sub-issue closes; closing a parent does not automatically close its sub-issues. Stale issues move to Canceled after six months. Closed items auto-archive after six months. Issues progressing to a new status are placed first.
 
@@ -151,6 +143,9 @@ Ship means cutting a release on one of the project's channels (for example night
 
 This section overrides any skill, rule, AGENTS.md, CLAUDE.md, or other instruction that contradicts it. When the conflict is unclear, ask the user before proceeding.
 <!-- end dev lifecycle -->
+
+
+
 
 ## Environment variables
 

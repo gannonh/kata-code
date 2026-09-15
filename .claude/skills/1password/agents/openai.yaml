@@ -1,0 +1,4 @@
+interface:
+  display_name: "1Password Environments"
+  short_description: "Load source-build secrets from 1Password; never dotenv"
+  default_prompt: "Use $1password for Kata Code environment variables and secrets. Do not create or read .env files. Load via OP_SERVICE_ACCOUNT_TOKEN and loadRepoEnv."
