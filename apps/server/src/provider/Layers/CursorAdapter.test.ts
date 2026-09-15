@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeURL from "node:url";
 
@@ -20,6 +21,7 @@ import { createModelSelection } from "@kata-sh/code-shared/model";
 import {
   ApprovalRequestId,
   CursorSettings,
+  EnvironmentId,
   ProviderDriverKind,
   type ProviderRuntimeEvent,
   ThreadId,
@@ -28,11 +30,13 @@ import {
 
 import { ServerConfig } from "../../config.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
+import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import type { CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { makeCursorAdapter } from "./CursorAdapter.ts";
 import { execScriptSource, writeFakeCli } from "../../testUtils/fakeCli.ts";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
+import { cursorWorkspaceSlug } from "../acp/CursorPluginMcp.ts";
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CursorAdapter`.
@@ -123,6 +127,54 @@ function waitForJsonLogMatch(
     }
     return yield* Effect.promise(() => readJsonLines(filePath));
   });
+}
+
+function writeFile(filePath: string, contents: string): void {
+  NodeFS.mkdirSync(NodePath.dirname(filePath), { recursive: true });
+  NodeFS.writeFileSync(filePath, contents);
+}
+
+function mcpServersFromRequests(
+  requests: ReadonlyArray<Record<string, unknown>>,
+  method: string,
+): ReadonlyArray<Record<string, unknown>> {
+  const entry = requests.find((row) => row.method === method);
+  const params = entry?.params;
+  if (typeof params !== "object" || params === null || Array.isArray(params)) return [];
+  const mcpServers = (params as { mcpServers?: unknown }).mcpServers;
+  return Array.isArray(mcpServers)
+    ? mcpServers.filter(
+        (server): server is Record<string, unknown> =>
+          typeof server === "object" && server !== null && !Array.isArray(server),
+      )
+    : [];
+}
+
+function assertSessionMcpKeepsT3CodeAndHostPlugins(
+  requests: ReadonlyArray<Record<string, unknown>>,
+  method: "session/new" | "session/load",
+): void {
+  const servers = mcpServersFromRequests(requests, method);
+  const names = servers
+    .map((server) => server.name)
+    .filter((name): name is string => typeof name === "string");
+  assert.isTrue(names.includes("t3-code"), `${method} must include t3-code`);
+  assert.isTrue(
+    names.includes("plugin-linear-linear"),
+    `${method} must include the Linear plugin server`,
+  );
+  assert.isTrue(
+    names.includes("plugin-github-github"),
+    `${method} must include other installed plugin servers`,
+  );
+  assert.notDeepEqual(
+    names,
+    ["t3-code"],
+    `${method} must not exclusively replace host plugin servers with t3-code`,
+  );
+  const t3Code = servers.find((server) => server.name === "t3-code");
+  assert.equal(t3Code?.type, "http");
+  assert.equal(t3Code?.url, "http://127.0.0.1:43123/mcp");
 }
 
 // Tests mutate `ServerSettingsService` mid-flight (e.g. setting
@@ -1716,6 +1768,133 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       }).pipe(Effect.provide(customAdapterLayer));
     },
   );
+
+  it.effect("passes t3-code and Cursor plugin MCP servers on session/new and session/load", () => {
+    const dataDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "cursor-plugin-mcp-adapter-"),
+    );
+    const cwd = NodePath.join(dataDir, "workspace");
+    NodeFS.mkdirSync(cwd, { recursive: true });
+    const projectMcps = NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd), "mcps");
+    writeFile(
+      NodePath.join(projectMcps, "plugin-linear-linear", "SERVER_METADATA.json"),
+      JSON.stringify({
+        serverIdentifier: "plugin-linear-linear",
+        serverName: "linear",
+      }),
+    );
+    writeFile(
+      NodePath.join(projectMcps, "plugin-github-github", "SERVER_METADATA.json"),
+      JSON.stringify({
+        serverIdentifier: "plugin-github-github",
+        serverName: "github",
+      }),
+    );
+    writeFile(
+      NodePath.join(dataDir, "plugins/cache/cursor-public/linear/aaa111/mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          linear: { type: "streamable-http", url: "https://mcp.linear.app/mcp" },
+        },
+      }),
+    );
+    writeFile(
+      NodePath.join(dataDir, "plugins/cache/cursor-public/github/bbb222/mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          github: { type: "http", url: "https://api.githubcopilot.com/mcp/" },
+        },
+      }),
+    );
+
+    const createThreadId = ThreadId.make("cursor-plugin-mcp-create");
+    const loadThreadId = ThreadId.make("cursor-plugin-mcp-load");
+    const mcpSession = {
+      environmentId: EnvironmentId.make("environment-plugin-mcp"),
+      providerSessionId: "provider-session-plugin-mcp",
+      providerInstanceId: ProviderInstanceId.make("cursor"),
+      endpoint: "http://127.0.0.1:43123/mcp",
+      authorizationHeader: "Bearer test-token",
+      capabilities: new Set<string>(["preview"]),
+    };
+
+    const customAdapterLayer = Layer.effect(
+      CursorAdapter,
+      Effect.gen(function* () {
+        const cursorConfig = decodeCursorSettings({});
+        const resolveSettings = yield* makeResolveCursorSettings;
+        return yield* makeCursorAdapter(cursorConfig, {
+          resolveSettings,
+          environment: { ...process.env, CURSOR_DATA_DIR: dataDir },
+        });
+      }),
+    ).pipe(
+      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(
+        ServerConfig.layerTest(process.cwd(), {
+          prefix: "t3code-cursor-adapter-plugin-mcp-",
+        }),
+      ),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    return Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const serverSettings = yield* ServerSettingsService;
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "cursor-acp-plugin-mcp-")),
+      );
+      const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+      const argvLogPath = NodePath.join(tempDir, "argv.txt");
+      yield* Effect.promise(() => NodeFSP.writeFile(requestLogPath, "", "utf8"));
+      const wrapperPath = yield* Effect.promise(() =>
+        makeProbeWrapper(requestLogPath, argvLogPath),
+      );
+      yield* serverSettings.updateSettings({
+        providers: { cursor: { binaryPath: wrapperPath } },
+      });
+
+      McpProviderSession.setMcpProviderSession({
+        ...mcpSession,
+        threadId: createThreadId,
+      });
+      yield* adapter.startSession({
+        threadId: createThreadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd,
+        runtimeMode: "full-access",
+      });
+      yield* adapter.stopSession(createThreadId);
+
+      McpProviderSession.setMcpProviderSession({
+        ...mcpSession,
+        threadId: loadThreadId,
+      });
+      yield* adapter.startSession({
+        threadId: loadThreadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd,
+        runtimeMode: "full-access",
+        resumeCursor: { schemaVersion: 1, sessionId: "mock-session-1" },
+      });
+      yield* adapter.stopSession(loadThreadId);
+
+      const requests = yield* waitForJsonLogMatch(
+        requestLogPath,
+        (entry) => entry.method === "session/load",
+      );
+      assertSessionMcpKeepsT3CodeAndHostPlugins(requests, "session/new");
+      assertSessionMcpKeepsT3CodeAndHostPlugins(requests, "session/load");
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          McpProviderSession.clearMcpProviderSession(createThreadId);
+          McpProviderSession.clearMcpProviderSession(loadThreadId);
+        }),
+      ),
+      Effect.provide(customAdapterLayer),
+    );
+  });
 
   // Production calls startSession from a request fiber that finishes as soon as
   // the session exists. `Effect.forkChild` made the notification consumer a

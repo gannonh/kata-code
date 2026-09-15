@@ -38,6 +38,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { ServerConfig } from "../../config.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { acpMcpServersForProviderSession } from "../acp/AcpMcpServers.ts";
 import type { AntigravityAuth } from "../AntigravityAuth.ts";
 import {
   ProviderAdapterRequestError,
@@ -798,16 +799,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
                   : {}),
                 additionalDirectories: [serverConfig.attachmentsDir],
                 ...(Option.isSome(cursor) ? { resumeSessionId: cursor.value.sessionId } : {}),
-                mcpServers: mcp
-                  ? [
-                      {
-                        type: "http",
-                        name: "t3-code",
-                        url: mcp.endpoint,
-                        headers: [{ name: "Authorization", value: mcp.authorizationHeader }],
-                      },
-                    ]
-                  : [],
+                mcpServers: acpMcpServersForProviderSession({ mcpSession: mcp }),
                 ...makeNativeLoggers({
                   nativeEventLogger: options.nativeEventLogger,
                   provider: PROVIDER,
