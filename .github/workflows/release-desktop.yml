@@ -281,10 +281,12 @@ jobs:
           KATACODE_DESKTOP_REUSE_LINUX_CAPTURE_HELPERS: ${{ steps.capture_helper_cache.outputs.cache-hit == 'true' }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           MACOS_PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
           KATACODE_CLERK_PASSKEY_RP_DOMAINS: ${{ vars.CLERK_PASSKEY_RP_DOMAINS }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -322,27 +324,41 @@ jobs:
           if [[ "${{ inputs.dry_run }}" == "true" ]]; then
             echo "Signing disabled for a dry run."
           elif [[ "${{ inputs.platform }}" == "mac" ]]; then
-            if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
-              if ! has_all "$APPLE_TEAM_ID" "$MACOS_PROVISIONING_PROFILE"; then
-                echo "macOS signing is configured, but APPLE_TEAM_ID or MACOS_PROVISIONING_PROFILE is missing." >&2
-                exit 1
-              fi
+            # An unsigned macOS build installs fine from a DMG, but Squirrel
+            # refuses to install an ad-hoc update over a Developer ID app, so
+            # auto-update requires the signing identity on every release.
+            if ! has_all "$CSC_LINK" "$CSC_KEY_PASSWORD"; then
+              echo "macOS release requires CSC_LINK and CSC_KEY_PASSWORD so the auto-updater can install the build." >&2
+              exit 1
+            fi
 
+            # electron-builder notarizes with whichever credentials are set:
+            # an App Store Connect API key, or an Apple ID app-specific
+            # password with the team ID.
+            if has_all "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
               key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
               printf '%s' "$APPLE_API_KEY" > "$key_path"
               export APPLE_API_KEY="$key_path"
+            elif ! has_all "$APPLE_ID" "$APPLE_APP_SPECIFIC_PASSWORD" "$APPLE_TEAM_ID"; then
+              echo "macOS notarization requires APPLE_API_KEY with APPLE_API_KEY_ID and APPLE_API_ISSUER, or APPLE_ID with APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID." >&2
+              exit 1
+            fi
 
-              profile_path="$RUNNER_TEMP/t3code.provisionprofile"
+            # Passkey entitlements need an Associated Domains provisioning
+            # profile; keep shipping without them when the repo has none.
+            if has_all "$APPLE_TEAM_ID" "$MACOS_PROVISIONING_PROFILE"; then
+              profile_path="$RUNNER_TEMP/katacode.provisionprofile"
               printf '%s' "$MACOS_PROVISIONING_PROFILE" | base64 -D > "$profile_path"
               security cms -D -i "$profile_path" >/dev/null
               export KATACODE_APPLE_TEAM_ID="$APPLE_TEAM_ID"
               export KATACODE_MACOS_PROVISIONING_PROFILE="$profile_path"
-
-              echo "macOS signing enabled."
-              args+=(--signed)
+              echo "macOS passkey entitlements enabled."
             else
-              echo "macOS signing disabled (missing one or more Apple signing secrets)."
+              echo "macOS passkey entitlements disabled (no provisioning profile configured)."
             fi
+
+            echo "macOS signing enabled."
+            args+=(--signed)
           elif [[ "${{ inputs.platform }}" == "win" ]]; then
             if has_all \
               "$AZURE_TENANT_ID" \
