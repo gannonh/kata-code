@@ -38,7 +38,11 @@ export function buildInstallerRenameRules(version: string): ReadonlyArray<Rename
     },
     {
       pattern: new RegExp(`^${prefix}-arm64\\.zip(\\.blockmap)?$`),
-      replace: "Kata-Code-macOS-Apple-Silicon.zip$1",
+      // electron-updater detects Apple Silicon artifacts by the "arm64"
+      // substring in the file URL, and this zip is first in the merged
+      // manifest, so without that substring an Intel Mac would download the
+      // Apple Silicon build.
+      replace: "Kata-Code-macOS-Apple-Silicon-arm64.zip$1",
     },
     // macOS — x64 (Intel)
     {
@@ -49,12 +53,15 @@ export function buildInstallerRenameRules(version: string): ReadonlyArray<Rename
       pattern: new RegExp(`^${prefix}-x64\\.zip(\\.blockmap)?$`),
       replace: "Kata-Code-macOS-Intel.zip$1",
     },
-    // Linux — AppImage
+    // Linux — AppImage. electron-builder names the x64 artifact `-x86_64`.
     {
       pattern: new RegExp(`^${prefix}-arm64\\.AppImage$`),
       replace: "Kata-Code-Linux-arm64.AppImage",
     },
-    { pattern: new RegExp(`^${prefix}-x64\\.AppImage$`), replace: "Kata-Code-Linux-x64.AppImage" },
+    {
+      pattern: new RegExp(`^${prefix}-x86_64\\.AppImage$`),
+      replace: "Kata-Code-Linux-x64.AppImage",
+    },
     // Linux — Debian
     { pattern: new RegExp(`^${prefix}-arm64\\.deb$`), replace: "Kata-Code-Linux-arm64.deb" },
     { pattern: new RegExp(`^${prefix}-x64\\.deb$`), replace: "Kata-Code-Linux-x64.deb" },
@@ -123,7 +130,7 @@ export function renderReleaseBody(input: {
 
   const macAppleSiliconDmg = pick("Kata-Code-macOS-Apple-Silicon.dmg");
   const macIntelDmg = pick("Kata-Code-macOS-Intel.dmg");
-  const macAppleSiliconZip = pick("Kata-Code-macOS-Apple-Silicon.zip");
+  const macAppleSiliconZip = pick("Kata-Code-macOS-Apple-Silicon-arm64.zip");
   const macIntelZip = pick("Kata-Code-macOS-Intel.zip");
   const linuxX64AppImage = pick("Kata-Code-Linux-x64.AppImage");
   const linuxArm64AppImage = pick("Kata-Code-Linux-arm64.AppImage");
