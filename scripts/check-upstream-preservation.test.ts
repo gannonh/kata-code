@@ -804,6 +804,28 @@ describe("upstream preservation CLI", () => {
     });
   });
 
+  it("does not freeze release-asset-names.test.ts as a trusted assertion", () => {
+    const check = PRESERVATION_CHECKS.find(
+      (candidate) => candidate.id === "release-package-ownership",
+    );
+    expect(check?.id).toBe("release-package-ownership");
+    const command = check?.commands[0];
+    if (command === undefined) throw new Error("release-package-ownership has no command");
+    expect(command.trustedPaths).toEqual(["scripts/update-release-package-versions.test.ts"]);
+    expect(command.requiredPaths).toEqual([
+      "scripts/release-asset-names.test.ts",
+      "scripts/update-release-package-versions.test.ts",
+    ]);
+    const emptyRoot = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "kata-release-assets-required-"),
+    );
+    try {
+      expect(missingRequiredPaths(emptyRoot, command)).toEqual(command.requiredPaths);
+    } finally {
+      NodeFS.rmSync(emptyRoot, { recursive: true, force: true });
+    }
+  });
+
   it("does not freeze KataUpstreamUpgrade.test.ts as a trusted assertion", () => {
     const check = PRESERVATION_CHECKS.find((candidate) => candidate.id === "migration-identity");
     expect(check?.id).toBe("migration-identity");
