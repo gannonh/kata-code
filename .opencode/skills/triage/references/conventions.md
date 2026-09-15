@@ -29,7 +29,7 @@ Ship is reserved for project-defined releases after Verify. This plugin has no r
 **Cursor** (local plugin import):
 
 ```bash
-cp -R plugins/cursor ~/.cursor/plugins/local/plan-build-verify
+cp -R plugins/cursor ~/.opencode/plugins/local/plan-build-verify
 ```
 
 Enable Allow Local Plugin Imports, then enable `plan-build-verify`.

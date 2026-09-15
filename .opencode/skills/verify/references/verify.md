@@ -61,7 +61,7 @@ git switch --detach <merge-commit>
 
 **Look for a project-local `verify-*` skill first** (slash form `/verify-<app>`).
 
-1. Search for a skill named `verify-*`. Typical locations: `.cursor/skills/verify-*/SKILL.md`, then any installed skills path that matches `verify-*`.
+1. Search for a skill named `verify-*`. Typical locations: `.opencode/skills/verify-*/SKILL.md`, then any installed skills path that matches `verify-*`.
 2. If several match, pick the one whose description matches the app under test; if still ambiguous, ask once.
 3. If found: read that `SKILL.md` completely. Use its Launch, Doctor, Drive, Evidence, and Cleanup sections against the merged code.
 4. Reuse Build's evidence contract. Resolve paths against the sibling `build` skill directory:
