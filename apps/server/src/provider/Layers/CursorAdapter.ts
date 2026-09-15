@@ -66,7 +66,9 @@ import {
   parsePermissionRequest,
 } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
+import { acpMcpServersForProviderSession } from "../acp/AcpMcpServers.ts";
 import { applyCursorAcpModelSelection, makeCursorAcpRuntime } from "../acp/CursorAcpSupport.ts";
+import { discoverCursorPluginMcpServers } from "../acp/CursorPluginMcp.ts";
 import { CursorTransportFailure } from "../acp/CursorTransportFailure.ts";
 import {
   CursorAskQuestionRequest,
@@ -540,13 +542,18 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings;
 
+          const processEnv = options?.environment ?? process.env;
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+          const mcpServers = acpMcpServersForProviderSession({
+            mcpSession,
+            host: discoverCursorPluginMcpServers(cwd, { env: processEnv }),
+          });
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
             ...(options?.environment || mcpSession?.agentDeviceEnvironment
               ? {
                   environment: McpProviderSession.withAgentDeviceEnvironment(
-                    options?.environment ?? process.env,
+                    processEnv,
                     mcpSession,
                   ),
                 }
@@ -556,23 +563,7 @@ export function makeCursorAdapter(
             runtimeMode: input.runtimeMode,
             ...(resumeSessionId ? { resumeSessionId } : {}),
             clientInfo: { name: "t3-code", version: "0.0.0" },
-            ...(mcpSession
-              ? {
-                  mcpServers: [
-                    {
-                      type: "http" as const,
-                      name: "t3-code",
-                      url: mcpSession.endpoint,
-                      headers: [
-                        {
-                          name: "Authorization",
-                          value: mcpSession.authorizationHeader,
-                        },
-                      ],
-                    },
-                  ],
-                }
-              : {}),
+            mcpServers,
             ...acpNativeLoggers,
           }).pipe(
             Effect.provideService(Crypto.Crypto, crypto),
