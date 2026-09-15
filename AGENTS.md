@@ -1,4 +1,5 @@
 <!-- begin global rules -->
+
 ## Global Agent Instructions
 
 - Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
@@ -49,9 +50,11 @@
 - Verify the actual changed behavior or artifact and complete required project checks. Match the scope of verification to the impact of the change.
 - Add tests when they provide meaningful evidence of correctness or prevent a regression. Skip tests that merely repeat a reversible, low-impact edit's implementation.
 - Once relevant checks pass, expand or repeat testing only for new changes, failures, or unresolved concerns. State what was verified and any material verification limits.
+
 <!-- end global rules -->
 
 <!-- begin dev lifecycle -->
+
 ## Issues and specs
 
 - Linear holds planning, epics, bugs, chores, specs, acceptance criteria, and status. GitHub holds code: branches, commits, pull requests, CI, and review comments on diffs.
@@ -125,13 +128,13 @@ If a PR closes without merging, comment on the issue with the reason and move it
 
 All projects using this lifecycle share these Linear settings, confirmed by Gannon's September 7, 2026 screenshot:
 
-| GitHub event | Linear action |
-| --- | --- |
-| Draft PR opened | Move to In Progress |
-| PR opened | Move to Agent Review |
-| PR review requested or review activity | No action |
-| PR ready for merge | No action |
-| PR merged | Move to Done |
+| GitHub event                           | Linear action        |
+| -------------------------------------- | -------------------- |
+| Draft PR opened                        | Move to In Progress  |
+| PR opened                              | Move to Agent Review |
+| PR review requested or review activity | No action            |
+| PR ready for merge                     | No action            |
+| PR merged                              | Move to Done         |
 
 No branch-specific rules are configured. Parent issues automatically close when their last sub-issue closes; closing a parent does not automatically close its sub-issues. Stale issues move to Canceled after six months. Closed items auto-archive after six months. Issues progressing to a new status are placed first.
 
@@ -143,9 +146,6 @@ Ship means cutting a release on one of the project's channels (for example night
 
 This section overrides any skill, rule, AGENTS.md, CLAUDE.md, or other instruction that contradicts it. When the conflict is unclear, ask the user before proceeding.
 <!-- end dev lifecycle -->
-
-
-
 
 ## Environment variables
 
