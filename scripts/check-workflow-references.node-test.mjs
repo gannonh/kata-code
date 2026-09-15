@@ -164,6 +164,104 @@ jobs:
   });
 });
 
+NodeTest.test("rejects undefined jobs in multiline flow needs", () => {
+  withRoot((root) => {
+    writeFile(
+      root,
+      ".github/workflows/release.yml",
+      `name: Release
+on: workflow_dispatch
+jobs:
+  publish:
+    needs:
+      [
+        ghost,
+        build,
+      ]
+    runs-on: ubuntu-24.04
+  build:
+    runs-on: ubuntu-24.04
+`,
+    );
+    const result = run(root);
+    NodeAssert.equal(result.status, 1);
+    NodeAssert.match(result.stderr, /release\.yml:5: job needs an undefined job: ghost/);
+    NodeAssert.doesNotMatch(result.stderr, /job needs an undefined job: build/);
+  });
+});
+
+NodeTest.test("rejects scripts after shell conditionals and interpreter option values", () => {
+  withRoot((root) => {
+    writeFile(
+      root,
+      ".github/workflows/release.yml",
+      `name: Release
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish
+        run: |
+          if ! node scripts/removed.ts publish; then
+            exit 1
+          fi
+      - run: node --import tsx scripts/also-removed.ts
+`,
+    );
+    const result = run(root);
+    NodeAssert.equal(result.status, 1);
+    NodeAssert.match(result.stderr, /run step references a missing file: scripts\/removed\.ts/);
+    NodeAssert.match(
+      result.stderr,
+      /run step references a missing file: scripts\/also-removed\.ts/,
+    );
+  });
+});
+
+NodeTest.test("resolves scripts from a step working directory", () => {
+  withRoot((root) => {
+    writeFile(root, "apps/mobile/scripts/present.ts", "export {};\n");
+    writeFile(
+      root,
+      ".github/workflows/release.yml",
+      `name: Release
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Mobile
+        working-directory: apps/mobile
+        run: node scripts/present.ts
+`,
+    );
+    const result = run(root);
+    NodeAssert.equal(result.status, 0, result.stderr);
+  });
+});
+
+NodeTest.test("skips dynamic working directories instead of resolving from the root", () => {
+  withRoot((root) => {
+    writeFile(
+      root,
+      ".github/workflows/release.yml",
+      `name: Release
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Matrix
+        working-directory: \${{ matrix.dir }}
+        run: node scripts/not-invented-here.ts
+`,
+    );
+    const result = run(root);
+    NodeAssert.equal(result.status, 0, result.stderr);
+  });
+});
+
 NodeTest.test("passes the current repository workflows", () => {
   const result = NodeChildProcess.spawnSync(process.execPath, [script], { encoding: "utf8" });
   NodeAssert.equal(result.status, 0, result.stderr);

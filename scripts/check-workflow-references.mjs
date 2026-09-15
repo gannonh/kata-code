@@ -22,11 +22,17 @@ const needsItemPattern = /^(\s+)-\s*(['"]?)([A-Za-z0-9_.-]+)\2\s*$/;
 const runBlockPattern = /^\s*(?:-\s+)?run:\s*[|>][+-]?\s*$/;
 const runInlinePattern = /^\s*(?:-\s+)?run:\s*(\S.*)$/;
 const interpreterPattern =
-  /(^|[&|;][ \t]*)[ \t]*(?:sudo[ \t]+)?(?:node|bun|deno|bash|sh|zsh|python3?|pwsh|powershell)[ \t]+/gm;
+  /(^|[&|;][ \t]*)[ \t]*(?:(?:if|elif|then|do|else|while|until|time|exec|!)[ \t]+)*(?:sudo[ \t]+)?(?:node|bun|deno|bash|sh|zsh|python3?|pwsh|powershell)[ \t]+/gm;
 const directScriptPattern =
   /(^|[&|;][ \t]*)[ \t]*(\.\/[A-Za-z0-9_@.-]+(?:\/[A-Za-z0-9_@.-]+)*\.(?:sh|bash|py|ps1))/gm;
+const workingDirectoryPattern = /^\s*working-directory:\s*(.+?)\s*$/;
 const scriptPathPattern =
   /^\.?\/?[A-Za-z0-9_@.-]+(?:\/[A-Za-z0-9_@.-]+)*\.(?:ts|tsx|mts|cts|mjs|cjs|js|sh|bash|py|ps1)$/;
+const unresolvedValuePattern = /[$*?\[\]{}~'"=]/;
+
+function isUnresolved(value) {
+  return unresolvedValuePattern.test(value);
+}
 
 function indentOf(line) {
   return line.length - line.trimStart().length;
@@ -91,16 +97,30 @@ function checkJobNeeds(relativePath, lines) {
     if (needsMatch !== null) {
       needsIndent = null;
       if (indentOf(line) !== 4) continue;
-      const value = needsMatch[2].replace(/#.*$/, "").trim();
+      const needsLine = index + 1;
+      let value = needsMatch[2].replace(/#.*$/, "").trim();
       if (value === "") {
-        needsIndent = indentOf(line);
-      } else if (value.startsWith("[")) {
+        let cursor = index + 1;
+        while (cursor < lines.length && lines[cursor].trim() === "") cursor += 1;
+        if (cursor < lines.length && lines[cursor].trim().startsWith("[")) {
+          const parts = [];
+          for (; cursor < lines.length; cursor += 1) {
+            parts.push(lines[cursor].trim().replace(/#.*$/, ""));
+            if (lines[cursor].includes("]")) break;
+          }
+          value = parts.join(" ");
+          index = cursor;
+        } else {
+          needsIndent = indentOf(line);
+        }
+      }
+      if (value.startsWith("[")) {
         for (const entry of value.replace(/^\[|\]$/g, "").split(",")) {
           const name = entry.trim().replace(/^['"]|['"]$/g, "");
-          if (name !== "") needs.push([name, index + 1]);
+          if (name !== "") needs.push([name, needsLine]);
         }
-      } else if (!value.includes("${{")) {
-        needs.push([value.replace(/^['"]|['"]$/g, ""), index + 1]);
+      } else if (value !== "" && !value.includes("${{")) {
+        needs.push([value.replace(/^['"]|['"]$/g, ""), needsLine]);
       }
       continue;
     }
@@ -127,7 +147,7 @@ function collectScriptReferences(text) {
   const add = (candidate, index) => {
     const value = candidate.replace(/^\.\//, "");
     if (!scriptPathPattern.test(value)) return;
-    if (/[$*?\[\]{}~'"=]/.test(value)) return;
+    if (isUnresolved(value)) return;
     references.push({ reference: value, index });
   };
 
@@ -138,7 +158,9 @@ function collectScriptReferences(text) {
     match = interpreterPattern.exec(text)
   ) {
     const remainder = text.slice(match.index + match[0].length).split(/\s+/);
-    const candidate = remainder.find((part) => part !== "" && !part.startsWith("-"));
+    const candidate = remainder.find(
+      (part) => !part.startsWith("-") && !isUnresolved(part) && scriptPathPattern.test(part),
+    );
     if (candidate !== undefined) add(candidate, match.index);
   }
 
@@ -155,8 +177,24 @@ function collectScriptReferences(text) {
 }
 
 function checkRunScripts(relativePath, lines) {
+  let workingDirectory = null;
+  let workingDirectoryIsDynamic = false;
+
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
+
+    const workingDirectoryMatch = workingDirectoryPattern.exec(line);
+    if (workingDirectoryMatch !== null) {
+      const value = workingDirectoryMatch[1]
+        .replace(/\s+#.*$/, "")
+        .replace(/^['"]|['"]$/g, "")
+        .trim();
+      workingDirectoryIsDynamic = value.includes("${{");
+      workingDirectory =
+        value.startsWith("/") || isUnresolved(value) ? null : value.replace(/^\.\//, "");
+      continue;
+    }
+
     const blockMatch = runBlockPattern.exec(line);
     const inlineMatch = blockMatch === null ? runInlinePattern.exec(line) : null;
     if (blockMatch === null && inlineMatch === null) continue;
@@ -179,9 +217,17 @@ function checkRunScripts(relativePath, lines) {
       text = inlineMatch[1];
     }
 
+    if (workingDirectoryIsDynamic) continue;
+
     for (const { reference, index: offset } of collectScriptReferences(text)) {
-      const target = NodePath.join(root, reference);
-      if (!NodeFS.existsSync(target) || !NodeFS.statSync(target).isFile()) {
+      const targets = [NodePath.join(root, reference)];
+      if (workingDirectory !== null) {
+        targets.push(NodePath.join(root, workingDirectory, reference));
+      }
+      const found = targets.some(
+        (target) => NodeFS.existsSync(target) && NodeFS.statSync(target).isFile(),
+      );
+      if (!found) {
         const lineOffset = text.slice(0, offset).split("\n").length - 1;
         report(
           relativePath,
