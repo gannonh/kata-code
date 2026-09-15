@@ -900,14 +900,16 @@ function RoutineEditor({
                 <PlayIcon className="size-3.5" /> Resume
               </Button>
             ) : null}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void applyChange("delete")}
-              disabled={busy || offline}
-            >
-              <Trash2Icon className="size-3.5 text-destructive" /> Delete
-            </Button>
+            {routine.state !== "deleted" ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void applyChange("delete")}
+                disabled={busy || offline}
+              >
+                <Trash2Icon className="size-3.5 text-destructive" /> Delete
+              </Button>
+            ) : null}
           </div>
           <Menu>
             <MenuTrigger
