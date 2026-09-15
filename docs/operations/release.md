@@ -371,13 +371,24 @@ Checklist:
 
 1. Confirm that the `@kata-sh` scope exists on npm and owns `@kata-sh/code-cli`.
 2. For `@kata-sh/code-cli` and each `@kata-sh/code-cli-<platform>-<arch>` package, configure a Trusted Publisher in the
-   npm package settings (a package that has never been published needs a first publish or a
-   placeholder before the setting exists; the `--dry-run` step in `publish_cli` reports which
-   names are still rejected):
+   npm package settings:
    - Provider: GitHub Actions
    - Repository: this repo
    - Workflow file: `.github/workflows/release.yml`
    - Environment (if used): match your npm trusted publishing config
+   - Allowed actions: `npm publish`
+
+   Trusted publishing cannot create a package: npm only offers the settings page once the name
+   exists. Bootstrap a new name once from a logged-in account, for example
+   `npx setup-trusted-publishing --access public` in a directory whose `package.json` names the
+   package, which publishes a `0.0.0` stub; then configure its Trusted Publisher. `publish_cli`'s
+   `--dry-run` step does not detect a missing publisher, because `npm publish --dry-run` only warns
+   that it is unauthenticated and still exits zero. The real publish reports the problem as
+   `ENEEDAUTH` or `404`. npm also processes a newly created package's first publishes
+   asynchronously ("Your package is being processed and may take a few minutes to become
+   available"), so before dispatching a release confirm each name resolves with
+   `npm view <package> version`.
+
 3. Ensure npm account and org policies allow trusted publishing for every package.
 4. Create release tag `vX.Y.Z` and push; workflow will:
    - build and smoke-test the five CLI archives
