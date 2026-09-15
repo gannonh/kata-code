@@ -250,7 +250,9 @@ jobs:
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # Upstream runs this on an 8-vCPU Blacksmith runner. The full check,
+    # typecheck, and test suite needs more than 10 minutes on hosted runners.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v6
