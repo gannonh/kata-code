@@ -8,29 +8,50 @@ This document covers the unified release workflow for stable and nightly desktop
 
 - Workflow: `.github/workflows/release.yml`
 - Triggers:
-  - push tag matching `v*.*.*` for stable releases
-  - scheduled nightly check every three hours
-  - manual `workflow_dispatch` for either channel
-- Runs quality gates first: lint, typecheck, test.
+  - manual `workflow_dispatch` with `channel=stable`, the normal way to ship stable
+  - push tag matching `v*.*.*` for a stable release of an explicit commit
+  - scheduled nightly check every 30 minutes
+  - manual `workflow_dispatch` with `channel=nightly`
+  - manual `workflow_dispatch` with `channel=preview`, the maintainers' test train. It builds, signs, notarizes, tests, and publishes a commit that users must select explicitly. Preview uses nightly versioning under the `preview` prerelease identifier (`0.0.41-preview.<date>.<run>`) and publishes a GitHub prerelease plus npm packages under the `preview` dist-tag. No schedule or default npm dist-tag selects preview. Preview desktop builds have no update feed, and the GitHub release omits updater manifests and blockmaps. Install one by downloading the release, running `npx @kata-sh/code-cli@preview`, setting `KATACODE_CHANNEL=preview` for an install script, or running `katacode update --channel preview`. The CLI warns before entering the channel. The release body also warns that the build is for testing. The hosted web app, AUR, and Discord announcements are skipped.
+  - manual `workflow_dispatch` with `dry_run=true` builds and tests the release matrix without trusted signing, notarization, publishing, deployment, or finalization.
+- A manual stable release builds the commit of the latest published nightly, not `main` HEAD.
+  Nightly is the release candidate: verify the nightly, then promote it. Merges to `main` keep
+  landing while you verify and never leak into the stable build.
+  - The version defaults to the one the nightly previewed (`0.0.39-nightly.*` ships as `0.0.39`).
+    Pass the `version` input to override it, for example for a minor bump.
+  - The stable tag is created on the nightly's commit when the GitHub Release is published.
+  - Pushing a `vX.Y.Z` tag by hand still works and builds exactly the tagged commit. Use it when
+    the commit to ship is not the latest nightly, such as a cherry-picked fix on a release branch.
+- Runs lint, typecheck, and tests alongside artifact builds. Publishing waits for every check.
 - Reads the shared production Kata Code Connect relay URL and Clerk client configuration before packaging clients.
-- Builds four artifacts in parallel for both channels:
+- Builds the platform-independent JS (server bundle, web client, Electron main) once in the `build_bundle` job and hands it to every platform job as the `js-bundle` artifact; the platform jobs only package it, so no runner rebuilds it.
+- Builds six desktop artifacts in parallel for both channels, each as its own job (`desktop_<platform>_<arch>`, one call of `release-desktop.yml`) on hardware of its own architecture, gated only on the bundle (the Windows jobs also wait for the same-arch Linux job, whose CLI archive they embed as the WSL runtime):
   - macOS `arm64` DMG
   - macOS `x64` DMG
-  - Linux `x64` AppImage
-  - Windows `x64` NSIS installer
+  - Linux `x64` and `arm64` AppImage
+  - Windows `x64` and `arm64` NSIS installer
 - Publishes one GitHub Release with all produced files.
+  - Renames desktop installers to stable platform and architecture names, rewrites updater
+    manifests to reference those names, and adds a platform download table to the release body.
   - Stable tags with a suffix after `X.Y.Z` (for example `1.2.3-alpha.1`) are published as GitHub prereleases.
   - Only plain stable `X.Y.Z` releases are marked as the repository's latest release.
   - Nightly runs are always GitHub prereleases and never marked latest.
   - Automatically generated release notes are pinned to the previous tag in the same channel, so stable compares to the previous stable tag and nightly compares to the previous nightly tag.
 - Includes Electron auto-update metadata (for example `latest*.yml`, `nightly*.yml`, and `*.blockmap`) in release assets.
-- Publishes the CLI package (`apps/server`, npm package `@kata-sh/code-cli`) with OIDC trusted publishing from the same workflow file:
+- Builds a self-contained CLI archive per platform (`katacode-<version>-<platform>-<arch>.tar.gz`, `.zip` on Windows) in the same job as that target's desktop artifact and attaches them to the GitHub Release with a `SHA256SUMS` file, on every channel, for five targets: macOS arm64, Linux x64 and arm64, Windows x64 and arm64. Every archive is built, signed, and smoke-tested on hardware of its own architecture. There is no macOS x64 archive: Node single-executables are unsupported on x64 macOS (the SEA docs list macOS as arm64 only) and the binary segfaults on start; the x64 desktop app is Electron and unaffected.
+  - The archive holds the server as a Node single-executable (`scripts/build-cli-archive.ts`), so unpacking it needs neither Node, npm, nor a compiler. It is the only form in which Kata Code manages a runtime: the desktop's SSH environments, the boot service, `katacode update`, and the install scripts all download and verify this archive against `SHA256SUMS`. The npm packages exist for people who run `npx @kata-sh/code-cli` or `npm install -g @kata-sh/code-cli` and carry the same archive contents. Product-managed runtimes do not install from npm. The `curl | sh` installers are `scripts/install.sh` and `scripts/install.ps1`; invoke their published copies through the raw URLs in [Install Kata Code](../user/install.md).
+  - The executable is built with a Node that supports `--build-sea` (`VP_NODE_VERSION=26.8.2`, kept in step with `SEA_NODE_VERSION` in `apps/server/vite.config.ts`), while the repo stays on `engines.node`.
+  - macOS archives are signed with the Developer ID certificate and notarized when the Apple secrets are present (ad hoc otherwise, which still runs from `curl`/`tar` installs). Windows executables use the same Azure Trusted Signing setup as the installer. Every native addon in the macOS archive is signed too, since the hardened runtime refuses unsigned libraries.
+  - Each archive is extracted and executed on its build runner (`scripts/smoke-cli-archive.ts`) before it is uploaded.
+- Publishes the CLI to npm with OIDC trusted publishing from the same workflow file, as the same bytes the GitHub Release carries: `scripts/build-npm-platform-packages.ts` unpacks the five CLI archives into `@kata-sh/code-cli-<platform>-<arch>` packages. Each package sets `os` and `cpu`, so npm installs only the matching package. The script also generates the `@kata-sh/code-cli` launcher, whose `bin/katacode.js` lists the platform packages as `optionalDependencies` and runs the installed executable. `npx @kata-sh/code-cli` needs Node only to run the launcher. `node apps/server/scripts/cli.ts publish` publishes the platform packages first and the launcher last, after a `--dry-run` pass over all packages.
   - stable releases publish npm dist-tag `latest`
   - nightly releases publish npm dist-tag `nightly`
+  - preview releases publish npm dist-tag `preview`, which nothing resolves unless asked for by name
+  - one-time setup: the `@kata-sh` npm scope must exist, and `@kata-sh/code-cli` plus each `@kata-sh/code-cli-<platform>-<arch>` package needs a trusted publisher registered for this workflow file (see below).
 - Deploys the hosted web app to Vercel only after a release is published:
   - stable releases are aliased to the `latest` hosted app channel
   - nightly releases are aliased to the `nightly` hosted app channel
-- macOS publication requires signing and notarization credentials. Windows signing is auto-detected from its secrets.
+- Signing is optional and auto-detected per platform from secrets.
 
 ## Required release credentials
 
@@ -232,7 +253,7 @@ tag does not exist. Check the Sandbox image job before changing `VERCEL_TOKEN`.
 
 - Workflow: `.github/workflows/release.yml`
 - Triggers:
-  - scheduled check every three hours
+  - scheduled check every 30 minutes
   - manual `workflow_dispatch` with `channel=nightly`
 - Runs the same desktop quality gates and artifact matrix as the tagged release flow.
 - Publishes a GitHub prerelease only:
@@ -242,7 +263,7 @@ tag does not exist. Check the Sandbox image job before changing `VERCEL_TOKEN`.
   - `make_latest` is always `false`
 - Uses the next stable patch version as the nightly base. For example, `0.0.17` produces nightlies on `0.0.18-nightly.*`.
 - Publishes Electron auto-update metadata to the dedicated `nightly` updater channel, so desktop users can opt into that track independently from stable.
-- Publishes the CLI package (`apps/server`, npm package `@kata-sh/code-cli`) to the `nightly` npm dist-tag using the same nightly version.
+- Publishes the CLI npm packages (`@kata-sh/code-cli` and `@kata-sh/code-cli-<platform>-<arch>`) to the `nightly` npm dist-tag using the same nightly version.
 - Does not commit version bumps back to `main`.
 
 ## Server self-update release invariant
@@ -253,7 +274,7 @@ npm before users can receive that client.
 
 The workflow enforces this ordering:
 
-1. `publish_cli` publishes the exact stable or nightly version to npm.
+1. `publish_cli` publishes the exact release version to npm, on every channel.
 2. `release` depends on `publish_cli` before exposing desktop artifacts in GitHub Releases.
 3. `deploy_web` depends on `release` before moving the hosted channel to the new client.
 
@@ -295,10 +316,19 @@ Windows packages the bundled server and only its runtime-external/native
 dependency closure in `resources/server.asar`. Native modules and helper
 executables declared as unpacked by that archive must be present at the matching
 paths below `resources/server.asar.unpacked`. The Windows-native backend reads
-the archive in place through Electron. WSL cannot read ASAR files, so enabling
-the WSL backend extracts the server tree once into the desktop state directory
-under `wsl-server-tree/<version>` and reuses the completed version until the app
-is updated.
+the archive in place through Electron. Packaged Windows builds also ship
+`resources/wsl-runtime.tar.gz` plus its SHA-256 sidecar: the Linux CLI archive
+(`katacode-<version>-linux-<arch>.tar.gz`, the same arch as the Windows host) built
+by the Linux desktop job and handed to the Windows desktop build as
+`--wsl-runtime`, copied in verbatim so WSL runs the exact bytes a Linux user
+downloads. WSL verifies and extracts that archive
+into `~/.katacode/wsl-runtime/sha256-<archive-digest>` inside the selected distro,
+then reuses it for later launches of the same update.
+
+Windows keeps JavaScript and package metadata inside `app.asar` and unpacks only
+native libraries and helper executables. Avoid enabling whole-package smart
+unpacking: each loose file adds work to NSIS installation and counts against
+the payload limit.
 
 The artifact builder rejects a Windows package when any of these invariants
 break:
@@ -309,6 +339,12 @@ break:
 - On same-architecture Windows builds, the packaged primary cannot load the fff
   native library from inside `server.asar` through its `.unpacked` sibling.
 - The isolated, extracted sidecar cannot load the server entry with plain Node.
+- A Windows build given `--wsl-runtime` omits the WSL archive or SHA-256
+  sidecar, or the sidecar digest does not match the emitted archive.
+- The emitted WSL archive is not a Linux CLI release archive: it must unpack to
+  a single `katacode-<version>-linux-<arch>` directory holding `katacode`, `client/`, and
+  `node_modules/` with the Linux node-pty binary, and must not carry a loose
+  server bundle (`bin.mjs`).
 - The external Windows resource monitor is absent.
 - The unpacked Windows application contains more than 80 files.
 
@@ -322,36 +358,46 @@ blockmaps, with a 60 MB maximum for a representative sidecar-to-sidecar update.
 
 ## 0) npm OIDC trusted publishing setup (CLI)
 
-The workflow invokes `node apps/server/scripts/cli.ts publish` after aligning package versions. That
-script temporarily prepares the `@kata-sh/code-cli` package, then runs `vp pm publish --filter @kata-sh/code-cli ...` from the
-repository root so workspace publish configuration is applied correctly.
+The workflow runs `node scripts/build-npm-platform-packages.ts` on the downloaded CLI archives, then
+`node apps/server/scripts/cli.ts publish --packages-dir npm-packages`, which runs `npm publish` on
+each `@kata-sh/code-cli-<platform>-<arch>.tgz` and finally on `@kata-sh/code-cli.tgz`, the launcher. The script publishes
+tarballs it built itself rather than directories: `npm publish <dir>` strips `node_modules/` from the
+tarball no matter what `files` says, and the executable loads its native addons from there. Six
+packages are published per release: `@kata-sh/code-cli`, `@kata-sh/code-cli-darwin-arm64`,
+`@kata-sh/code-cli-linux-arm64`, `@kata-sh/code-cli-linux-x64`,
+`@kata-sh/code-cli-win32-arm64`, and `@kata-sh/code-cli-win32-x64`.
 
 Checklist:
 
-1. Confirm the npm org/user owns package `@kata-sh/code-cli`.
-2. In npm package settings, configure Trusted Publisher:
+1. Confirm that the `@kata-sh` scope exists on npm and owns `@kata-sh/code-cli`.
+2. For `@kata-sh/code-cli` and each `@kata-sh/code-cli-<platform>-<arch>` package, configure a Trusted Publisher in the
+   npm package settings (a package that has never been published needs a first publish or a
+   placeholder before the setting exists; the `--dry-run` step in `publish_cli` reports which
+   names are still rejected):
    - Provider: GitHub Actions
    - Repository: this repo
    - Workflow file: `.github/workflows/release.yml`
    - Environment (if used): match your npm trusted publishing config
-3. Ensure npm account and org policies allow trusted publishing for the package.
+3. Ensure npm account and org policies allow trusted publishing for every package.
 4. Create release tag `vX.Y.Z` and push; workflow will:
-   - align the release package versions to `X.Y.Z`
-   - build web + server
-   - invoke the CLI publish script with npm dist-tag `latest`
-5. Nightly runs invoke the same publish script with npm dist-tag `nightly`.
+   - build and smoke-test the five CLI archives
+   - build the npm packages from those archives
+   - publish them with npm dist-tag `latest`
+5. Nightly runs publish with npm dist-tag `nightly`; preview runs with `preview`.
 
-## 1) Release validation and signed builds
+## 1) Release validation and unsigned builds
 
-Use `workflow_dispatch` with `dry_run=true` to run the quality gates and full desktop build matrix
-without publishing npm packages, GitHub Releases, or hosted web aliases. For a dry run without a
-version input, the workflow derives a disposable `0.0.0-dryrun.<run>` version. Dry runs may omit
-platform signing secrets; publishing jobs remain disabled.
+Use `workflow_dispatch` with `dry_run=true` to run the quality gates, build the Sandbox image, and
+build the full desktop and CLI matrix without publishing. If you omit the version, the workflow
+uses `0.0.0-dryrun.<run>`. Dry runs skip trusted signing, notarization, npm publication, GitHub
+Release publication, AUR publication, hosted deployment, and finalization.
 
-A normal nightly dispatch (`channel=nightly`, `dry_run=false`) publishes a real nightly npm package,
-GitHub prerelease, desktop updater release, and hosted nightly alias. A stable dispatch requires a
-version and publishes to the stable channels. macOS release builds fail before publication when the
-Developer ID signing certificate is unavailable.
+A normal nightly dispatch publishes a real nightly npm package, GitHub prerelease, desktop updater
+release, and hosted nightly alias. A preview dispatch also publishes artifacts, but only to the
+explicit preview channel. A stable dispatch publishes to the stable channels.
+
+Pushing any accepted non-nightly tag, including `v0.0.0-test.1`, starts a real stable release. Do
+not push a test tag to validate the workflow.
 
 ## 2) Apple signing + notarization setup (macOS)
 
@@ -434,21 +480,24 @@ Checklist:
 
 ## 4) Ongoing release checklist
 
-1. Ensure `main` is green in CI.
-2. Bump app version as needed.
-3. Create release tag: `vX.Y.Z`.
-4. Push tag.
-5. Verify workflow steps:
+1. Pick the latest nightly and verify it: run the smoke test above against its artifacts and
+   check the nightly channel for regressions.
+2. Dispatch the Release workflow with `channel=stable`. Leave `version` empty unless the version
+   should differ from the one the nightly previewed.
+3. Confirm the `Resolve release commit` notice names the nightly tag and commit you verified. If a
+   newer nightly published in between, the run builds that one instead.
+4. Verify workflow steps:
    - preflight passes
-   - all matrix builds pass
+   - release quality checks pass
+   - `build_bundle` and all platform builds pass
    - `publish_cli` publishes the exact release version before the release job
    - release job uploads expected files
-6. Smoke test downloaded artifacts.
+5. Smoke test downloaded artifacts.
 
 ## 5) Troubleshooting
 
 - macOS build unsigned when expected signed:
-  - Check all Apple secrets plus the `APPLE_TEAM_ID` repository secret are populated and non-empty.
+  - Check all Apple secrets plus `APPLE_TEAM_ID` are populated and non-empty.
   - Confirm the provisioning profile belongs to `APPLE_TEAM_ID.com.katacode.app` and includes
     Associated Domains.
 - Windows build unsigned when expected signed:
@@ -456,12 +505,3 @@ Checklist:
 - Build fails with signing error:
   - Retry with secrets removed to confirm unsigned path still works.
   - Re-check certificate/profile names and tenant/client credentials.
-
-## Signed builds without desktop passkeys
-
-`APPLE_TEAM_ID` is a GitHub repository secret. `MACOS_PROVISIONING_PROFILE` is a secret.
-For local signed builds, pass `KATACODE_APPLE_TEAM_ID` and
-`KATACODE_MACOS_PROVISIONING_PROFILE` to include passkey entitlements. The build derives the
-relying-party domain from `KATACODE_CLERK_PUBLISHABLE_KEY` unless
-`KATACODE_CLERK_PASSKEY_RP_DOMAINS` overrides it. Without a provisioning profile, the app can
-remain signed but has no Associated Domains entitlement.

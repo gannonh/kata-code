@@ -344,7 +344,7 @@ export function createDevRunnerEnv({
     }
 
     // A dev-runner server is never launcher-managed. When the shell that runs
-    // this script was itself spawned by the machine's managed t3 service (an
+    // this script was itself spawned by the machine's managed Kata Code service (an
     // agent working inside Kata Code), these leak through and the child server
     // fails startup with "The service launcher expected @kata-sh/code-cli@<launcherVersion>,
     // but this server is @kata-sh/code-cli@<serverVersion>."
@@ -373,9 +373,9 @@ export function createDevRunnerEnv({
         delete output.VITE_WS_URL;
         // Deleting is not enough on its own: vite.config.ts calls loadRepoEnv,
         // which merges 1Password Environment values *under* this env, so a
-        // developer with either URL in that Environment would get it back and
-        // silently lose single-origin mode. This states the intent positively
-        // so Vite can ignore those values rather than infer from their absence.
+        // developer with either URL in that Environment would get it back and silently lose
+        // single-origin mode. This states the intent positively so Vite can
+        // ignore those values rather than infer from their absence.
         output.KATACODE_SINGLE_ORIGIN_DEV = "1";
       } else {
         output.VITE_HTTP_URL = `http://localhost:${serverPort}`;
@@ -392,6 +392,7 @@ export function createDevRunnerEnv({
       delete output.KATACODE_MODE;
       delete output.KATACODE_NO_BROWSER;
       delete output.KATACODE_HOST;
+      delete output.KATACODE_DEV_AUTH_TOKEN;
     }
 
     if (!isDesktopMode && host !== undefined) {

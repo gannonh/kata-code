@@ -12,7 +12,7 @@ vp i
 vp run dev
 ```
 
-Open the one-time pairing URL printed by the dev runner. The bare origin does not authenticate
+Open the pairing URL printed by the dev runner. The bare origin does not authenticate
 a new browser.
 
 ## Choosing a dev process
@@ -21,18 +21,18 @@ Use `vp run dev` for server and web, or `vp run dev:desktop` for the Electron cl
 `dev:server` and `dev:web` start those processes separately.
 See the [mobile README](../../apps/mobile/README.md) for native builds and Metro.
 
-Flags go directly after the task name, for example `vp run dev --home-dir /tmp/t3code-dev`.
+Flags go directly after the task name, for example `vp run dev --home-dir /tmp/katacode-dev`.
 Add `--browser` to open a browser automatically.
 
 ### State and ports
 
-Linked worktrees default to their own `.t3/userdata`, even when `T3CODE_HOME` is set.
-The main checkout defaults to `~/.t3/dev/userdata`. An explicit `--home-dir` wins in both cases.
-Never run a development server against the live `~/.t3/userdata`.
+Linked worktrees default to their own `.katacode/userdata`, even when `KATACODE_HOME` is set.
+The main checkout defaults to `~/.katacode/dev/userdata`. An explicit `--home-dir` wins in both cases.
+Never run a development server against the live `~/.katacode/userdata`.
 See [test data](../../AGENTS.md#test-data) for copying a consistent database snapshot.
 
 Read ports from the `[dev-runner]` output. Worktrees derive stable preferences from their paths,
-but occupied ports can shift them. `T3CODE_PORT_OFFSET` or `T3CODE_DEV_INSTANCE` can select a
+but occupied ports can shift them. `KATACODE_PORT_OFFSET` or `KATACODE_DEV_INSTANCE` can select a
 different preference when needed.
 
 ### Sharing and remote debugging
@@ -45,7 +45,7 @@ Leave `VITE_HTTP_URL` and `VITE_WS_URL` unset. Vite proxies the backend through 
 origin so the same build works over localhost and remote connections.
 
 Shared runs enable bundled dev to avoid a network round trip for each import level.
-`T3CODE_BUNDLED_DEV=0` opts out when debugging bundler differences. Two reload traps matter
+`KATACODE_BUNDLED_DEV=0` opts out when debugging bundler differences. Two reload traps matter
 when changing this setup:
 
 - The web entry must dynamically import the app so React refresh initializes before application
@@ -55,6 +55,27 @@ when changing this setup:
 
 The workarounds live in the [web entry](../../apps/web/src/bootstrap.ts) and
 [Tailwind plugin](../../apps/web/vite/tailwind.ts).
+
+#### Reuse a development credential
+
+Use a shared development credential only when you trust every service on the hostname. Browsers
+send cookies to all ports on that hostname, so another service could receive the credential.
+
+Generate a value of at least 32 characters:
+
+```sh
+openssl rand -hex 32
+```
+
+Set `KATACODE_DEV_AUTH_TOKEN` in the repository's 1Password Environment, or export it in the
+process that starts `vp run dev --share`. Do not store the value in a dotenv file. Restart the dev
+server, then open its startup pairing URL once in each browser profile. Later dev servers on the
+same hostname accept the shared cookie until it expires after 30 days.
+
+Treat this token and each startup pairing URL as an administrative secret. Every server still
+keeps its own authentication database, signing key, and revocation state. Desktop and production
+servers ignore the token. See [environment authentication](../internals/environment-auth.md#reusable-dev-credential)
+for the security model.
 
 ## Checks
 
@@ -150,8 +171,9 @@ rustup target add x86_64-pc-windows-msvc
 rustup target add aarch64-pc-windows-msvc
 ```
 
-NSIS is downloaded by electron-builder. WSL support additionally needs a Linux node-pty prebuild;
-see the [release runbook](./release.md#windows-payload-topology-and-update-validation).
+NSIS is downloaded by electron-builder. WSL support additionally needs the Linux CLI archive
+passed as `--wsl-runtime`; see the
+[release runbook](./release.md#windows-payload-topology-and-update-validation).
 
 ### Signing and passkeys
 

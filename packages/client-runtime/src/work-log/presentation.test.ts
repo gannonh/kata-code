@@ -641,7 +641,7 @@ describe("pull request tool presentation", () => {
       tone: "tool",
       itemType: "mcp_tool_call",
       toolLifecycleStatus: "completed",
-      toolSource: { key: "t3-code", name: "T3 Code", kind: "integration" },
+      toolSource: { key: "t3-code", name: "Kata Code", kind: "integration" },
     };
     const list: WorkLogPresentationEntry = {
       ...link,

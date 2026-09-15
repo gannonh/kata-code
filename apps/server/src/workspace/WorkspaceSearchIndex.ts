@@ -1,13 +1,13 @@
-import {
-  type DirItem,
-  type DirSearchResult,
-  type FileItem,
-  FileFinder,
-  type GrepCursor,
-  type MixedItem,
-  type MixedSearchResult,
-  type Result,
-  type SearchResult,
+import type {
+  DirItem,
+  DirSearchResult,
+  FileItem,
+  FileFinder as FileFinderType,
+  GrepCursor,
+  MixedItem,
+  MixedSearchResult,
+  Result,
+  SearchResult,
 } from "@ff-labs/fff-node";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -24,6 +24,7 @@ import type {
   ProjectSearchEntriesResult,
 } from "@kata-sh/code-contracts";
 import { isWorkspaceImagePreviewPath } from "@kata-sh/code-shared/filePreview";
+import { loadFffNode } from "./loadFffNode.ts";
 
 const WORKSPACE_INDEX_MAX_ENTRIES = 25_000;
 const WORKSPACE_INDEX_PAGE_SIZE = WORKSPACE_INDEX_MAX_ENTRIES + 2;
@@ -301,9 +302,18 @@ const createFinder = Effect.fn("WorkspaceSearchIndex.createFinder")(function* (
   cwd: string,
   variant: WorkspaceSearchIndexVariant,
 ) {
+  const fffNode = yield* Effect.tryPromise({
+    try: () => loadFffNode(),
+    catch: (cause) =>
+      new WorkspaceSearchIndexCreateFailed({
+        cwd,
+        reason: "Failed to load the workspace search native module.",
+        cause,
+      }),
+  });
   const result = yield* Effect.try({
     try: () =>
-      FileFinder.create({
+      fffNode.FileFinder.create({
         basePath: cwd,
         disableMmapCache: true,
         // Content indexing costs scan CPU and memory, so only the on-demand
@@ -330,7 +340,7 @@ const createFinder = Effect.fn("WorkspaceSearchIndex.createFinder")(function* (
 
 const waitForIndexReady = Effect.fn("WorkspaceSearchIndex.waitForIndexReady")(function* <E>(
   cwd: string,
-  finder: FileFinder,
+  finder: FileFinderType,
   onFailure: (input: { readonly reason: string; readonly cause?: unknown }) => E,
 ): Effect.fn.Return<void, E | WorkspaceSearchIndexScanTimedOut> {
   const result = yield* Effect.tryPromise({

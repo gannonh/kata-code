@@ -11,19 +11,62 @@ Run these commands on the machine that will host Kata Code:
 | ------------------------------- | ------------------------------------------------ |
 | Install and start               | `npx @kata-sh/code-cli@latest service install`   |
 | Inspect status and log location | `npx @kata-sh/code-cli@latest service status`    |
-| Update or repair                | `npx @kata-sh/code-cli@latest service update`    |
+| Update the installed executable | `katacode update`                                |
+| Repair the service              | `npx @kata-sh/code-cli@latest service install`   |
 | Stop and remove from startup    | `npx @kata-sh/code-cli@latest service uninstall` |
 
 Uninstalling the service leaves your projects, threads, and settings intact.
 
-Install and update use the version of the CLI you invoke. For nightly, use
-`npx @kata-sh/code-cli@nightly service update`; replace `nightly` with an exact version to pin
+Service installation uses the version of the CLI you invoke. For nightly, use
+`npx @kata-sh/code-cli@nightly service install`; replace `nightly` with an exact version to pin
 one. An older CLI refuses to replace a newer service unless you explicitly add
 `--allow-downgrade`.
 
 Updating restarts the server. Finish active work first, and wait for any remote
 update already in progress. To match a remote client's version, follow
 [Updating Kata Code](./updating.md).
+
+Self-contained builds install as a download from the Kata Code GitHub release
+instead of through npm, so the machine running the service does not need
+Node.js or npm once the CLI is on it. To get the CLI onto a machine without
+Node, run the install script:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/gannonh/kata-code/main/scripts/install.sh | sh
+```
+
+On Windows, run
+`irm https://raw.githubusercontent.com/gannonh/kata-code/main/scripts/install.ps1 | iex`
+in PowerShell instead.
+
+It places `katacode` in `~/.local/bin` and reuses the same download when you later
+run `katacode service install`. It follows the stable train by default; set
+`KATACODE_CHANNEL=nightly` for nightlies, `KATACODE_VERSION` to pin an exact
+version, or `KATACODE_RELEASE_BASE_URL` to download from a mirror.
+
+`preview` is a third train that maintainers cut from unreleased branches to
+exercise the release pipeline. Those builds can be broken, receive no fixes,
+and are never offered as updates; the installer and `katacode update` only take you
+there when you ask for the channel explicitly, and warn you when they do.
+
+Once a self-contained `katacode` is installed, `katacode update` moves the machine to a
+newer one without npm: it downloads the newest release on the channel the
+running `katacode` came from, verifies it, and points the `katacode` launcher at it. When
+a background service is installed for the same Kata Code home it asks before
+restarting it, since a restart interrupts running agent turns, terminals, and
+remote clients; answer no and the service keeps the old version until you run
+`katacode service restart`. From a script there is no prompt, so pass `--yes` to
+restart the service. A server you started by hand is never touched; the
+command tells you it is still on the old version so you can restart it
+yourself. Pass an exact version (`katacode update 0.0.41-preview.20260912.1595`) to
+pin one, `--channel` to follow a different release train (moving onto preview from stable or nightly asks for confirmation), or
+`--allow-downgrade` to move backwards.
+
+`katacode uninstall` reverses the install script: it shows what it found (the
+background service, the `katacode` launcher, every downloaded version under
+`~/.katacode/runtime`), asks once, and removes them. Your projects, threads, and
+settings under `~/.katacode/userdata` are kept; delete that directory yourself if
+you want them gone too. Pass `--yes` from a script.
 
 ## Platform support
 
@@ -70,12 +113,13 @@ that session open.
 | `linger-unavailable`                    | Run `loginctl show-user "$(id -un)" --property=Linger` and check that systemd-logind is available.                             |
 | `user-manager-unavailable`              | Run `systemctl --user status` in a login session for the service user; check your distribution's systemd user-session support. |
 | `service-disabled` or `service-stopped` | Read the log and `systemctl --user status t3code.service`, then use the repair command printed by Kata Code.                   |
+| `restart-pending`                       | A newer version is installed but the service still runs the previous one. Run `katacode service restart`.                      |
 
 On macOS, check **System Settings → General → Login Items** if the service no
 longer starts at login. If agent work cannot access Desktop, Documents, or
 Downloads, it may need Full Disk Access for the Node executable listed in
 `ProgramArguments` in
-`~/Library/LaunchAgents/com.katacode.app.service.plist`.
+`~/Library/LaunchAgents/com.t3tools.t3code.service.plist`.
 
 For failures after signing in to Kata Code Connect, see
 [connection troubleshooting](./remote-access.md#kata-code-connect-troubleshooting).

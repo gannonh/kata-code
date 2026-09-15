@@ -6,13 +6,13 @@ Use `APP_BASE_NAME` and `CLOUD_PRODUCT_NAME` from `@kata-sh/code-shared/branding
 
 ## Regression check
 
-Run `vp run check:branding` and `vp run test:branding`. CI runs both in its Check job. The checker discovers files recursively under `apps/web`, `apps/desktop`, `apps/mobile`, `apps/server`, `packages`, and `native`, including newly added untracked files. It scans source, UI markup, and configuration text for case-insensitive `T3 Code`, `T3 Connect`, `T3 Server`, `T3 account`, `T3 thread(s)`, and known environment/backend/runtime/preview phrases, including whitespace split across lines. It excludes dependency/build output, tests, and fixtures. It is a copy check, not a replacement for reviewing standalone names, images, dynamically assembled strings, or new file formats.
+Run `vp run check:branding` and `vp run test:branding`. CI runs both in its Check job. The checker discovers files recursively under `apps/web`, `apps/desktop`, `apps/mobile`, `apps/server`, `packages`, and `native`, including newly added untracked files. It scans source, UI markup, and configuration text for case-insensitive `Kata Code`, `Kata Code Connect`, `Kata Code Server`, `Kata Code account`, `Kata Code thread(s)`, and known environment/backend/runtime/preview phrases, including whitespace split across lines. It excludes dependency/build output, tests, and fixtures. It is a copy check, not a replacement for reviewing standalone names, images, dynamically assembled strings, or new file formats.
 
 `branding-exceptions.json` permits only exact comment text at an exact source path. Every entry states why it remains. No whole source file is exempted. Changed comments must be reviewed again. Internal symbols such as `T3ConnectClient`, wire identifiers, storage keys, and named third-party themes do not match product phrases and need no exception. Tests inject rejected copy into new source files and ensure the command fails; they also verify that an excepted comment cannot hide a new product string in the same file.
 
 ## Audit and retained occurrences
 
-The source audit searched `T3 Code`, `T3 Connect`, standalone `T3`, `t3code`, `t3.codes`, and upstream repository links across the scoped applications, shared packages, and native helpers. It covered the Connections row/search catalog, boot failure text, client labels, desktop activation errors, capture setup and permissions, browser import, integration examples, diagnostics, terminal previews, mobile sign-in, work-log labels, server environment/error text, and native capture helpers.
+The source audit searched `Kata Code`, `Kata Code Connect`, standalone `T3`, `t3code`, `t3.codes`, and upstream repository links across the scoped applications, shared packages, and native helpers. It covered the Connections row/search catalog, boot failure text, client labels, desktop activation errors, capture setup and permissions, browser import, integration examples, diagnostics, terminal previews, mobile sign-in, work-log labels, server environment/error text, and native capture helpers.
 
 Retained categories and concrete occurrences:
 
