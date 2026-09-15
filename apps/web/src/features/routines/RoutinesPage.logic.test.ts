@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { RoutineDraft, ServerProvider, VcsRef } from "@kata-sh/code-contracts";
+import type { Routine, RoutineDraft, ServerProvider, VcsRef } from "@kata-sh/code-contracts";
 import { ModelSelection, ProjectId, ProviderInstanceId } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
 
@@ -184,8 +184,14 @@ describe("unsaved routine cancel", () => {
 
 describe("routine delete in the library", () => {
   it("drops the deleted card and keeps the editor source for history", () => {
-    const enabled = { id: "routine-1", state: "enabled" as const };
-    const deleted = { id: "routine-1", state: "deleted" as const };
+    const enabled: { id: string; state: Routine["state"] } = {
+      id: "routine-1",
+      state: "enabled",
+    };
+    const deleted: { id: string; state: Routine["state"] } = {
+      id: "routine-1",
+      state: "deleted",
+    };
     expect(libraryRoutinesAfterChange([enabled], deleted)).toEqual([]);
     expect(keepDeletedRoutineInEditor(deleted.state)).toBe(true);
     expect(DELETE_ROUTINE_MESSAGE).toContain("Conversations and run history stay available");
