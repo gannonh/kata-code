@@ -1,14 +1,46 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { ServerProvider, VcsRef } from "@kata-sh/code-contracts";
+import type { Routine, RoutineDraft, ServerProvider, VcsRef } from "@kata-sh/code-contracts";
+import { ModelSelection, ProjectId, ProviderInstanceId } from "@kata-sh/code-contracts";
+import * as Schema from "effect/Schema";
 
 import {
   canSaveRoutineDraft,
+  confirmDialogAccepted,
+  DELETE_ROUTINE_MESSAGE,
+  DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
   firstEnabledProviderModel,
+  isRoutineDraftDirty,
+  keepDeletedRoutineInEditor,
+  libraryRoutinesAfterChange,
   preferredWorktreeBaseBranch,
+  ROUTINE_CANCEL_HINT,
+  ROUTINE_CONTROL_CLASS,
+  ROUTINE_EDITOR_FIELDS_CLASS,
+  ROUTINE_PERMISSION_MODE_LABELS,
+  ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS,
+  routineDraftBaselineAfterAutomaticChange,
   routinesLibraryEmptyKind,
   worktreeBaseExists,
 } from "./RoutinesPage.logic";
+
+const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
+
+function draft(patch: Partial<RoutineDraft> = {}): RoutineDraft {
+  return {
+    name: "",
+    instruction: "",
+    projectId: ProjectId.make("project-1"),
+    modelSelection: decodeModelSelection({
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.4",
+    }),
+    runtimeMode: "approval-required",
+    workspace: { kind: "shared", directory: "/tmp/project" },
+    trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
+    ...patch,
+  };
+}
 
 function ref(name: string, flags: Partial<VcsRef> = {}): VcsRef {
   return {
@@ -118,5 +150,85 @@ describe("routinesLibraryEmptyKind", () => {
     expect(
       routinesLibraryEmptyKind({ routineCount: 0, unavailableCount: 0, pendingCount: 0 }),
     ).toBe("empty");
+  });
+});
+
+describe("routine editor layout", () => {
+  it("stacks the editor and wraps When-to-run so 1440 sidebar-open cannot overlay fields", () => {
+    expect(ROUTINE_EDITOR_FIELDS_CLASS).toContain("grid-cols-1");
+    expect(ROUTINE_EDITOR_FIELDS_CLASS).toContain("min-w-0");
+    expect(ROUTINE_EDITOR_FIELDS_CLASS).not.toMatch(/\blg:grid-cols-2\b/);
+    expect(ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS).toContain("flex-wrap");
+    expect(ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS).not.toMatch(/\bsm:grid-cols-4\b/);
+    expect(ROUTINE_CONTROL_CLASS).toContain("w-full");
+    expect(ROUTINE_CONTROL_CLASS).toContain("min-w-0");
+  });
+
+  it("keeps the full permission-mode label", () => {
+    expect(ROUTINE_PERMISSION_MODE_LABELS["approval-required"]).toBe(
+      "Supervised · ask before changes",
+    );
+  });
+});
+
+describe("unsaved routine cancel", () => {
+  it("treats an unchanged draft as clean and a typed draft as dirty", () => {
+    const baseline = draft();
+    expect(isRoutineDraftDirty(baseline, baseline)).toBe(false);
+    expect(isRoutineDraftDirty(draft({ name: "Daily brief" }), baseline)).toBe(true);
+  });
+
+  it("documents that a canceled dirty draft is discarded without saving", () => {
+    expect(DISCARD_UNSAVED_ROUTINE_MESSAGE).toContain("will not become a routine");
+    expect(ROUTINE_CANCEL_HINT).toContain("canceled draft is not saved");
+  });
+
+  it("treats a missing confirm host as cancellation", () => {
+    expect(confirmDialogAccepted(undefined)).toBe(false);
+    expect(confirmDialogAccepted(false)).toBe(false);
+    expect(confirmDialogAccepted(true)).toBe(true);
+  });
+
+  it("adopts automatic workspace-branch init as the baseline when the draft is still clean", () => {
+    const worktree = {
+      kind: "worktree" as const,
+      baseBranch: "main",
+      startFromOrigin: true,
+      runSetupScript: true,
+    };
+    const baseline = draft({ workspace: worktree });
+    const next = draft({ workspace: { ...worktree, baseBranch: "develop" } });
+    expect(routineDraftBaselineAfterAutomaticChange(baseline, baseline, next)).toEqual(next);
+    expect(isRoutineDraftDirty(next, next)).toBe(false);
+  });
+
+  it("keeps the baseline when the user already edited the draft", () => {
+    const worktree = {
+      kind: "worktree" as const,
+      baseBranch: "main",
+      startFromOrigin: true,
+      runSetupScript: true,
+    };
+    const baseline = draft({ workspace: worktree });
+    const current = draft({ name: "Daily brief", workspace: worktree });
+    const next = draft({ name: "Daily brief", workspace: { ...worktree, baseBranch: "develop" } });
+    expect(routineDraftBaselineAfterAutomaticChange(current, baseline, next)).toEqual(baseline);
+    expect(isRoutineDraftDirty(next, baseline)).toBe(true);
+  });
+});
+
+describe("routine delete in the library", () => {
+  it("drops the deleted card and keeps the editor source for history", () => {
+    const enabled: { id: string; state: Routine["state"] } = {
+      id: "routine-1",
+      state: "enabled",
+    };
+    const deleted: { id: string; state: Routine["state"] } = {
+      id: "routine-1",
+      state: "deleted",
+    };
+    expect(libraryRoutinesAfterChange([enabled], deleted)).toEqual([]);
+    expect(keepDeletedRoutineInEditor(deleted.state)).toBe(true);
+    expect(DELETE_ROUTINE_MESSAGE).toContain("Conversations and run history stay available");
   });
 });

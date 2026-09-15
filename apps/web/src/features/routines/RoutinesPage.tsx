@@ -52,11 +52,25 @@ import { SidebarInset } from "../../components/ui/sidebar";
 import { WorkspacePageHeader } from "../../components/WorkspacePageHeader";
 import { Badge } from "../../components/ui/badge";
 import { Empty, EmptyHeader, EmptyTitle } from "../../components/ui/empty";
+import { requestConfirmDialog } from "../../confirmDialog";
 import {
   canSaveRoutineDraft,
+  confirmDialogAccepted,
+  DELETE_ROUTINE_MESSAGE,
+  DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
   firstEnabledProviderModel,
+  isRoutineDraftDirty,
+  keepDeletedRoutineInEditor,
+  libraryRoutinesAfterChange,
   preferredWorktreeBaseBranch,
+  routineDraftBaselineAfterAutomaticChange,
+  ROUTINE_CANCEL_HINT,
+  ROUTINE_CONTROL_CLASS,
+  ROUTINE_EDITOR_COLUMN_CLASS,
+  ROUTINE_EDITOR_FIELDS_CLASS,
+  ROUTINE_PERMISSION_MODE_LABELS,
+  ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS,
   routinesLibraryEmptyKind,
 } from "./RoutinesPage.logic";
 
@@ -303,6 +317,8 @@ function RoutineEditor({
   onOwnerChange,
   onSaved,
   onCancel,
+  baseline,
+  onBaselineChange,
 }: {
   readonly draft: DraftState;
   readonly routine: RoutineWithOwner | null;
@@ -317,6 +333,8 @@ function RoutineEditor({
   readonly onOwnerChange: (environmentId: EnvironmentId) => void;
   readonly onSaved: (routine: Routine) => void;
   readonly onCancel: () => void;
+  readonly baseline: RoutineDraft;
+  readonly onBaselineChange: (baseline: RoutineDraft) => void;
 }) {
   const save = useAtomCommand(routineEnvironment.save, { reportFailure: false });
   const change = useAtomCommand(routineEnvironment.change, { reportFailure: false });
@@ -382,8 +400,10 @@ function RoutineEditor({
     const preferred = preferredWorktreeBaseBranch(refs.data.refs);
     if (!preferred || preferred === configuration.workspace.baseBranch) return;
     if (configuration.workspace.baseBranch !== "main") return;
-    setConfiguration({ workspace: worktreeWorkspace(preferred) });
-  }, [configuration.workspace, refs.data]);
+    const next = { ...configuration, workspace: worktreeWorkspace(preferred) };
+    onDraftChange({ ...draft, configuration: next });
+    onBaselineChange(routineDraftBaselineAfterAutomaticChange(configuration, baseline, next));
+  }, [baseline, configuration, draft, onBaselineChange, onDraftChange, refs.data]);
   const provider = selectableProviders.find(
     (candidate) => candidate.instanceId === configuration.modelSelection.instanceId,
   );
@@ -434,8 +454,21 @@ function RoutineEditor({
     onSaved(result.value);
   };
 
+  const requestClose = async () => {
+    if (!isRoutineDraftDirty(configuration, baseline)) {
+      onCancel();
+      return;
+    }
+    const confirmation = requestConfirmDialog(DISCARD_UNSAVED_ROUTINE_MESSAGE);
+    if (confirmDialogAccepted(await confirmation)) onCancel();
+  };
+
   const applyChange = async (action: "pause" | "resume" | "delete") => {
     if (!routine || offline || busy) return;
+    if (action === "delete") {
+      const confirmation = requestConfirmDialog(DELETE_ROUTINE_MESSAGE, { variant: "destructive" });
+      if (!confirmDialogAccepted(await confirmation)) return;
+    }
     setBusy(true);
     setMessage(null);
     const result = await change({
@@ -455,7 +488,6 @@ function RoutineEditor({
           : "Routine resumed",
     );
     onSaved(result.value);
-    if (action === "delete") onCancel();
   };
 
   const runTest = async () => {
@@ -480,7 +512,10 @@ function RoutineEditor({
   };
 
   return (
-    <section className="border-t border-border/60 pt-5" aria-label="Routine editor">
+    <section
+      className="min-w-0 overflow-x-clip border-t border-border/60 pt-5"
+      aria-label="Routine editor"
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-base font-semibold text-foreground">
@@ -503,10 +538,17 @@ function RoutineEditor({
               <RotateCcwIcon className="size-3.5" /> Test run
             </Button>
           ) : null}
-          <Button size="sm" onClick={submitSave} disabled={!canSave}>
-            <SaveIcon className="size-3.5" /> {busy ? "Saving…" : "Save"}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onCancel}>
+          {routine?.state !== "deleted" ? (
+            <Button size="sm" onClick={submitSave} disabled={!canSave}>
+              <SaveIcon className="size-3.5" /> {busy ? "Saving…" : "Save"}
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="ghost"
+            title={ROUTINE_CANCEL_HINT}
+            onClick={() => void requestClose()}
+          >
             Cancel
           </Button>
         </div>
@@ -523,15 +565,21 @@ function RoutineEditor({
           it reconnects.
         </div>
       ) : null}
+      {routine?.state === "deleted" ? (
+        <div className="mt-3 rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          This routine is deleted. Conversations and run history stay available below. It will not
+          start again on the schedule.
+        </div>
+      ) : null}
 
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <div className="grid gap-4">
+      <div className={ROUTINE_EDITOR_FIELDS_CLASS}>
+        <div className={ROUTINE_EDITOR_COLUMN_CLASS}>
           {!isSaved && owners.length > 1 ? (
             <div className="grid gap-1.5">
               <FieldLabel htmlFor="routine-environment">Environment</FieldLabel>
               <select
                 id="routine-environment"
-                className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
+                className={ROUTINE_CONTROL_CLASS}
                 value={draft.environmentId}
                 onChange={(event) => onOwnerChange(event.target.value as EnvironmentId)}
               >
@@ -566,7 +614,7 @@ function RoutineEditor({
             <FieldLabel htmlFor="routine-project">Project</FieldLabel>
             <select
               id="routine-project"
-              className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
+              className={ROUTINE_CONTROL_CLASS}
               value={configuration.projectId}
               onChange={(event) => {
                 const nextProject = projects.find(
@@ -595,7 +643,7 @@ function RoutineEditor({
             <FieldLabel htmlFor="routine-provider">Provider and model</FieldLabel>
             <select
               id="routine-provider"
-              className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
+              className={ROUTINE_CONTROL_CLASS}
               value={`${configuration.modelSelection.instanceId}:${configuration.modelSelection.model}`}
               onChange={(event) => {
                 const [instanceId, ...modelParts] = event.target.value.split(":");
@@ -689,32 +737,36 @@ function RoutineEditor({
           </div>
         </div>
 
-        <div className="grid content-start gap-4">
+        <div className={ROUTINE_EDITOR_COLUMN_CLASS}>
           <div className="grid gap-1.5">
             <FieldLabel htmlFor="routine-permission">Permission mode</FieldLabel>
             <select
               id="routine-permission"
-              className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
+              className={ROUTINE_CONTROL_CLASS}
               value={configuration.runtimeMode}
               onChange={(event) =>
                 setConfiguration({ runtimeMode: event.target.value as RuntimeMode })
               }
             >
-              <option value="approval-required">Supervised · ask before changes</option>
-              <option value="auto-accept-edits">Auto accept edits</option>
-              <option value="auto">Auto</option>
-              <option value="full-access">Full access</option>
+              {(Object.entries(ROUTINE_PERMISSION_MODE_LABELS) as [RuntimeMode, string][]).map(
+                ([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ),
+              )}
             </select>
           </div>
-          <div className="grid gap-2 rounded-xl border border-border/60 bg-muted/15 p-3">
+          <div className="grid min-w-0 gap-2 rounded-xl border border-border/60 bg-muted/15 p-3">
             <div className="flex items-center gap-2 text-sm font-medium">
               <CalendarClockIcon className="size-4 text-muted-foreground" /> When to run
             </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className={ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS}>
               {(["daily", "weekdays", "weekly", "cron"] as const).map((kind) => (
                 <Button
                   key={kind}
                   size="sm"
+                  className="min-w-0 shrink"
                   variant={configuration.trigger.kind === kind ? "default" : "outline"}
                   onClick={() => {
                     if (kind === "cron")
@@ -750,7 +802,7 @@ function RoutineEditor({
                 {configuration.trigger.kind === "weekly" ? (
                   <select
                     aria-label="Weekday"
-                    className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
+                    className={ROUTINE_CONTROL_CLASS}
                     value={String(configuration.trigger.weekday)}
                     onChange={(event) => setTrigger({ weekday: Number(event.target.value) })}
                   >
@@ -790,7 +842,7 @@ function RoutineEditor({
             <FieldLabel htmlFor="routine-workspace">Workspace</FieldLabel>
             <select
               id="routine-workspace"
-              className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
+              className={ROUTINE_CONTROL_CLASS}
               value={configuration.workspace.kind}
               onChange={(event) => {
                 if (event.target.value === "worktree")
@@ -854,14 +906,16 @@ function RoutineEditor({
                 <PlayIcon className="size-3.5" /> Resume
               </Button>
             ) : null}
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void applyChange("delete")}
-              disabled={busy || offline}
-            >
-              <Trash2Icon className="size-3.5 text-destructive" /> Delete
-            </Button>
+            {routine.state !== "deleted" ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => void applyChange("delete")}
+                disabled={busy || offline}
+              >
+                <Trash2Icon className="size-3.5 text-destructive" /> Delete
+              </Button>
+            ) : null}
           </div>
           <Menu>
             <MenuTrigger
@@ -870,7 +924,7 @@ function RoutineEditor({
               <MoreHorizontalIcon className="size-4" />
             </MenuTrigger>
             <MenuPopup align="end">
-              <MenuItem onClick={onCancel}>
+              <MenuItem onClick={() => void requestClose()}>
                 <Settings2Icon className="size-4" /> Close editor
               </MenuItem>
             </MenuPopup>
@@ -963,6 +1017,8 @@ export function RoutinesPage() {
   const [editing, setEditing] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [editorRoutine, setEditorRoutine] = useState<RoutineWithOwner | null>(null);
+  const [baseline, setBaseline] = useState<RoutineDraft | null>(null);
   const newRoutineTriggerRef = useRef<HTMLButtonElement | null>(null);
   const allRoutines = useMemo(
     () => Array.from(routinesByEnvironment.values()).flatMap((load) => load.routines),
@@ -978,7 +1034,10 @@ export function RoutinesPage() {
     ).length,
   });
   const selectedRoutine =
-    allRoutines.find((routine) => `${routine.environmentId}:${routine.id}` === selectedKey) ?? null;
+    allRoutines.find((routine) => `${routine.environmentId}:${routine.id}` === selectedKey) ??
+    (editorRoutine !== null && `${editorRoutine.environmentId}:${editorRoutine.id}` === selectedKey
+      ? editorRoutine
+      : null);
   const selectedEnvironment = environments.find(
     (environment) =>
       environment.environmentId === (draft?.environmentId ?? selectedRoutine?.environmentId),
@@ -1018,12 +1077,16 @@ export function RoutinesPage() {
       setShowMenu(false);
       setEditing(false);
       setDraft(null);
+      setEditorRoutine(null);
+      setBaseline(null);
       return;
     }
     setCreateError(null);
     setShowMenu(false);
     setSelectedKey(null);
     setDraft(null);
+    setEditorRoutine(null);
+    setBaseline(null);
     setEditing(true);
   };
 
@@ -1038,6 +1101,7 @@ export function RoutinesPage() {
     if (next) {
       setCreateError(null);
       setDraft(next);
+      setBaseline(next.configuration);
       return;
     }
     setEditing(false);
@@ -1063,16 +1127,22 @@ export function RoutinesPage() {
     if (projectOk && (providerOk || enabledProviders(selectedProviders ?? []).length === 0)) return;
     const next = defaultDraft(draft.environmentId, environmentProjects, selectedProviders ?? []);
     if (!next) return;
+    const nextConfiguration = {
+      ...next.configuration,
+      name: draft.configuration.name,
+      instruction: draft.configuration.instruction,
+    };
     setDraft({
       ...next,
       id: draft.id,
-      configuration: {
-        ...next.configuration,
-        name: draft.configuration.name,
-        instruction: draft.configuration.instruction,
-      },
+      configuration: nextConfiguration,
     });
-  }, [draft, editing, projects, selectedProviders, selectedRoutine]);
+    if (baseline) {
+      setBaseline(
+        routineDraftBaselineAfterAutomaticChange(draft.configuration, baseline, nextConfiguration),
+      );
+    }
+  }, [baseline, draft, editing, projects, selectedProviders, selectedRoutine]);
 
   const selectRoutine = (routine: RoutineWithOwner) => {
     setSelectedKey(`${routine.environmentId}:${routine.id}`);
@@ -1084,6 +1154,8 @@ export function RoutinesPage() {
     });
     setEditing(true);
     setShowMenu(false);
+    setEditorRoutine(routine);
+    setBaseline(routine.configuration);
   };
 
   const cancelEditing = () => {
@@ -1091,6 +1163,8 @@ export function RoutinesPage() {
     setDraft(null);
     setSelectedKey(null);
     setCreateError(null);
+    setEditorRoutine(null);
+    setBaseline(null);
     queueMicrotask(() => newRoutineTriggerRef.current?.focus());
   };
 
@@ -1102,20 +1176,16 @@ export function RoutinesPage() {
       expectedRevision: routine.revision,
       configuration: routine.configuration,
     });
+    setBaseline(routine.configuration);
     setSelectedKey(`${routine.environmentId}:${routine.id}`);
-    setEditing(true);
+    setEditing(routine.state !== "deleted" || keepDeletedRoutineInEditor(routine.state));
     setRoutinesByEnvironment((previous) => {
       const next = new Map(previous);
       const existing = next.get(routine.environmentId);
       const currentRoutines = existing?.routines ?? [];
-      if (routine.state === "deleted") {
-        next.set(routine.environmentId, {
-          status: existing?.status ?? "ready",
-          routines: currentRoutines.filter((entry) => entry.id !== routine.id),
-        });
-        return next;
-      }
-      const owner = currentRoutines.find((entry) => entry.id === routine.id);
+      const owner =
+        currentRoutines.find((entry) => entry.id === routine.id) ??
+        (editorRoutine?.id === routine.id ? editorRoutine : undefined);
       const replacement: RoutineWithOwner = {
         ...routine,
         ownerLabel: owner?.ownerLabel ?? "Environment",
@@ -1123,12 +1193,15 @@ export function RoutinesPage() {
       };
       next.set(routine.environmentId, {
         status: existing?.status ?? "ready",
-        routines: currentRoutines.some((entry) => entry.id === routine.id)
-          ? currentRoutines.map((entry) => (entry.id === routine.id ? replacement : entry))
-          : [...currentRoutines, replacement],
+        routines: libraryRoutinesAfterChange(currentRoutines, replacement),
       });
       return next;
     });
+    setEditorRoutine((previous) => ({
+      ...routine,
+      ownerLabel: previous?.id === routine.id ? previous.ownerLabel : "Environment",
+      connectionPhase: previous?.id === routine.id ? previous.connectionPhase : "connected",
+    }));
   };
 
   if (!isReady)
@@ -1242,7 +1315,9 @@ export function RoutinesPage() {
               label: owner.label,
             }))}
             offline={ownerOffline === true}
+            baseline={baseline ?? draft.configuration}
             onDraftChange={setDraft}
+            onBaselineChange={setBaseline}
             onOwnerChange={changeOwner}
             onSaved={updateSavedRoutine}
             onCancel={cancelEditing}
