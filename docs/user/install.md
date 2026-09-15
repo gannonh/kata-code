@@ -5,8 +5,10 @@ desktop, web, or mobile app. Set up the machine where the agents will work first
 
 ## Requirements
 
-Command-line use, SSH hosts, and WSL backends need Node.js 22.16+ (22.x), 23.11+
-(23.x), or 24.10 and later. The native desktop app includes its server runtime.
+`npx @kata-sh/code-cli` needs Node.js only to run npm itself; the CLI it installs is a
+self-contained executable. SSH hosts and WSL backends need Node.js 22.16+
+(22.x), 23.11+ (23.x), or 24.10 and later. The native desktop app includes its
+server runtime.
 
 You need an installed, authenticated provider before starting a thread. You can
 launch Kata Code and configure providers afterwards.
@@ -19,6 +21,22 @@ npx @kata-sh/code-cli@latest
 
 This starts the server and opens the local web app. Run
 `npx @kata-sh/code-cli@latest --help` for command-line options.
+
+The executable is built for Apple Silicon Macs, Linux, and Windows. There is
+no Intel Mac build of it, because Node cannot produce a single executable for
+that platform; the Intel desktop app is unaffected. To run a standalone server
+on an Intel Mac, build it from source. You need Node.js 24 and `vp` (see
+[Development](../operations/development.md#first-checkout)):
+
+```bash
+git clone https://github.com/gannonh/kata-code
+cd kata-code && vp i && vp run build:desktop
+node apps/server/dist/bin.mjs
+```
+
+A server run this way is a plain Node program: `katacode update` and the background
+service do not apply, so update it with `git pull` and a rebuild, and start it
+however you run other Node processes.
 
 ## Desktop app
 

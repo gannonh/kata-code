@@ -756,13 +756,13 @@ export const IRIS_THEME: ThemeDefinition = {
   sidebarArtwork: true,
 };
 
-export const BUILT_IN_THEMES: ReadonlyArray<ThemeDefinition> = [
+export const BUILT_IN_THEMES = [
   T3_CHAT_THEME,
   GROVE_THEME,
   OCEAN_THEME,
   EMBER_THEME,
   IRIS_THEME,
-];
+] as const satisfies ReadonlyArray<ThemeDefinition>;
 
 export function getThemeColorsForAppearance(
   theme: ThemeDefinition,

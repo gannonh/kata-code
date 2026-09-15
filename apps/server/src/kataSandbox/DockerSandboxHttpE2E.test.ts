@@ -255,7 +255,7 @@ async function httpJson<Body>(input: {
       authorization: `Bearer ${input.token}`,
       ...(input.body === undefined ? {} : { "content-type": "application/json" }),
     },
-    body: input.body === undefined ? undefined : JSON.stringify(input.body),
+    ...(input.body === undefined ? {} : { body: JSON.stringify(input.body) }),
   });
   const text = await response.text();
   return {
@@ -462,6 +462,7 @@ function makeClientLayer() {
     Layer.succeed(Platform.PlatformConnectionSource, { registrations: Stream.succeed([]) }),
     Layer.succeed(Platform.ConnectionTargetStore, {
       list: Effect.sync(() => [...targets.values()]),
+      listDisabled: Effect.succeed([]),
     }),
     Layer.succeed(Platform.ConnectionRegistrationStore, {
       register: (registration) =>
@@ -476,6 +477,7 @@ function makeClientLayer() {
         Effect.sync(() => {
           targets.delete(target.environmentId);
         }),
+      setEnabled: () => Effect.void,
     }),
     Layer.succeed(ProfileStore.ConnectionProfileStore, {
       get: (id) => Effect.sync(() => Option.fromUndefinedOr(profiles.get(id))),

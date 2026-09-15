@@ -1,0 +1,356 @@
+import { assert, describe, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import { beforeEach, vi } from "vite-plus/test";
+
+const { handleMock, netFetchMock, onBeforeSendHeadersMock, onHeadersReceivedMock, unhandleMock } =
+  vi.hoisted(() => ({
+    handleMock: vi.fn(),
+    netFetchMock: vi.fn(),
+    onBeforeSendHeadersMock: vi.fn(),
+    onHeadersReceivedMock: vi.fn(),
+    unhandleMock: vi.fn(),
+  }));
+
+vi.mock("electron", () => ({
+  net: { fetch: netFetchMock },
+  protocol: { handle: handleMock, unhandle: unhandleMock },
+  session: {
+    defaultSession: {
+      webRequest: {
+        onBeforeSendHeaders: onBeforeSendHeadersMock,
+        onHeadersReceived: onHeadersReceivedMock,
+      },
+    },
+  },
+}));
+
+import * as ElectronProtocol from "./ElectronProtocol.ts";
+
+const protocolLayer = ElectronProtocol.layer.pipe(Layer.provide(NodeServices.layer));
+
+describe("ElectronProtocol", () => {
+  beforeEach(() => {
+    handleMock.mockReset();
+    netFetchMock.mockReset();
+    onBeforeSendHeadersMock.mockReset();
+    onHeadersReceivedMock.mockReset();
+    unhandleMock.mockReset();
+  });
+
+  it.effect("serves the bundled client from disk without a backend", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = yield* fileSystem.makeTempDirectoryScoped();
+      yield* fileSystem.writeFileString(`${directory}/index.html`, "<html>app</html>");
+      yield* fileSystem.writeFileString(`${directory}/app.js`, "export default 1;");
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+      const protocol = yield* ElectronProtocol.ElectronProtocol;
+      yield* protocol.registerDesktopProtocol({
+        scheme: "katacode",
+        assetDirectory: directory,
+        clerkFrontendApiHostname: undefined,
+      });
+      const request = (pathname: string, init?: RequestInit) =>
+        Effect.promise(() => handler!(new Request(`katacode://app${pathname}`, init)));
+
+      // SPA routes fall back to index.html, including ones containing dots.
+      const page = yield* request("/settings/connections");
+      assert.equal(yield* Effect.promise(() => page.text()), "<html>app</html>");
+      assert.include(page.headers.get("content-security-policy") ?? "", "default-src 'self'");
+      const dottedRoute = yield* request("/environment/thread.with.dots", {
+        headers: { accept: "text/html" },
+      });
+      assert.equal(yield* Effect.promise(() => dottedRoute.text()), "<html>app</html>");
+
+      const script = yield* request("/app.js?v=1");
+      assert.equal(yield* Effect.promise(() => script.text()), "export default 1;");
+      assert.include(script.headers.get("content-type") ?? "", "javascript");
+
+      assert.equal((yield* request("/missing.js")).status, 404);
+      assert.equal((yield* request("/%2e%2e%2fsecret.txt")).status, 404);
+      assert.equal((yield* request("/%invalid")).status, 400);
+      assert.equal((yield* request("/", { method: "POST" })).status, 405);
+      assert.equal(netFetchMock.mock.calls.length, 0);
+    }).pipe(Effect.provide(Layer.merge(protocolLayer, NodeServices.layer)), Effect.scoped),
+  );
+
+  it.effect("proxies the stable renderer origin to the current app server", () =>
+    Effect.gen(function* () {
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+      netFetchMock.mockResolvedValue(new Response("ok"));
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "katacode-dev",
+            targetOrigin: new URL("http://127.0.0.1:3773/"),
+            clerkFrontendApiHostname: "clerk.t3.codes",
+          });
+          assert.isDefined(handler);
+
+          const response = yield* Effect.promise(() =>
+            handler!(
+              new Request("katacode-dev://app/api/health?verbose=1", {
+                headers: {
+                  accept: "application/json",
+                  origin: "katacode-dev://app",
+                  referer: "katacode-dev://app/",
+                  "sec-fetch-site": "same-origin",
+                },
+              }),
+            ),
+          );
+          assert.equal(yield* Effect.promise(() => response.text()), "ok");
+          assert.include(
+            response.headers.get("content-security-policy") ?? "",
+            "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://clerk.t3.codes https://challenges.cloudflare.com",
+          );
+          assert.include(
+            response.headers.get("content-security-policy") ?? "",
+            "connect-src 'self' http: https: ws: wss:",
+          );
+          assert.include(
+            response.headers.get("content-security-policy") ?? "",
+            "img-src 'self' katacode-dev: blob: data: http: https:",
+          );
+          assert.include(
+            response.headers.get("content-security-policy") ?? "",
+            "font-src 'self' katacode-dev: data:",
+          );
+        }),
+      );
+
+      assert.deepEqual(
+        handleMock.mock.calls.map((call) => call[0]),
+        ["katacode-dev"],
+      );
+      assert.equal(netFetchMock.mock.calls[0]?.[0], "http://127.0.0.1:3773/api/health?verbose=1");
+      const forwardedHeaders = new Headers(netFetchMock.mock.calls[0]?.[1]?.headers);
+      assert.equal(forwardedHeaders.get("accept"), "application/json");
+      assert.isNull(forwardedHeaders.get("origin"));
+      assert.isNull(forwardedHeaders.get("referer"));
+      assert.isNull(forwardedHeaders.get("sec-fetch-site"));
+      assert.deepEqual(unhandleMock.mock.calls, [["katacode-dev"]]);
+    }).pipe(Effect.provide(protocolLayer)),
+  );
+
+  it.effect("rejects custom protocol requests for another host", () =>
+    Effect.gen(function* () {
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+
+      const response = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "katacode",
+            targetOrigin: new URL("http://127.0.0.1:3773/"),
+            clerkFrontendApiHostname: undefined,
+          });
+          return yield* Effect.promise(() => handler!(new Request("katacode://other/")));
+        }),
+      );
+
+      assert.equal(response.status, 404);
+      assert.equal(netFetchMock.mock.calls.length, 0);
+    }).pipe(Effect.provide(protocolLayer)),
+  );
+
+  it("removes the renderer origin only from authenticated Clerk requests", () => {
+    assert.deepEqual(
+      ElectronProtocol.normalizeClerkRequestHeaders({
+        Authorization: "Bearer client-token",
+        Origin: "katacode-dev://app",
+        Accept: "application/json",
+      }),
+      {
+        Authorization: "Bearer client-token",
+        Accept: "application/json",
+      },
+    );
+    assert.deepEqual(
+      ElectronProtocol.normalizeClerkRequestHeaders({
+        Origin: "katacode-dev://app",
+        Accept: "application/json",
+      }),
+      {
+        Origin: "katacode-dev://app",
+        Accept: "application/json",
+      },
+    );
+    assert.deepEqual(
+      ElectronProtocol.normalizeClerkRequestHeaders({
+        authorization: "Bearer client-token",
+        origin: "katacode-dev://app",
+      }),
+      { authorization: "Bearer client-token" },
+    );
+  });
+
+  it("adds the renderer origin to native Clerk responses", () => {
+    assert.deepEqual(
+      ElectronProtocol.withClerkCorsResponseHeaders(
+        {
+          "Access-Control-Allow-Origin": ["https://old.example"],
+          "Content-Type": ["application/json"],
+        },
+        "katacode-dev://app",
+      ),
+      {
+        "Access-Control-Allow-Origin": ["katacode-dev://app"],
+        "Content-Type": ["application/json"],
+      },
+    );
+  });
+
+  it.effect("registers the Clerk header hooks for the configured frontend host", () =>
+    Effect.gen(function* () {
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "katacode-dev",
+            targetOrigin: new URL("http://127.0.0.1:3773/"),
+            clerkFrontendApiHostname: "upward-terrier-81.clerk.accounts.dev",
+          });
+
+          assert.deepEqual(onBeforeSendHeadersMock.mock.calls[0]?.[0], {
+            urls: ["https://upward-terrier-81.clerk.accounts.dev/*"],
+          });
+          assert.deepEqual(onHeadersReceivedMock.mock.calls[0]?.[0], {
+            urls: ["https://upward-terrier-81.clerk.accounts.dev/*"],
+          });
+        }),
+      );
+
+      assert.deepEqual(onBeforeSendHeadersMock.mock.calls.at(-1), [null]);
+      assert.deepEqual(onHeadersReceivedMock.mock.calls.at(-1), [null]);
+    }).pipe(Effect.provide(protocolLayer)),
+  );
+
+  it.effect("retries transient renderer target failures", () =>
+    Effect.gen(function* () {
+      let handler: ((request: Request) => Promise<Response>) | undefined;
+      handleMock.mockImplementation((_scheme, nextHandler) => {
+        handler = nextHandler;
+      });
+      netFetchMock
+        .mockRejectedValueOnce(new Error("connect ECONNREFUSED 127.0.0.1:5733"))
+        .mockResolvedValueOnce(new Response("ready"));
+
+      const response = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const protocol = yield* ElectronProtocol.ElectronProtocol;
+          yield* protocol.registerDesktopProtocol({
+            scheme: "katacode-dev",
+            targetOrigin: new URL("http://127.0.0.1:5733/"),
+            clerkFrontendApiHostname: undefined,
+          });
+          return yield* Effect.promise(() => handler!(new Request("katacode-dev://app/")));
+        }),
+      );
+
+      assert.equal(yield* Effect.promise(() => response.text()), "ready");
+      assert.equal(netFetchMock.mock.calls.length, 2);
+    }).pipe(Effect.provide(protocolLayer)),
+  );
+
+  it.effect("preserves protocol registration failures", () =>
+    Effect.gen(function* () {
+      const cause = new Error("protocol registration failed");
+      handleMock.mockImplementationOnce(() => {
+        throw cause;
+      });
+
+      const protocol = yield* ElectronProtocol.ElectronProtocol;
+      const error = yield* Effect.scoped(
+        protocol.registerDesktopProtocol({
+          scheme: "katacode-dev",
+          targetOrigin: new URL("http://127.0.0.1:3773/"),
+          clerkFrontendApiHostname: undefined,
+        }),
+      ).pipe(Effect.flip);
+
+      assert.instanceOf(error, ElectronProtocol.ElectronProtocolRegistrationError);
+      assert.equal(error.scheme, "katacode-dev");
+      assert.strictEqual(error.cause, cause);
+      assert.equal(error.message, 'Failed to register Electron protocol scheme "katacode-dev".');
+    }).pipe(Effect.provide(protocolLayer)),
+  );
+
+  it.effect("preserves protocol unregistration failures", () =>
+    Effect.gen(function* () {
+      const cause = new Error("protocol unregistration failed");
+      unhandleMock.mockImplementationOnce(() => {
+        throw cause;
+      });
+
+      const protocol = yield* ElectronProtocol.ElectronProtocol;
+      const exit = yield* Effect.exit(
+        Effect.scoped(
+          protocol.registerDesktopProtocol({
+            scheme: "katacode",
+            targetOrigin: new URL("http://127.0.0.1:3773/"),
+            clerkFrontendApiHostname: undefined,
+          }),
+        ),
+      );
+
+      assert.equal(exit._tag, "Failure");
+      if (exit._tag === "Failure") {
+        const error = Cause.squash(exit.cause);
+        assert.instanceOf(error, ElectronProtocol.ElectronProtocolUnregistrationError);
+        assert.equal(error.scheme, "katacode");
+        assert.strictEqual(error.cause, cause);
+        assert.equal(error.message, 'Failed to unregister Electron protocol scheme "katacode".');
+      }
+    }).pipe(Effect.provide(protocolLayer)),
+  );
+
+  it("keeps executable sources host-restricted while allowing runtime network resources", () => {
+    const policy = ElectronProtocol.makeDesktopContentSecurityPolicy({
+      scheme: "katacode",
+      targetOrigin: new URL("http://127.0.0.1:3773/"),
+      clerkFrontendApiHostname: "clerk.t3.codes",
+    });
+    const directives = Object.fromEntries(
+      policy.split("; ").map((directive) => {
+        const [name, ...sources] = directive.split(" ");
+        return [name, sources];
+      }),
+    );
+
+    assert.deepEqual(directives["script-src"], [
+      "'self'",
+      "'unsafe-inline'",
+      "'wasm-unsafe-eval'",
+      "https://clerk.t3.codes",
+      "https://challenges.cloudflare.com",
+    ]);
+    assert.deepEqual(directives["connect-src"], ["'self'", "http:", "https:", "ws:", "wss:"]);
+    assert.deepEqual(directives["img-src"], [
+      "'self'",
+      "katacode:",
+      "blob:",
+      "data:",
+      "http:",
+      "https:",
+    ]);
+    assert.deepEqual(directives["media-src"], ["'self'", "katacode:", "blob:", "http:", "https:"]);
+    assert.deepEqual(directives["frame-src"], ["'self'", "blob:", "http:", "https:"]);
+    assert.deepEqual(directives["font-src"], ["'self'", "katacode:", "data:"]);
+  });
+});

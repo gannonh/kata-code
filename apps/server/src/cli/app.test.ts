@@ -239,7 +239,7 @@ describe("katacode app", () => {
     ),
   );
 
-  it.effect("never searches a dev state directory for an explicit T3 home", () =>
+  it.effect("never searches a dev state directory for an explicit Kata Code home", () =>
     withTempDirectory("t3-app-explicit-test-", (root) =>
       Effect.gen(function* () {
         vi.mocked(NodeOS.homedir).mockReturnValue(root);
