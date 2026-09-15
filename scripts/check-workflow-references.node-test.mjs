@@ -262,6 +262,140 @@ jobs:
   });
 });
 
+NodeTest.test("rejects missing files required by inline scripts", () => {
+  withRoot((root) => {
+    writeFile(
+      root,
+      ".github/workflows/release.yml",
+      `name: Release
+on: workflow_dispatch
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const { gate } = require('./.github/scripts/check-nightly-release.cjs');
+            const fs = require("fs");
+            const dynamic = await import('./scripts/also-missing.mjs');
+`,
+    );
+    const result = run(root);
+    NodeAssert.equal(result.status, 1);
+    NodeAssert.match(
+      result.stderr,
+      /release\.yml:10: inline script reference does not exist: \.\/\.github\/scripts\/check-nightly-release\.cjs/,
+    );
+    NodeAssert.match(
+      result.stderr,
+      /release\.yml:12: inline script reference does not exist: \.\/scripts\/also-missing\.mjs/,
+    );
+    NodeAssert.doesNotMatch(result.stderr, /inline script reference does not exist: fs/);
+  });
+});
+
+NodeTest.test("resolves extensionless CommonJS and index module requires", () => {
+  withRoot((root) => {
+    writeFile(root, ".github/scripts/present.cjs", "module.exports = {};\n");
+    writeFile(root, "vendor/helper/index.js", "module.exports = {};\n");
+    writeFile(
+      root,
+      ".github/workflows/release.yml",
+      `name: Release
+on: workflow_dispatch
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const first = require('./.github/scripts/present');
+            const second = require('./vendor/helper');
+`,
+    );
+    const result = run(root);
+    NodeAssert.equal(result.status, 0, result.stderr);
+  });
+});
+
+NodeTest.test("honors the run step working directory for inline JavaScript", () => {
+  withRoot((root) => {
+    writeFile(root, "apps/demo/present.cjs", "module.exports = {};\n");
+    writeFile(
+      root,
+      ".github/workflows/release.yml",
+      `name: Release
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Inline
+        working-directory: apps/demo
+        run: node -e "require('./present.cjs')"
+`,
+    );
+    const result = run(root);
+    NodeAssert.equal(result.status, 0, result.stderr);
+  });
+});
+
+NodeTest.test(
+  "reports inline JavaScript under a working directory when the module is missing",
+  () => {
+    withRoot((root) => {
+      writeFile(
+        root,
+        ".github/workflows/release.yml",
+        `name: Release
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Inline
+        working-directory: apps/demo
+        run: node -e "require('./present.cjs')"
+`,
+      );
+      const result = run(root);
+      NodeAssert.equal(result.status, 1);
+      NodeAssert.match(
+        result.stderr,
+        /release\.yml:9: inline script reference does not exist: \.\/present\.cjs/,
+      );
+    });
+  },
+);
+
+NodeTest.test("ignores inert require text in comments and echo output", () => {
+  withRoot((root) => {
+    writeFile(
+      root,
+      ".github/workflows/release.yml",
+      `name: Release
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Inert
+        run: |
+          # require('./commented.cjs')
+          echo "require('./example.cjs')"
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            // require('./also-commented.cjs')
+`,
+    );
+    const result = run(root);
+    NodeAssert.equal(result.status, 0, result.stderr);
+  });
+});
+
 NodeTest.test("passes the current repository workflows", () => {
   const result = NodeChildProcess.spawnSync(process.execPath, [script], { encoding: "utf8" });
   NodeAssert.equal(result.status, 0, result.stderr);

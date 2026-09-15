@@ -25,7 +25,13 @@ const interpreterPattern =
   /(^|[&|;][ \t]*)[ \t]*(?:(?:if|elif|then|do|else|while|until|time|exec|!)[ \t]+)*(?:sudo[ \t]+)?(?:node|bun|deno|bash|sh|zsh|python3?|pwsh|powershell)[ \t]+/gm;
 const directScriptPattern =
   /(^|[&|;][ \t]*)[ \t]*(\.\/[A-Za-z0-9_@.-]+(?:\/[A-Za-z0-9_@.-]+)*\.(?:sh|bash|py|ps1))/gm;
+const inlineRequirePattern = /(?:require|import)\(\s*(['"])(\.\.?\/[^'"]+)\1\s*\)/g;
 const workingDirectoryPattern = /^\s*working-directory:\s*(.+?)\s*$/;
+const scriptBlockPattern = /^\s*script:\s*[|>][+-]?\s*$/;
+const scriptInlinePattern = /^\s*script:\s*(\S.*)$/;
+const inlineJavaScriptPattern = /\bnode\s+(?:-[ep]\b|--eval\b|--print\b)/;
+const moduleExtensions = [".js", ".cjs", ".mjs", ".json", ".node"];
+const moduleIndexFiles = moduleExtensions.map((extension) => `index${extension}`);
 const scriptPathPattern =
   /^\.?\/?[A-Za-z0-9_@.-]+(?:\/[A-Za-z0-9_@.-]+)*\.(?:ts|tsx|mts|cts|mjs|cjs|js|sh|bash|py|ps1)$/;
 const unresolvedValuePattern = /[$*?\[\]{}~'"=]/;
@@ -38,8 +44,84 @@ function indentOf(line) {
   return line.length - line.trimStart().length;
 }
 
+function isFile(target) {
+  return NodeFS.existsSync(target) && NodeFS.statSync(target).isFile();
+}
+
+function resolvesAsModule(target) {
+  if (isFile(target)) return true;
+  if (moduleExtensions.some((extension) => isFile(`${target}${extension}`))) return true;
+  return moduleIndexFiles.some((name) => isFile(NodePath.join(target, name)));
+}
+
 function report(relativePath, line, message) {
   findings.push(`${relativePath}:${line}: ${message}`);
+}
+
+function collectBlocks(lines, blockPattern, inlinePattern) {
+  const blocks = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const blockMatch = blockPattern.exec(line);
+    const inlineMatch = blockMatch === null ? inlinePattern.exec(line) : null;
+    if (blockMatch === null && inlineMatch === null) continue;
+    if (blockMatch !== null) {
+      const baseIndent = indentOf(line);
+      const blockLines = [];
+      let cursor = index + 1;
+      for (; cursor < lines.length; cursor += 1) {
+        const candidate = lines[cursor];
+        if (candidate.trim() !== "" && indentOf(candidate) <= baseIndent) break;
+        blockLines.push(candidate);
+      }
+      blocks.push({ startLine: index + 2, lines: blockLines });
+      index = cursor - 1;
+    } else {
+      blocks.push({ startLine: index + 1, lines: [inlineMatch[1]] });
+    }
+  }
+  return blocks;
+}
+
+function workingDirectoryBefore(lines, lineIndex) {
+  for (let index = lineIndex; index >= 0; index -= 1) {
+    const match = workingDirectoryPattern.exec(lines[index]);
+    if (match === null) continue;
+    const value = match[1]
+      .replace(/\s+#.*$/, "")
+      .replace(/^['"]|['"]$/g, "")
+      .trim();
+    if (value.includes("${{")) return { dynamic: true, value: null };
+    if (value.startsWith("/") || isUnresolved(value)) return { dynamic: false, value: null };
+    return { dynamic: false, value: value.replace(/^\.\//, "") };
+  }
+  return { dynamic: false, value: null };
+}
+
+function reportMissingInlineReferences(
+  relativePath,
+  lineNumber,
+  text,
+  workingDirectory,
+  commentMarker,
+) {
+  inlineRequirePattern.lastIndex = 0;
+  for (
+    let match = inlineRequirePattern.exec(text);
+    match !== null;
+    match = inlineRequirePattern.exec(text)
+  ) {
+    const commentIndex = text.indexOf(commentMarker);
+    if (commentIndex !== -1 && commentIndex < match.index) continue;
+    const reference = match[2].replace(/^\.\//, "");
+    const targets = [NodePath.join(root, reference)];
+    if (workingDirectory !== null) {
+      targets.push(NodePath.join(root, workingDirectory, reference));
+    }
+    if (!targets.some(resolvesAsModule)) {
+      report(relativePath, lineNumber, `inline script reference does not exist: ${match[2]}`);
+    }
+  }
 }
 
 function checkLocalUses(relativePath, lines) {
@@ -176,66 +258,45 @@ function collectScriptReferences(text) {
   return references;
 }
 
+function checkScriptBlocks(relativePath, lines) {
+  for (const block of collectBlocks(lines, scriptBlockPattern, scriptInlinePattern)) {
+    block.lines.forEach((line, offset) => {
+      reportMissingInlineReferences(relativePath, block.startLine + offset, line, null, "//");
+    });
+  }
+}
+
 function checkRunScripts(relativePath, lines) {
-  let workingDirectory = null;
-  let workingDirectoryIsDynamic = false;
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-
-    const workingDirectoryMatch = workingDirectoryPattern.exec(line);
-    if (workingDirectoryMatch !== null) {
-      const value = workingDirectoryMatch[1]
-        .replace(/\s+#.*$/, "")
-        .replace(/^['"]|['"]$/g, "")
-        .trim();
-      workingDirectoryIsDynamic = value.includes("${{");
-      workingDirectory =
-        value.startsWith("/") || isUnresolved(value) ? null : value.replace(/^\.\//, "");
-      continue;
-    }
-
-    const blockMatch = runBlockPattern.exec(line);
-    const inlineMatch = blockMatch === null ? runInlinePattern.exec(line) : null;
-    if (blockMatch === null && inlineMatch === null) continue;
-
-    let text;
-    let startLine = index + 1;
-    if (blockMatch !== null) {
-      startLine = index + 2;
-      const baseIndent = indentOf(line);
-      const blockLines = [];
-      let cursor = index + 1;
-      for (; cursor < lines.length; cursor += 1) {
-        const candidate = lines[cursor];
-        if (candidate.trim() !== "" && indentOf(candidate) <= baseIndent) break;
-        blockLines.push(candidate);
-      }
-      text = blockLines.join("\n");
-      index = cursor - 1;
-    } else {
-      text = inlineMatch[1];
-    }
-
-    if (workingDirectoryIsDynamic) continue;
+  for (const block of collectBlocks(lines, runBlockPattern, runInlinePattern)) {
+    const workingDirectory = workingDirectoryBefore(lines, block.startLine - 2);
+    if (workingDirectory.dynamic) continue;
+    const text = block.lines.join("\n");
 
     for (const { reference, index: offset } of collectScriptReferences(text)) {
       const targets = [NodePath.join(root, reference)];
-      if (workingDirectory !== null) {
-        targets.push(NodePath.join(root, workingDirectory, reference));
+      if (workingDirectory.value !== null) {
+        targets.push(NodePath.join(root, workingDirectory.value, reference));
       }
-      const found = targets.some(
-        (target) => NodeFS.existsSync(target) && NodeFS.statSync(target).isFile(),
-      );
-      if (!found) {
+      if (!targets.some(isFile)) {
         const lineOffset = text.slice(0, offset).split("\n").length - 1;
         report(
           relativePath,
-          startLine + lineOffset,
+          block.startLine + lineOffset,
           `run step references a missing file: ${reference}`,
         );
       }
     }
+
+    block.lines.forEach((lineText, offset) => {
+      if (!inlineJavaScriptPattern.test(lineText)) return;
+      reportMissingInlineReferences(
+        relativePath,
+        block.startLine + offset,
+        lineText,
+        workingDirectory.value,
+        "#",
+      );
+    });
   }
 }
 
@@ -246,6 +307,7 @@ for (const file of workflowFiles) {
   const lines = NodeFS.readFileSync(NodePath.join(workflowsDirectory, file), "utf8").split("\n");
   checkLocalUses(relativePath, lines);
   checkJobNeeds(relativePath, lines);
+  checkScriptBlocks(relativePath, lines);
   checkRunScripts(relativePath, lines);
 }
 
