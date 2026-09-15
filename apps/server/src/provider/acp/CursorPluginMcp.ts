@@ -20,7 +20,7 @@ import * as NodePath from "node:path";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 const PLUGIN_ROOT_VARS = ["CURSOR_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] as const;
-const UNRESOLVED_PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/;
+const TEMPLATE_PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/g;
 
 export function cursorWorkspaceSlug(cwd: string): string {
   return cwd
@@ -31,11 +31,15 @@ export function cursorWorkspaceSlug(cwd: string): string {
 
 export function cursorDataDir(
   env: NodeJS.ProcessEnv = process.env,
-  homedir = NodeOS.homedir(),
+  homedir = homeFromEnv(env),
 ): string {
   const override = env.CURSOR_DATA_DIR?.trim();
   if (override) return override;
   return NodePath.join(homedir, ".cursor");
+}
+
+function homeFromEnv(env: NodeJS.ProcessEnv): string {
+  return env.HOME?.trim() || env.USERPROFILE?.trim() || NodeOS.homedir();
 }
 
 export function discoverCursorPluginMcpServers(
@@ -43,12 +47,12 @@ export function discoverCursorPluginMcpServers(
   options?: { readonly env?: NodeJS.ProcessEnv; readonly homedir?: string },
 ): ReadonlyArray<EffectAcpSchema.McpServer> {
   const env = options?.env ?? process.env;
-  const dataDir = cursorDataDir(env, options?.homedir ?? NodeOS.homedir());
+  const dataDir = cursorDataDir(env, options?.homedir);
   const installed = readInstalledPluginIdentifiers(
     NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd), "mcps"),
   );
   if (installed.size === 0) return [];
-  return readPluginCacheMcpServers(NodePath.join(dataDir, "plugins", "cache"), installed);
+  return readPluginCacheMcpServers(NodePath.join(dataDir, "plugins", "cache"), installed, env);
 }
 
 function readInstalledPluginIdentifiers(mcpsDir: string): Set<string> {
@@ -73,6 +77,7 @@ function readInstalledPluginIdentifiers(mcpsDir: string): Set<string> {
 function readPluginCacheMcpServers(
   cacheDir: string,
   installed: ReadonlySet<string>,
+  env: NodeJS.ProcessEnv,
 ): ReadonlyArray<EffectAcpSchema.McpServer> {
   const servers: EffectAcpSchema.McpServer[] = [];
   const taken = new Set<string>();
@@ -102,7 +107,7 @@ function readPluginCacheMcpServers(
       for (const [serverKey, rawConfig] of Object.entries(mcpServers)) {
         const identifier = `plugin-${plugin.name}-${serverKey}`;
         if (!installed.has(identifier) || taken.has(identifier)) continue;
-        const converted = toAcpMcpServer(identifier, rawConfig, pluginRoot);
+        const converted = toAcpMcpServer(identifier, rawConfig, pluginRoot, env);
         if (!converted) continue;
         taken.add(identifier);
         servers.push(converted);
@@ -142,11 +147,12 @@ function toAcpMcpServer(
   name: string,
   rawConfig: unknown,
   pluginRoot: string,
+  env: NodeJS.ProcessEnv,
 ): EffectAcpSchema.McpServer | undefined {
   if (!isRecord(rawConfig)) return undefined;
   const type = stringField(rawConfig, "type")?.toLowerCase();
-  const url = expandPluginRoot(stringField(rawConfig, "url"), pluginRoot);
-  const command = expandPluginRoot(stringField(rawConfig, "command"), pluginRoot);
+  const url = resolveTemplate(stringField(rawConfig, "url"), pluginRoot, env);
+  const command = resolveTemplate(stringField(rawConfig, "command"), pluginRoot, env);
   if (
     url &&
     (type === undefined ||
@@ -158,7 +164,7 @@ function toAcpMcpServer(
       type: "http",
       name,
       url,
-      headers: objectToHeaders(rawConfig.headers),
+      headers: objectToEntries(rawConfig.headers, pluginRoot, env),
     };
   }
   if (url && type === "sse") {
@@ -166,7 +172,7 @@ function toAcpMcpServer(
       type: "sse",
       name,
       url,
-      headers: objectToHeaders(rawConfig.headers),
+      headers: objectToEntries(rawConfig.headers, pluginRoot, env),
     };
   }
   if (command) {
@@ -176,49 +182,50 @@ function toAcpMcpServer(
     return {
       name,
       command: resolvedCommand,
-      args: stringArray(rawConfig.args).map(
-        (value) => expandPluginRoot(value, pluginRoot) ?? value,
-      ),
-      env: objectToEnv(rawConfig.env),
+      args: stringArray(rawConfig.args)
+        .map((value) => resolveTemplate(value, pluginRoot, env))
+        .filter((value): value is string => value !== undefined),
+      env: objectToEntries(rawConfig.env, pluginRoot, env),
     };
   }
   return undefined;
 }
 
-function objectToHeaders(value: unknown): ReadonlyArray<{ name: string; value: string }> {
+function objectToEntries(
+  value: unknown,
+  pluginRoot: string,
+  env: NodeJS.ProcessEnv,
+): ReadonlyArray<{ name: string; value: string }> {
   if (!isRecord(value)) return [];
-  const headers: Array<{ name: string; value: string }> = [];
+  const entries: Array<{ name: string; value: string }> = [];
   for (const [name, raw] of Object.entries(value)) {
-    if (typeof raw !== "string" || hasUnresolvedPlaceholder(raw)) continue;
-    headers.push({ name, value: raw });
+    if (typeof raw !== "string") continue;
+    const resolved = resolveTemplate(raw, pluginRoot, env);
+    if (resolved === undefined) continue;
+    entries.push({ name, value: resolved });
   }
-  return headers;
+  return entries;
 }
 
-function objectToEnv(value: unknown): ReadonlyArray<{ name: string; value: string }> {
-  if (!isRecord(value)) return [];
-  const env: Array<{ name: string; value: string }> = [];
-  for (const [name, raw] of Object.entries(value)) {
-    if (typeof raw !== "string" || hasUnresolvedPlaceholder(raw)) continue;
-    env.push({ name, value: raw });
-  }
-  return env;
-}
-
-function expandPluginRoot(value: string | undefined, pluginRoot: string): string | undefined {
+function resolveTemplate(
+  value: string | undefined,
+  pluginRoot: string,
+  env: NodeJS.ProcessEnv,
+): string | undefined {
   if (value === undefined) return undefined;
-  let expanded = value;
-  for (const name of PLUGIN_ROOT_VARS) {
-    expanded = expanded.replaceAll(`\${${name}}`, pluginRoot);
-  }
-  return expanded;
-}
-
-function hasUnresolvedPlaceholder(value: string): boolean {
-  const match = UNRESOLVED_PLACEHOLDER.exec(value);
-  if (!match) return false;
-  const name = match[1];
-  return name !== undefined && !(PLUGIN_ROOT_VARS as readonly string[]).includes(name);
+  let unresolved = false;
+  const resolved = value.replace(
+    TEMPLATE_PLACEHOLDER,
+    (_match, name: string, fallback: string | undefined) => {
+      if ((PLUGIN_ROOT_VARS as readonly string[]).includes(name)) return pluginRoot;
+      const fromEnv = env[name];
+      if (fromEnv !== undefined) return fromEnv;
+      if (fallback !== undefined) return fallback;
+      unresolved = true;
+      return "";
+    },
+  );
+  return unresolved ? undefined : resolved;
 }
 
 function readJsonObject(filePath: string): Record<string, unknown> | undefined {
