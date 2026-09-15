@@ -27,7 +27,7 @@ describe("release-asset-names / suggestReleaseFileName", () => {
     );
     assert.equal(
       suggestReleaseFileName("Kata-Code-1.2.3-arm64.zip", VERSION),
-      "Kata-Code-macOS-Apple-Silicon.zip",
+      "Kata-Code-macOS-Apple-Silicon-arm64.zip",
     );
   });
 
@@ -44,7 +44,7 @@ describe("release-asset-names / suggestReleaseFileName", () => {
 
   it("renames Linux AppImage and deb artifacts by arch", () => {
     assert.equal(
-      suggestReleaseFileName("Kata-Code-1.2.3-x64.AppImage", VERSION),
+      suggestReleaseFileName("Kata-Code-1.2.3-x86_64.AppImage", VERSION),
       "Kata-Code-Linux-x64.AppImage",
     );
     assert.equal(
@@ -92,7 +92,7 @@ describe("release-asset-names / buildInstallerRenameMap", () => {
     const names = [
       "Kata-Code-1.2.3-arm64.dmg",
       "Kata-Code-1.2.3-arm64.dmg.blockmap",
-      "Kata-Code-1.2.3-x64.AppImage",
+      "Kata-Code-1.2.3-x86_64.AppImage",
       "latest-mac.yml",
       "builder-debug.yml",
     ];
@@ -102,11 +102,11 @@ describe("release-asset-names / buildInstallerRenameMap", () => {
       [
         "Kata-Code-1.2.3-arm64.dmg",
         "Kata-Code-1.2.3-arm64.dmg.blockmap",
-        "Kata-Code-1.2.3-x64.AppImage",
+        "Kata-Code-1.2.3-x86_64.AppImage",
       ],
     );
     assert.equal(map.get("Kata-Code-1.2.3-arm64.dmg"), "Kata-Code-macOS-Apple-Silicon.dmg");
-    assert.equal(map.get("Kata-Code-1.2.3-x64.AppImage"), "Kata-Code-Linux-x64.AppImage");
+    assert.equal(map.get("Kata-Code-1.2.3-x86_64.AppImage"), "Kata-Code-Linux-x64.AppImage");
   });
 });
 
@@ -114,7 +114,7 @@ describe("release-asset-names / rewriteManifestContent", () => {
   it("replaces every renamed file reference inside manifest text", () => {
     const renameMap = new Map([
       ["Kata-Code-1.2.3-arm64.dmg", "Kata-Code-macOS-Apple-Silicon.dmg"],
-      ["Kata-Code-1.2.3-arm64.zip", "Kata-Code-macOS-Apple-Silicon.zip"],
+      ["Kata-Code-1.2.3-arm64.zip", "Kata-Code-macOS-Apple-Silicon-arm64.zip"],
     ]);
     const manifest = [
       "version: 1.2.3",
@@ -132,13 +132,13 @@ describe("release-asset-names / rewriteManifestContent", () => {
     ].join("\n");
 
     const rewritten = rewriteManifestContent(manifest, renameMap);
-    assert.ok(rewritten.includes("Kata-Code-macOS-Apple-Silicon.zip"));
+    assert.ok(rewritten.includes("Kata-Code-macOS-Apple-Silicon-arm64.zip"));
     assert.ok(rewritten.includes("Kata-Code-macOS-Apple-Silicon.dmg"));
     assert.ok(!rewritten.includes("Kata-Code-1.2.3-arm64.zip"));
     assert.ok(!rewritten.includes("Kata-Code-1.2.3-arm64.dmg"));
     // path: field is rewritten too, not just url: fields.
-    assert.ok(rewritten.startsWith("path: Kata-Code-macOS-Apple-Silicon.zip") === false);
-    assert.ok(rewritten.includes("path: Kata-Code-macOS-Apple-Silicon.zip"));
+    assert.ok(rewritten.startsWith("path: Kata-Code-macOS-Apple-Silicon-arm64.zip") === false);
+    assert.ok(rewritten.includes("path: Kata-Code-macOS-Apple-Silicon-arm64.zip"));
   });
 });
 
@@ -200,7 +200,7 @@ it.layer(NodeServices.layer)("release-asset-names / prepareReleaseAssets", (it) 
         const arm64Dmg = "Kata-Code-1.2.3-arm64.dmg";
         const arm64DmgBlockmap = "Kata-Code-1.2.3-arm64.dmg.blockmap";
         const arm64Zip = "Kata-Code-1.2.3-arm64.zip";
-        const x64AppImage = "Kata-Code-1.2.3-x64.AppImage";
+        const x64AppImage = "Kata-Code-1.2.3-x86_64.AppImage";
         const x64Exe = "Kata-Code-1.2.3-x64.exe";
         const macManifest = "latest-mac.yml";
 
@@ -242,7 +242,7 @@ it.layer(NodeServices.layer)("release-asset-names / prepareReleaseAssets", (it) 
         // Installers renamed to friendly names.
         assert.ok(result.fileNames.includes("Kata-Code-macOS-Apple-Silicon.dmg"));
         assert.ok(result.fileNames.includes("Kata-Code-macOS-Apple-Silicon.dmg.blockmap"));
-        assert.ok(result.fileNames.includes("Kata-Code-macOS-Apple-Silicon.zip"));
+        assert.ok(result.fileNames.includes("Kata-Code-macOS-Apple-Silicon-arm64.zip"));
         assert.ok(result.fileNames.includes("Kata-Code-Linux-x64.AppImage"));
         assert.ok(result.fileNames.includes("Kata-Code-Windows-x64.exe"));
 
@@ -253,7 +253,7 @@ it.layer(NodeServices.layer)("release-asset-names / prepareReleaseAssets", (it) 
 
         // Manifest contents rewritten to reference the new names.
         const rewrittenManifest = yield* fileSystem.readFileString(path.join(distDir, macManifest));
-        assert.ok(rewrittenManifest.includes("Kata-Code-macOS-Apple-Silicon.zip"));
+        assert.ok(rewrittenManifest.includes("Kata-Code-macOS-Apple-Silicon-arm64.zip"));
         assert.ok(rewrittenManifest.includes("Kata-Code-macOS-Apple-Silicon.dmg"));
         assert.ok(!rewrittenManifest.includes("Kata-Code-1.2.3-arm64.zip"));
         assert.ok(!rewrittenManifest.includes("Kata-Code-1.2.3-arm64.dmg"));
