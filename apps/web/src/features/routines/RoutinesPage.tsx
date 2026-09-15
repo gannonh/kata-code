@@ -63,6 +63,7 @@ import {
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
   preferredWorktreeBaseBranch,
+  routineDraftBaselineAfterAutomaticChange,
   ROUTINE_CANCEL_HINT,
   ROUTINE_CONTROL_CLASS,
   ROUTINE_EDITOR_COLUMN_CLASS,
@@ -316,6 +317,7 @@ function RoutineEditor({
   onSaved,
   onCancel,
   baseline,
+  onBaselineChange,
 }: {
   readonly draft: DraftState;
   readonly routine: RoutineWithOwner | null;
@@ -331,6 +333,7 @@ function RoutineEditor({
   readonly onSaved: (routine: Routine) => void;
   readonly onCancel: () => void;
   readonly baseline: RoutineDraft;
+  readonly onBaselineChange: (baseline: RoutineDraft) => void;
 }) {
   const save = useAtomCommand(routineEnvironment.save, { reportFailure: false });
   const change = useAtomCommand(routineEnvironment.change, { reportFailure: false });
@@ -396,8 +399,10 @@ function RoutineEditor({
     const preferred = preferredWorktreeBaseBranch(refs.data.refs);
     if (!preferred || preferred === configuration.workspace.baseBranch) return;
     if (configuration.workspace.baseBranch !== "main") return;
-    setConfiguration({ workspace: worktreeWorkspace(preferred) });
-  }, [configuration.workspace, refs.data]);
+    const next = { ...configuration, workspace: worktreeWorkspace(preferred) };
+    onDraftChange({ ...draft, configuration: next });
+    onBaselineChange(routineDraftBaselineAfterAutomaticChange(configuration, baseline, next));
+  }, [baseline, configuration, draft, onBaselineChange, onDraftChange, refs.data]);
   const provider = selectableProviders.find(
     (candidate) => candidate.instanceId === configuration.modelSelection.instanceId,
   );
@@ -1121,16 +1126,22 @@ export function RoutinesPage() {
     if (projectOk && (providerOk || enabledProviders(selectedProviders ?? []).length === 0)) return;
     const next = defaultDraft(draft.environmentId, environmentProjects, selectedProviders ?? []);
     if (!next) return;
+    const nextConfiguration = {
+      ...next.configuration,
+      name: draft.configuration.name,
+      instruction: draft.configuration.instruction,
+    };
     setDraft({
       ...next,
       id: draft.id,
-      configuration: {
-        ...next.configuration,
-        name: draft.configuration.name,
-        instruction: draft.configuration.instruction,
-      },
+      configuration: nextConfiguration,
     });
-  }, [draft, editing, projects, selectedProviders, selectedRoutine]);
+    if (baseline) {
+      setBaseline(
+        routineDraftBaselineAfterAutomaticChange(draft.configuration, baseline, nextConfiguration),
+      );
+    }
+  }, [baseline, draft, editing, projects, selectedProviders, selectedRoutine]);
 
   const selectRoutine = (routine: RoutineWithOwner) => {
     setSelectedKey(`${routine.environmentId}:${routine.id}`);
@@ -1305,6 +1316,7 @@ export function RoutinesPage() {
             offline={ownerOffline === true}
             baseline={baseline ?? draft.configuration}
             onDraftChange={setDraft}
+            onBaselineChange={setBaseline}
             onOwnerChange={changeOwner}
             onSaved={updateSavedRoutine}
             onCancel={cancelEditing}

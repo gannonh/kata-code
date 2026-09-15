@@ -108,6 +108,15 @@ export function isRoutineDraftDirty(current: RoutineDraft, baseline: RoutineDraf
   return JSON.stringify(current) !== JSON.stringify(baseline);
 }
 
+/** Automatic init (default-branch fill) is not a user edit. Keep real edits dirty. */
+export function routineDraftBaselineAfterAutomaticChange(
+  current: RoutineDraft,
+  baseline: RoutineDraft,
+  next: RoutineDraft,
+): RoutineDraft {
+  return isRoutineDraftDirty(current, baseline) ? baseline : next;
+}
+
 export function libraryRoutinesAfterChange<
   T extends { readonly id: string; readonly state: Routine["state"] },
 >(routines: readonly T[], next: T): readonly T[] {

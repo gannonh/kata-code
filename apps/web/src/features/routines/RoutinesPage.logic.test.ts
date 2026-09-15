@@ -18,6 +18,7 @@ import {
   ROUTINE_EDITOR_FIELDS_CLASS,
   ROUTINE_PERMISSION_MODE_LABELS,
   ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS,
+  routineDraftBaselineAfterAutomaticChange,
   routinesLibraryEmptyKind,
   worktreeBaseExists,
 } from "./RoutinesPage.logic";
@@ -179,6 +180,33 @@ describe("unsaved routine cancel", () => {
   it("documents that a canceled dirty draft is discarded without saving", () => {
     expect(DISCARD_UNSAVED_ROUTINE_MESSAGE).toContain("will not become a routine");
     expect(ROUTINE_CANCEL_HINT).toContain("canceled draft is not saved");
+  });
+
+  it("adopts automatic workspace-branch init as the baseline when the draft is still clean", () => {
+    const worktree = {
+      kind: "worktree" as const,
+      baseBranch: "main",
+      startFromOrigin: true,
+      runSetupScript: true,
+    };
+    const baseline = draft({ workspace: worktree });
+    const next = draft({ workspace: { ...worktree, baseBranch: "develop" } });
+    expect(routineDraftBaselineAfterAutomaticChange(baseline, baseline, next)).toEqual(next);
+    expect(isRoutineDraftDirty(next, next)).toBe(false);
+  });
+
+  it("keeps the baseline when the user already edited the draft", () => {
+    const worktree = {
+      kind: "worktree" as const,
+      baseBranch: "main",
+      startFromOrigin: true,
+      runSetupScript: true,
+    };
+    const baseline = draft({ workspace: worktree });
+    const current = draft({ name: "Daily brief", workspace: worktree });
+    const next = draft({ name: "Daily brief", workspace: { ...worktree, baseBranch: "develop" } });
+    expect(routineDraftBaselineAfterAutomaticChange(current, baseline, next)).toEqual(baseline);
+    expect(isRoutineDraftDirty(next, baseline)).toBe(true);
   });
 });
 
