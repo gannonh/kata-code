@@ -1,6 +1,6 @@
 # Verified history and gotchas
 
-These observations were checked against Kata main `0c2aa608219f35ae1254092fa81a25ff26aac6d3` on September 10, 2026. The last-integration record was checked on merge `9926bc3db3ee0edc0579c289f7d9ce7f5c71bdbe` on September 12, 2026. Resolve current paths and issue states before applying them. Repository documents are the detailed evidence; this file preserves lessons that change integration decisions.
+These observations were checked against Kata main `0c2aa608219f35ae1254092fa81a25ff26aac6d3` on September 10, 2026. The last-integration record was checked on merge `9926bc3db3ee0edc0579c289f7d9ce7f5c71bdbe` on September 12, 2026. The workflow-reference lesson was checked against `e96c74aa48e7ae5b56b70db9b7a62096dc0df0d5` on September 15, 2026. Resolve current paths and issue states before applying them. Repository documents are the detailed evidence; this file preserves lessons that change integration decisions.
 
 ## Last upstream integration
 
@@ -21,6 +21,18 @@ The previous integration [KAT-3297 / PR #194](https://github.com/gannonh/kata-co
 | New upstream automation and assets entered the delta | Preserve active/parked workflow decisions, registry/release ownership, existing Kata artwork, and intentional deletions of `.repos`, `.plans`, devcontainer/reference debris. Review newly added files. |
 | Browser preview improvements overlap Docker settings | Preserve Docker provisioning, credential/private-GitHub/resume behavior and shipped Sprite CLI. Keep `enableSandboxes` off by default, its supported override, and the current Experimental placement. Do not restart canceled feature work. |
 | Codex cited AGENTS.md "Do not preserve backward compatibility" to delete TAKE mixed-fleet adapters | Keep `threadPullRequestCompatibility` `single` / `thread.meta.update` PR linking and `translateLegacyProjectOverridePatch` / `deriveLegacyProjectOverrides` while main still advertises `threadPullRequestLinking` and `projectAgentBrowserAccessOverrides`. Gannon KEEP on KAT-3329 PR #212 (`r3996918967`, `r3996919018`). Mixed fleet is the TAKE. |
+
+## Workflow takes inherit upstream's jobs
+
+[KAT-3371 / PR #223](https://github.com/gannonh/kata-code/pull/223) landed as `e96c74aa48` and took upstream `release.yml` and `release-desktop.yml` wholesale. Three references to infrastructure Kata had parked or deleted came with them, and GitHub rejected the entire release workflow before any job ran:
+
+| Reintroduced reference | Why it is wrong in Kata | Observed failure |
+| --- | --- | --- |
+| `publish_aur` job calling `./.github/workflows/publish-aur.yml` | The file is parked at `.github/disabled/publish-aur.yml` (`e917fb7edf`, `packaging/aur/README.md`). | `Invalid workflow file: .github/workflows/release.yml#L1043 ... failed to fetch workflow: workflow was not found`. No job in the file loads. |
+| Three steps using `./.github/actions/setup-apt-mirrors` | Kata keeps no `.github/actions/`; `e917fb7edf` removed Blacksmith runners, and `ci.yml` installs packages without a mirror step. | The three jobs would fail once the file loads. |
+| `announce_discord` job running `scripts/notify-discord-release.ts` | `931cd1c539` deleted the script and test, and the KAT-3297 intake records the tooling as a SKIP. | `continue-on-error` hid the missing-script failures. |
+
+Resolution: delete the inherited jobs and steps and drop the matching AUR and Discord claims from `docs/operations/release.md`. A clean merge of an upstream workflow file is not evidence that its jobs belong in Kata. Before committing a workflow take, compare every job against `.github/disabled/README.md`, prior deletion commits, and intake SKIP entries, then resolve every `uses: ./...` path and every script path in `run:` steps against the candidate tree. `scripts/check-workflow-references.mjs` performs both scans, and CI runs it plus its `node:test` suite in the Check job.
 
 ## Branding repair exposed missing coverage
 

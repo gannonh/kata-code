@@ -12,7 +12,7 @@ This document covers the unified release workflow for stable and nightly desktop
   - push tag matching `v*.*.*` for a stable release of an explicit commit
   - scheduled nightly check every 30 minutes
   - manual `workflow_dispatch` with `channel=nightly`
-  - manual `workflow_dispatch` with `channel=preview`, the maintainers' test train. It builds, signs, notarizes, tests, and publishes a commit that users must select explicitly. Preview uses nightly versioning under the `preview` prerelease identifier (`0.0.41-preview.<date>.<run>`) and publishes a GitHub prerelease plus npm packages under the `preview` dist-tag. No schedule or default npm dist-tag selects preview. Preview desktop builds have no update feed, and the GitHub release omits updater manifests and blockmaps. Install one by downloading the release, running `npx @kata-sh/code-cli@preview`, setting `KATACODE_CHANNEL=preview` for an install script, or running `katacode update --channel preview`. The CLI warns before entering the channel. The release body also warns that the build is for testing. The hosted web app, AUR, and Discord announcements are skipped.
+  - manual `workflow_dispatch` with `channel=preview`, the maintainers' test train. It builds, signs, notarizes, tests, and publishes a commit that users must select explicitly. Preview uses nightly versioning under the `preview` prerelease identifier (`0.0.41-preview.<date>.<run>`) and publishes a GitHub prerelease plus npm packages under the `preview` dist-tag. No schedule or default npm dist-tag selects preview. Preview desktop builds have no update feed, and the GitHub release omits updater manifests and blockmaps. Install one by downloading the release, running `npx @kata-sh/code-cli@preview`, setting `KATACODE_CHANNEL=preview` for an install script, or running `katacode update --channel preview`. The CLI warns before entering the channel. The release body also warns that the build is for testing. The hosted web app is skipped.
   - manual `workflow_dispatch` with `dry_run=true` builds and tests the release matrix without trusted signing, notarization, publishing, deployment, or finalization.
 - A manual stable release builds the commit of the latest published nightly, not `main` HEAD.
   Nightly is the release candidate: verify the nightly, then promote it. Merges to `main` keep
@@ -390,7 +390,7 @@ Checklist:
 Use `workflow_dispatch` with `dry_run=true` to run the quality gates, build the Sandbox image, and
 build the full desktop and CLI matrix without publishing. If you omit the version, the workflow
 uses `0.0.0-dryrun.<run>`. Dry runs skip trusted signing, notarization, npm publication, GitHub
-Release publication, AUR publication, hosted deployment, and finalization.
+Release publication, hosted deployment, and finalization.
 
 A normal nightly dispatch publishes a real nightly npm package, GitHub prerelease, desktop updater
 release, and hosted nightly alias. A preview dispatch also publishes artifacts, but only to the

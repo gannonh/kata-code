@@ -64,6 +64,11 @@ jobs:
           node --test scripts/check-product-branding.node-test.mjs
           node scripts/check-product-branding.mjs
 
+      - name: Check workflow references
+        run: |
+          node --test scripts/check-workflow-references.node-test.mjs
+          node scripts/check-workflow-references.mjs
+
       - name: Check upstream preservation contract
         env:
           CANDIDATE_SHA: ${{ github.sha }}

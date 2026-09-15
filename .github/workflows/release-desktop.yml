@@ -195,9 +195,6 @@ jobs:
             exit $code
           }
 
-      - uses: ./.github/actions/setup-apt-mirrors
-        if: inputs.platform == 'linux'
-
       - name: Install Linux desktop build libraries
         if: inputs.platform == 'linux'
         shell: bash
