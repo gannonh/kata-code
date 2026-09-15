@@ -262,6 +262,39 @@ jobs:
   });
 });
 
+NodeTest.test("rejects missing files required by inline scripts", () => {
+  withRoot((root) => {
+    writeFile(
+      root,
+      ".github/workflows/release.yml",
+      `name: Release
+on: workflow_dispatch
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/github-script@v8
+        with:
+          script: |
+            const { gate } = require('./.github/scripts/check-nightly-release.cjs');
+            const fs = require("fs");
+            const dynamic = await import('./scripts/also-missing.mjs');
+`,
+    );
+    const result = run(root);
+    NodeAssert.equal(result.status, 1);
+    NodeAssert.match(
+      result.stderr,
+      /release\.yml:10: inline script reference does not exist: \.\/\.github\/scripts\/check-nightly-release\.cjs/,
+    );
+    NodeAssert.match(
+      result.stderr,
+      /release\.yml:12: inline script reference does not exist: \.\/scripts\/also-missing\.mjs/,
+    );
+    NodeAssert.doesNotMatch(result.stderr, /inline script reference does not exist: fs/);
+  });
+});
+
 NodeTest.test("passes the current repository workflows", () => {
   const result = NodeChildProcess.spawnSync(process.execPath, [script], { encoding: "utf8" });
   NodeAssert.equal(result.status, 0, result.stderr);

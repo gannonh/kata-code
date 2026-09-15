@@ -161,6 +161,9 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
 
+      - name: Test nightly release checks
+        run: node --test .github/scripts/check-nightly-release.test.cjs
+
       - name: Test
         run: vp run --parallel --concurrency-limit 4 --filter '!@kata-sh/code-cli' --filter '!@kata-sh/code-monorepo' test
 

@@ -25,6 +25,7 @@ const interpreterPattern =
   /(^|[&|;][ \t]*)[ \t]*(?:(?:if|elif|then|do|else|while|until|time|exec|!)[ \t]+)*(?:sudo[ \t]+)?(?:node|bun|deno|bash|sh|zsh|python3?|pwsh|powershell)[ \t]+/gm;
 const directScriptPattern =
   /(^|[&|;][ \t]*)[ \t]*(\.\/[A-Za-z0-9_@.-]+(?:\/[A-Za-z0-9_@.-]+)*\.(?:sh|bash|py|ps1))/gm;
+const inlineRequirePattern = /(?:require|import)\(\s*(['"])(\.\.?\/[^'"]+)\1\s*\)/g;
 const workingDirectoryPattern = /^\s*working-directory:\s*(.+?)\s*$/;
 const scriptPathPattern =
   /^\.?\/?[A-Za-z0-9_@.-]+(?:\/[A-Za-z0-9_@.-]+)*\.(?:ts|tsx|mts|cts|mjs|cjs|js|sh|bash|py|ps1)$/;
@@ -176,6 +177,22 @@ function collectScriptReferences(text) {
   return references;
 }
 
+function checkInlineScripts(relativePath, lines) {
+  lines.forEach((line, index) => {
+    inlineRequirePattern.lastIndex = 0;
+    for (
+      let match = inlineRequirePattern.exec(line);
+      match !== null;
+      match = inlineRequirePattern.exec(line)
+    ) {
+      const target = NodePath.join(root, match[2].replace(/^\.\//, ""));
+      if (!NodeFS.existsSync(target) || !NodeFS.statSync(target).isFile()) {
+        report(relativePath, index + 1, `inline script reference does not exist: ${match[2]}`);
+      }
+    }
+  });
+}
+
 function checkRunScripts(relativePath, lines) {
   let workingDirectory = null;
   let workingDirectoryIsDynamic = false;
@@ -246,6 +263,7 @@ for (const file of workflowFiles) {
   const lines = NodeFS.readFileSync(NodePath.join(workflowsDirectory, file), "utf8").split("\n");
   checkLocalUses(relativePath, lines);
   checkJobNeeds(relativePath, lines);
+  checkInlineScripts(relativePath, lines);
   checkRunScripts(relativePath, lines);
 }
 

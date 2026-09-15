@@ -24,15 +24,16 @@ The previous integration [KAT-3297 / PR #194](https://github.com/gannonh/kata-co
 
 ## Workflow takes inherit upstream's jobs
 
-[KAT-3371 / PR #223](https://github.com/gannonh/kata-code/pull/223) landed as `e96c74aa48` and took upstream `release.yml` and `release-desktop.yml` wholesale. Three references to infrastructure Kata had parked or deleted came with them, and GitHub rejected the entire release workflow before any job ran:
+[KAT-3371 / PR #223](https://github.com/gannonh/kata-code/pull/223) landed as `e96c74aa48` and took upstream `release.yml` and `release-desktop.yml` wholesale. References to infrastructure Kata had parked, deleted, or never taken came with them, and GitHub rejected the entire release workflow before any job ran:
 
 | Reintroduced reference | Why it is wrong in Kata | Observed failure |
 | --- | --- | --- |
 | `publish_aur` job calling `./.github/workflows/publish-aur.yml` | The file is parked at `.github/disabled/publish-aur.yml` (`e917fb7edf`, `packaging/aur/README.md`). | `Invalid workflow file: .github/workflows/release.yml#L1043 ... failed to fetch workflow: workflow was not found`. No job in the file loads. |
 | Three steps using `./.github/actions/setup-apt-mirrors` | Kata keeps no `.github/actions/`; `e917fb7edf` removed Blacksmith runners, and `ci.yml` installs packages without a mirror step. | The three jobs would fail once the file loads. |
 | `announce_discord` job running `scripts/notify-discord-release.ts` | `931cd1c539` deleted the script and test, and the KAT-3297 intake records the tooling as a SKIP. | `continue-on-error` hid the missing-script failures. |
+| `resolve_commit` requiring `./.github/scripts/check-nightly-release.cjs` | `df0776ad66` deleted the script as then-unused, but the taken `release.yml` calls it and the nightly gap and stable-from-nightly logic are live behavior. | Post-merge nightly dispatch failed: `Cannot find module .../.github/scripts/check-nightly-release.cjs`. The fix restores the script and test from upstream rather than deleting the call. |
 
-Resolution: delete the inherited jobs and steps and drop the matching AUR and Discord claims from `docs/operations/release.md`. A clean merge of an upstream workflow file is not evidence that its jobs belong in Kata. Before committing a workflow take, compare every job against `.github/disabled/README.md`, prior deletion commits, and intake SKIP entries, then resolve every `uses: ./...` path and every script path in `run:` steps against the candidate tree. `scripts/check-workflow-references.mjs` performs both scans, and CI runs it plus its `node:test` suite in the Check job.
+Resolution: delete inherited jobs and steps that depend on parked or deleted infrastructure, restore upstream scripts a taken job genuinely needs, and drop the matching doc claims (the AUR and Discord lines in `docs/operations/release.md`). A clean merge of an upstream workflow file is not evidence that its jobs belong in Kata. Before committing a workflow take, compare every job against `.github/disabled/README.md`, prior deletion commits, and intake SKIP entries, then resolve every `uses: ./...` path, every `require()`/`import()` path inside inline `github-script` blocks, and every script path in `run:` steps against the candidate tree. `scripts/check-workflow-references.mjs` performs these scans, and CI runs it plus its `node:test` suite in the Check job and the restored nightly gate test in the Test job.
 
 ## Branding repair exposed missing coverage
 
