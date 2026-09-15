@@ -902,4 +902,42 @@ it.layer(storeLayer)("RoutineStore", (it) => {
       );
     }),
   );
+
+  it.effect("delete removes the library row and keeps history without later scheduled starts", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const environment = EnvironmentId.make("routine-delete-ui-environment");
+      const saved = yield* store.save(
+        environment,
+        {
+          id: RoutineId.make("routine-delete-ui"),
+          expectedRevision: 0,
+          configuration,
+        },
+        Date.parse("2026-01-01T08:00:00.000Z"),
+      );
+      const run = yield* store.testRun(
+        environment,
+        {
+          id: saved.id,
+          expectedRevision: saved.revision,
+          requestId: RoutineRequestId.make("request-delete-ui"),
+        },
+        Date.parse("2026-01-01T08:01:00.000Z"),
+      );
+      const deleted = yield* store.change(
+        environment,
+        { id: saved.id, expectedRevision: saved.revision, action: "delete" },
+        Date.parse("2026-01-01T08:02:00.000Z"),
+      );
+      assert.equal(deleted.state, "deleted");
+      assert.deepEqual(yield* store.list(environment), []);
+      const history = yield* store.history(environment, { id: saved.id });
+      assert.equal(history.runs[0]?.id, run.id);
+      yield* store.tick("delete-ui-worker", Date.parse("2026-01-02T12:00:00.000Z"));
+      const afterTick = yield* store.history(environment, { id: saved.id });
+      assert.equal(afterTick.runs.length, 1);
+      assert.equal(afterTick.runs[0]?.source, "test");
+    }),
+  );
 });
