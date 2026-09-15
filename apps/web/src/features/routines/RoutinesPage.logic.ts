@@ -108,6 +108,11 @@ export function isRoutineDraftDirty(current: RoutineDraft, baseline: RoutineDraf
   return JSON.stringify(current) !== JSON.stringify(baseline);
 }
 
+/** Fail closed when the themed confirm host is not registered yet (`undefined`). */
+export function confirmDialogAccepted(result: boolean | undefined): boolean {
+  return result === true;
+}
+
 /** Automatic init (default-branch fill) is not a user edit. Keep real edits dirty. */
 export function routineDraftBaselineAfterAutomaticChange(
   current: RoutineDraft,

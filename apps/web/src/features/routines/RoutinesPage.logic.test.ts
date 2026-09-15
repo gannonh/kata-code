@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 
 import {
   canSaveRoutineDraft,
+  confirmDialogAccepted,
   DELETE_ROUTINE_MESSAGE,
   DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
@@ -180,6 +181,12 @@ describe("unsaved routine cancel", () => {
   it("documents that a canceled dirty draft is discarded without saving", () => {
     expect(DISCARD_UNSAVED_ROUTINE_MESSAGE).toContain("will not become a routine");
     expect(ROUTINE_CANCEL_HINT).toContain("canceled draft is not saved");
+  });
+
+  it("treats a missing confirm host as cancellation", () => {
+    expect(confirmDialogAccepted(undefined)).toBe(false);
+    expect(confirmDialogAccepted(false)).toBe(false);
+    expect(confirmDialogAccepted(true)).toBe(true);
   });
 
   it("adopts automatic workspace-branch init as the baseline when the draft is still clean", () => {

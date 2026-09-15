@@ -55,6 +55,7 @@ import { Empty, EmptyHeader, EmptyTitle } from "../../components/ui/empty";
 import { requestConfirmDialog } from "../../confirmDialog";
 import {
   canSaveRoutineDraft,
+  confirmDialogAccepted,
   DELETE_ROUTINE_MESSAGE,
   DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
@@ -459,14 +460,14 @@ function RoutineEditor({
       return;
     }
     const confirmation = requestConfirmDialog(DISCARD_UNSAVED_ROUTINE_MESSAGE);
-    if (confirmation === undefined || (await confirmation)) onCancel();
+    if (confirmDialogAccepted(await confirmation)) onCancel();
   };
 
   const applyChange = async (action: "pause" | "resume" | "delete") => {
     if (!routine || offline || busy) return;
     if (action === "delete") {
       const confirmation = requestConfirmDialog(DELETE_ROUTINE_MESSAGE, { variant: "destructive" });
-      if (confirmation !== undefined && !(await confirmation)) return;
+      if (!confirmDialogAccepted(await confirmation)) return;
     }
     setBusy(true);
     setMessage(null);
