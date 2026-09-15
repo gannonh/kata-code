@@ -342,12 +342,14 @@ jobs:
   });
 });
 
-NodeTest.test("reports inline JavaScript under a working directory when the module is missing", () => {
-  withRoot((root) => {
-    writeFile(
-      root,
-      ".github/workflows/release.yml",
-      `name: Release
+NodeTest.test(
+  "reports inline JavaScript under a working directory when the module is missing",
+  () => {
+    withRoot((root) => {
+      writeFile(
+        root,
+        ".github/workflows/release.yml",
+        `name: Release
 on: workflow_dispatch
 jobs:
   build:
@@ -357,15 +359,16 @@ jobs:
         working-directory: apps/demo
         run: node -e "require('./present.cjs')"
 `,
-    );
-    const result = run(root);
-    NodeAssert.equal(result.status, 1);
-    NodeAssert.match(
-      result.stderr,
-      /release\.yml:9: inline script reference does not exist: \.\/present\.cjs/,
-    );
-  });
-});
+      );
+      const result = run(root);
+      NodeAssert.equal(result.status, 1);
+      NodeAssert.match(
+        result.stderr,
+        /release\.yml:9: inline script reference does not exist: \.\/present\.cjs/,
+      );
+    });
+  },
+);
 
 NodeTest.test("ignores inert require text in comments and echo output", () => {
   withRoot((root) => {
