@@ -1,18 +1,27 @@
 import { describe, expect, it } from "vite-plus/test";
 import type {
   Routine,
+  RoutineConnection,
   RoutineDraft,
   RoutineDraftGenerationResult,
   ServerProvider,
   VcsRef,
 } from "@kata-sh/code-contracts";
-import { ModelSelection, ProjectId, ProviderInstanceId } from "@kata-sh/code-contracts";
+import {
+  ModelSelection,
+  ProjectId,
+  ProviderInstanceId,
+  RoutineConnectionId,
+} from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
 
 import {
   canSaveRoutineDraft,
   confirmDialogAccepted,
+  defaultGitHubTrigger,
   DELETE_ROUTINE_MESSAGE,
+  formatRoutineTrigger,
+  gitHubHookSettingsUrl,
   DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
   firstEnabledProviderModel,
@@ -31,6 +40,8 @@ import {
   routineDraftForGenerationInput,
   routineDraftRevisionAfterEdit,
   routinesLibraryEmptyKind,
+  routineTriggerKind,
+  selectableConnections,
   worktreeBaseExists,
 } from "./RoutinesPage.logic";
 
@@ -427,5 +438,68 @@ describe("routine delete in the library", () => {
     expect(libraryRoutinesAfterChange([enabled], deleted)).toEqual([]);
     expect(keepDeletedRoutineInEditor(deleted.state)).toBe(true);
     expect(DELETE_ROUTINE_MESSAGE).toContain("Conversations and run history stay available");
+  });
+});
+
+describe("GitHub event triggers", () => {
+  const connection = (patch: Partial<RoutineConnection> = {}): RoutineConnection => ({
+    id: RoutineConnectionId.make("connection-1"),
+    environmentId: "environment-1" as RoutineConnection["environmentId"],
+    provider: "github",
+    repositoryId: 42,
+    repositoryName: "acme/widgets",
+    repositoryUrl: "https://github.com/acme/widgets",
+    defaultBranch: "main",
+    hookId: 1001,
+    callbackUrl: "https://env.example/api/routines/webhooks/github/connection-1",
+    status: "verified",
+    lastDelivery: null,
+    acceptedCount: 0,
+    ignoredCount: 0,
+    rejectedCount: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...patch,
+  });
+
+  it("labels schedule and GitHub triggers for the library card", () => {
+    expect(formatRoutineTrigger({ kind: "daily", time: "09:00", timezone: "UTC" })).toBe(
+      "Daily at 09:00 · UTC",
+    );
+    expect(formatRoutineTrigger(defaultGitHubTrigger(connection()))).toBe(
+      "GitHub · Pull request opened on main",
+    );
+    expect(routineTriggerKind(defaultGitHubTrigger(connection()))).toBe("github");
+  });
+
+  it("defaults a new GitHub trigger to PR opened on the repository default branch", () => {
+    expect(defaultGitHubTrigger(connection({ defaultBranch: "develop" }))).toEqual({
+      kind: "github",
+      connectionId: "connection-1",
+      repositoryId: 42,
+      event: "pr_opened",
+      branch: "develop",
+      includeDrafts: false,
+    });
+  });
+
+  it("hides disabled connections unless the routine already uses one", () => {
+    const disabled = connection({
+      id: RoutineConnectionId.make("connection-off"),
+      status: "disabled",
+    });
+    expect(selectableConnections([connection(), disabled], null).map((entry) => entry.id)).toEqual([
+      "connection-1",
+    ]);
+    expect(
+      selectableConnections([connection(), disabled], "connection-off").map((entry) => entry.id),
+    ).toEqual(["connection-1", "connection-off"]);
+  });
+
+  it("links to the provider delivery history only when a hook exists", () => {
+    expect(gitHubHookSettingsUrl(connection())).toBe(
+      "https://github.com/acme/widgets/settings/hooks/1001",
+    );
+    expect(gitHubHookSettingsUrl(connection({ hookId: null }))).toBeNull();
   });
 });

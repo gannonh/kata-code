@@ -16,7 +16,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
 import * as Stream from "effect/Stream";
-import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import { FetchHttpClient, HttpRouter, HttpServer, HttpServerRequest } from "effect/unstable/http";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
@@ -107,8 +107,10 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import { RoutineStoreLive } from "./routines/RoutineStore.ts";
+import { RoutineConnectionsLive } from "./routines/RoutineConnections.ts";
 import { RoutineDispatcherLive } from "./routines/RoutineDispatcher.ts";
 import { RoutineSchedulerLive } from "./routines/RoutineScheduler.ts";
+import { isRoutineWebhookPath, routineWebhookRouteLayer } from "./routines/RoutineWebhooks.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as PullRequestReadCache from "./pullRequest/PullRequestReadCache.ts";
@@ -549,6 +551,12 @@ const RuntimeCoreDependenciesWithoutRoutinesLive = ReactorLayerLive.pipe(
 
 const RuntimeCoreDependenciesLive = RoutineSchedulerLive.pipe(
   Layer.provideMerge(RoutineDispatcherLive.pipe(Layer.provideMerge(RoutineStoreLayerLive))),
+  Layer.provideMerge(
+    RoutineConnectionsLive.pipe(
+      Layer.provide(RoutineStoreLayerLive),
+      Layer.provide(GitHubCli.layer.pipe(Layer.provide(VcsProcess.layer))),
+    ),
+  ),
   Layer.provideMerge(RoutineStoreLayerLive),
   Layer.provideMerge(RuntimeCoreDependenciesWithoutRoutinesLive),
 );
@@ -567,10 +575,17 @@ const RuntimeDependenciesLive = SandboxDeploymentService.layer.pipe(
   Layer.provide(NetService.layer),
 );
 
+// Webhook callbacks bypass the readiness wait: a provider delivery that arrives
+// during startup must still be recorded, because GitHub does not retry failed
+// deliveries on its own. The callback only touches SQLite and the secret store.
 const commandReadinessLayer = HttpRouter.middleware(
   (httpEffect) =>
-    Effect.flatMap(ServerRuntimeStartup.ServerRuntimeStartup, (startup) =>
-      startup.awaitCommandReady.pipe(Effect.orDie, Effect.andThen(httpEffect)),
+    Effect.flatMap(HttpServerRequest.HttpServerRequest, (request) =>
+      isRoutineWebhookPath(request.url)
+        ? httpEffect
+        : Effect.flatMap(ServerRuntimeStartup.ServerRuntimeStartup, (startup) =>
+            startup.awaitCommandReady.pipe(Effect.orDie, Effect.andThen(httpEffect)),
+          ),
     ),
   { global: true },
 );
@@ -591,6 +606,7 @@ export const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(environmentAuthenticatedAuthLayer),
     ),
     sandboxBootstrapPairingRouteLayer,
+    routineWebhookRouteLayer,
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
     attachmentUploadRouteLayer,

@@ -52,6 +52,41 @@ export const ScheduleTrigger = Schema.Union([
   }),
 ]);
 export type ScheduleTrigger = typeof ScheduleTrigger.Type;
+export const RoutineConnectionId = TrimmedNonEmptyString.pipe(Schema.brand("RoutineConnectionId"));
+export type RoutineConnectionId = typeof RoutineConnectionId.Type;
+export const GitHubRoutineEvent = Schema.Literals([
+  "pr_opened",
+  "pr_updated",
+  "issue_opened",
+  "workflow_failed",
+]);
+export type GitHubRoutineEvent = typeof GitHubRoutineEvent.Type;
+export const GITHUB_ROUTINE_EVENT_LABELS: Record<GitHubRoutineEvent, string> = {
+  pr_opened: "Pull request opened",
+  pr_updated: "Pull request updated (new commits, reopened, or ready for review)",
+  issue_opened: "Issue opened",
+  workflow_failed: "Workflow run failed",
+};
+/**
+ * Event routines key on GitHub's numeric ids. A repository or label rename keeps
+ * its id, so the saved filter keeps matching without editing the routine.
+ */
+export const GitHubEventTrigger = Schema.Struct({
+  kind: Schema.Literal("github"),
+  connectionId: RoutineConnectionId,
+  repositoryId: PositiveInt,
+  event: GitHubRoutineEvent,
+  branch: Schema.optional(TrimmedNonEmptyString),
+  includeDrafts: Schema.Boolean,
+  issueLabelId: Schema.optional(PositiveInt),
+});
+export type GitHubEventTrigger = typeof GitHubEventTrigger.Type;
+export const RoutineTrigger = Schema.Union([ScheduleTrigger, GitHubEventTrigger]);
+export type RoutineTrigger = typeof RoutineTrigger.Type;
+export const isScheduleTrigger = (trigger: RoutineTrigger): trigger is ScheduleTrigger =>
+  trigger.kind !== "github";
+/** Event routines are never due; the scheduler filters them out by trigger kind. */
+export const EVENT_ROUTINE_NEXT_DUE_AT = "9999-12-31T00:00:00.000Z";
 export const RoutineWorkspace = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("worktree"),
@@ -68,7 +103,7 @@ export const RoutineDraft = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   workspace: RoutineWorkspace,
-  trigger: ScheduleTrigger,
+  trigger: RoutineTrigger,
 });
 export type RoutineDraft = typeof RoutineDraft.Type;
 
@@ -180,7 +215,11 @@ export const RoutineRun = Schema.Struct({
   revision: PositiveInt,
   configuration: RoutineDraft,
   occurrenceKey: Schema.String,
-  source: Schema.Literals(["schedule", "test", "downtime"]),
+  source: Schema.Literals(["schedule", "test", "downtime", "github"]),
+  /** Link to the provider resource that admitted this run, shown beside the run. */
+  sourceUrl: Schema.optional(Schema.String),
+  /** Bounded, untrusted provider context appended under the saved instruction. */
+  eventContext: Schema.optional(Schema.String),
   threadId: ThreadId,
   messageId: MessageId,
   commandId: CommandId,
@@ -229,6 +268,66 @@ export const RoutineHistoryInput = Schema.Struct({
   limit: Schema.optional(PositiveInt),
 });
 export const RoutinePreviewInput = Schema.Struct({ trigger: ScheduleTrigger });
+export const RoutineDeliveryStatus = Schema.Literals(["accepted", "ignored", "rejected"]);
+export type RoutineDeliveryStatus = typeof RoutineDeliveryStatus.Type;
+export const RoutineDelivery = Schema.Struct({
+  deliveryId: Schema.String,
+  event: Schema.String,
+  status: RoutineDeliveryStatus,
+  detail: Schema.NullOr(Schema.String),
+  runId: Schema.NullOr(RoutineRunId),
+  receivedAt: IsoDateTime,
+});
+export type RoutineDelivery = typeof RoutineDelivery.Type;
+export const RoutineConnectionStatus = Schema.Literals(["pending", "verified", "disabled"]);
+export type RoutineConnectionStatus = typeof RoutineConnectionStatus.Type;
+/**
+ * A repository webhook owned by this environment. The signing secret lives only
+ * in the server secret store and never appears on this record.
+ */
+export const RoutineConnection = Schema.Struct({
+  id: RoutineConnectionId,
+  environmentId: EnvironmentId,
+  provider: Schema.Literal("github"),
+  repositoryId: PositiveInt,
+  repositoryName: TrimmedNonEmptyString,
+  repositoryUrl: TrimmedNonEmptyString,
+  defaultBranch: TrimmedNonEmptyString,
+  hookId: Schema.NullOr(PositiveInt),
+  callbackUrl: TrimmedNonEmptyString,
+  status: RoutineConnectionStatus,
+  lastDelivery: Schema.NullOr(RoutineDelivery),
+  acceptedCount: NonNegativeInt,
+  ignoredCount: NonNegativeInt,
+  rejectedCount: NonNegativeInt,
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type RoutineConnection = typeof RoutineConnection.Type;
+export const RoutineConnectionList = Schema.Array(RoutineConnection);
+export const RoutineConnectionCreateInput = Schema.Struct({
+  id: RoutineConnectionId,
+  repository: TrimmedNonEmptyString,
+});
+export const RoutineConnectionInput = Schema.Struct({ id: RoutineConnectionId });
+export const RoutineGitHubMetadataInput = Schema.Struct({
+  repository: Schema.optional(TrimmedNonEmptyString),
+});
+export const RoutineGitHubMetadata = Schema.Struct({
+  repositories: Schema.Array(
+    Schema.Struct({ nameWithOwner: TrimmedNonEmptyString, defaultBranch: TrimmedNonEmptyString }),
+  ),
+  repository: Schema.NullOr(
+    Schema.Struct({
+      id: PositiveInt,
+      nameWithOwner: TrimmedNonEmptyString,
+      defaultBranch: TrimmedNonEmptyString,
+      branches: Schema.Array(TrimmedNonEmptyString),
+      labels: Schema.Array(Schema.Struct({ id: PositiveInt, name: TrimmedNonEmptyString })),
+    }),
+  ),
+});
+export type RoutineGitHubMetadata = typeof RoutineGitHubMetadata.Type;
 export const RoutinePreview = Schema.Struct({
   expression: Schema.String,
   dates: Schema.Array(IsoDateTime),

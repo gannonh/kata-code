@@ -5,10 +5,13 @@ import * as Schema from "effect/Schema";
 import { ProjectId } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
-  RoutineError,
+  RoutineDraft,
   RoutineDraftGenerationInput,
   RoutineDraftGenerationResult,
+  RoutineError,
+  RoutineRun,
   ScheduleTrigger,
+  isScheduleTrigger,
   previewRoutineSchedule,
 } from "./routines.ts";
 
@@ -114,5 +117,96 @@ describe("routine draft generation contracts", () => {
       time: "09:00",
       timezone: "UTC",
     });
+  });
+});
+
+describe("routine trigger union", () => {
+  const decodeDraft = Schema.decodeUnknownSync(RoutineDraft);
+  const base = {
+    name: "PR reviewer",
+    instruction: "Review the pull request.",
+    projectId: "project-1",
+    modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+    runtimeMode: "approval-required",
+    workspace: { kind: "shared", directory: "/tmp/project" },
+  };
+
+  it("accepts a GitHub event trigger keyed on stable ids", () => {
+    const draft = decodeDraft({
+      ...base,
+      trigger: {
+        kind: "github",
+        connectionId: "connection-1",
+        repositoryId: 42,
+        event: "pr_opened",
+        branch: "main",
+        includeDrafts: false,
+      },
+    });
+    expect(draft.trigger.kind).toBe("github");
+    expect(isScheduleTrigger(draft.trigger)).toBe(false);
+    expect(isScheduleTrigger({ kind: "daily", time: "09:00", timezone: "UTC" })).toBe(true);
+  });
+
+  it("rejects unknown GitHub events and non-positive repository ids", () => {
+    expect(() =>
+      decodeDraft({
+        ...base,
+        trigger: {
+          kind: "github",
+          connectionId: "connection-1",
+          repositoryId: 0,
+          event: "pr_opened",
+          includeDrafts: true,
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeDraft({
+        ...base,
+        trigger: {
+          kind: "github",
+          connectionId: "connection-1",
+          repositoryId: 42,
+          event: "push",
+          includeDrafts: true,
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("admits github as a run source with an optional source link", () => {
+    const decodeRun = Schema.decodeUnknownSync(RoutineRun);
+    const run = decodeRun({
+      id: "run-1",
+      routineId: "routine-1",
+      environmentId: "environment-1",
+      revision: 1,
+      configuration: {
+        ...base,
+        trigger: {
+          kind: "github",
+          connectionId: "connection-1",
+          repositoryId: 42,
+          event: "pr_opened",
+          includeDrafts: false,
+        },
+      },
+      occurrenceKey: "github:delivery-1",
+      source: "github",
+      sourceUrl: "https://github.com/acme/widgets/pull/7",
+      threadId: "thread-1",
+      messageId: "message-1",
+      commandId: "command-1",
+      conversation: { kind: "unconfirmed" },
+      status: "queued",
+      stage: "admitted",
+      turnId: null,
+      detail: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(run.source).toBe("github");
+    expect(run.sourceUrl).toBe("https://github.com/acme/widgets/pull/7");
   });
 });

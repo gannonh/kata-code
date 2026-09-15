@@ -1,10 +1,16 @@
 import {
+  GITHUB_ROUTINE_EVENT_LABELS,
   ModelSelection,
   isProviderAvailable,
+  isScheduleTrigger,
+  type GitHubEventTrigger,
   type Routine,
+  type RoutineConnection,
+  type RoutineDeliveryStatus,
   type RoutineDraft,
   type RoutineDraftConversationMessage,
   type RoutineDraftGenerationResult,
+  type RoutineTrigger,
   type RuntimeMode,
   type ServerProvider,
   type VcsRef,
@@ -234,3 +240,67 @@ export function libraryRoutinesAfterChange<
 export function keepDeletedRoutineInEditor(state: Routine["state"]): boolean {
   return state === "deleted";
 }
+
+export type RoutineTriggerKind = "schedule" | "github";
+
+export function routineTriggerKind(trigger: RoutineTrigger): RoutineTriggerKind {
+  return isScheduleTrigger(trigger) ? "schedule" : "github";
+}
+
+export function formatRoutineTrigger(trigger: RoutineTrigger): string {
+  if (!isScheduleTrigger(trigger)) {
+    const branch = trigger.branch ? ` on ${trigger.branch}` : "";
+    return `GitHub · ${GITHUB_ROUTINE_EVENT_LABELS[trigger.event].split(" (")[0]}${branch}`;
+  }
+  const triggerText =
+    trigger.kind === "cron"
+      ? trigger.expression
+      : trigger.kind === "weekly"
+        ? `Weekly on ${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][trigger.weekday]} at ${trigger.time}`
+        : trigger.kind === "weekdays"
+          ? `Weekdays at ${trigger.time}`
+          : `Daily at ${trigger.time}`;
+  return `${triggerText} · ${trigger.timezone}`;
+}
+
+export function defaultGitHubTrigger(connection: RoutineConnection): GitHubEventTrigger {
+  return {
+    kind: "github",
+    connectionId: connection.id,
+    repositoryId: connection.repositoryId,
+    event: "pr_opened",
+    branch: connection.defaultBranch,
+    includeDrafts: false,
+  };
+}
+
+/** Connections a new trigger may target; disabled ones stay listed only when already saved. */
+export function selectableConnections(
+  connections: readonly RoutineConnection[],
+  savedConnectionId: string | null,
+): readonly RoutineConnection[] {
+  return connections.filter(
+    (connection) => connection.status !== "disabled" || connection.id === savedConnectionId,
+  );
+}
+
+export function gitHubHookSettingsUrl(connection: RoutineConnection): string | null {
+  return connection.hookId === null
+    ? null
+    : `${connection.repositoryUrl}/settings/hooks/${connection.hookId}`;
+}
+
+export const ROUTINE_CONNECTION_STATUS_LABELS: Record<RoutineConnection["status"], string> = {
+  pending: "Waiting for GitHub ping",
+  verified: "Verified",
+  disabled: "Disabled",
+};
+
+export const ROUTINE_DELIVERY_STATUS_LABELS: Record<RoutineDeliveryStatus, string> = {
+  accepted: "Accepted",
+  ignored: "Ignored",
+  rejected: "Rejected",
+};
+
+export const GITHUB_REDELIVERY_NOTE =
+  "GitHub does not resend a delivery that failed on its own. Redeliver it from the repository's webhook settings.";

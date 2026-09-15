@@ -84,6 +84,7 @@ const startupDependencies = Layer.mergeAll(
     owner: "routine-startup-test",
     tick: Effect.void,
     start: Effect.void,
+    wake: Effect.void,
   }),
   ServerLifecycleEvents.layer,
   Layer.succeed(ServerEnvironment.ServerEnvironment, {

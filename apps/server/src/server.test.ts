@@ -31,6 +31,7 @@ import {
   ORCHESTRATION_WS_METHODS,
   type PreviewEvent,
   ProjectId,
+  RoutineConnectionId,
   type ProviderAuthState,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -177,6 +178,12 @@ import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
+import * as RoutineStore from "./routines/RoutineStore.ts";
+import {
+  routineConnectionSecretName,
+  routineWebhookCallbackPath,
+  signGitHubWebhookBody,
+} from "./routines/RoutineWebhooks.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
@@ -1770,6 +1777,75 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal((yield* Fiber.join(request)).status, 200);
       assert.isTrue(yield* Deferred.isDone(completed));
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("records a signed routine webhook while command readiness is still pending", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const staticDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-hook-" });
+      yield* fileSystem.writeFileString(path.join(staticDir, "index.html"), "ready");
+      const ready = yield* Deferred.make<void>();
+      const config = yield* buildAppUnderTest({
+        config: { staticDir },
+        layers: { serverRuntimeStartup: { awaitCommandReady: Deferred.await(ready) } },
+      });
+      const store = yield* RoutineStore.RoutineStore;
+      const secrets = yield* ServerSecretStore.ServerSecretStore.pipe(
+        Effect.provide(ServerSecretStore.layer.pipe(Layer.provide(ServerConfig.layer(config)))),
+      );
+      const connectionId = RoutineConnectionId.make("connection-startup");
+      const secret = new TextEncoder().encode("startup-secret");
+      yield* store.saveConnection({
+        id: connectionId,
+        environmentId: EnvironmentId.make("test-environment"),
+        provider: "github",
+        repositoryId: 42,
+        repositoryName: "acme/widgets",
+        repositoryUrl: "https://github.com/acme/widgets",
+        defaultBranch: "main",
+        hookId: 1,
+        callbackUrl: `http://localhost${routineWebhookCallbackPath(connectionId)}`,
+        status: "pending",
+        lastDelivery: null,
+        acceptedCount: 0,
+        ignoredCount: 0,
+        rejectedCount: 0,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      yield* secrets.set(routineConnectionSecretName(connectionId), secret);
+      const completed = yield* Deferred.make<void>();
+      const parked = yield* HttpClient.get("/").pipe(
+        Effect.tap(() => Deferred.succeed(completed, undefined)),
+        Effect.forkChild,
+      );
+      const body = new TextEncoder().encode(encodeTestJson({ zen: "ready" }));
+      const response = yield* HttpClient.execute(
+        HttpClientRequest.post(routineWebhookCallbackPath(connectionId)).pipe(
+          HttpClientRequest.setHeaders({
+            "x-github-delivery": "startup-ping",
+            "x-github-event": "ping",
+            "x-hub-signature-256": signGitHubWebhookBody(secret, body),
+          }),
+          HttpClientRequest.bodyUint8Array(body, "application/json"),
+        ),
+      );
+      assert.equal(response.status, 200);
+      assert.equal(
+        (yield* store.getConnection(EnvironmentId.make("test-environment"), connectionId)).status,
+        "verified",
+      );
+      assert.isFalse(yield* Deferred.isDone(completed));
+      yield* Deferred.succeed(ready, undefined);
+      assert.equal((yield* Fiber.join(parked)).status, 200);
+      assert.isTrue(yield* Deferred.isDone(completed));
+    }).pipe(
+      Effect.provide(
+        RoutineStore.RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+      ),
+      Effect.provide(NodeHttpServer.layerTest),
+    ),
   );
 
   it.effect("serves static index content for GET / when staticDir is configured", () =>

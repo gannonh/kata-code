@@ -70,6 +70,7 @@ import {
 import {
   CLOUD_ENDPOINT_RUNTIME_CONFIG,
   CLOUD_LINKED_USER_ID,
+  CLOUD_MANAGED_ENDPOINT_URL,
   CLOUD_MINT_PUBLIC_KEY,
   encodeEndpointRuntimeConfigJson,
   PUBLISH_AGENT_ACTIVITY_SECRET,
@@ -610,6 +611,16 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       schema: RelayEnvironmentLinkResponse,
     });
     yield* setCliDesiredCloudLink(true, mode);
+    // The relay owns the public hostname. Keep it so callbacks such as routine
+    // webhooks can name a reachable URL without asking the relay again.
+    if (link.endpoint.providerKind === "cloudflare_tunnel") {
+      yield* dependencies.secrets.set(
+        CLOUD_MANAGED_ENDPOINT_URL,
+        stringToBytes(link.endpoint.httpBaseUrl),
+      );
+    } else {
+      yield* dependencies.secrets.remove(CLOUD_MANAGED_ENDPOINT_URL);
+    }
     return yield* applyCloudRelayConfig(dependencies, {
       relayUrl,
       relayIssuer: link.relayIssuer,
@@ -800,9 +811,10 @@ const cloudUnlinkHandler = Effect.fn("environment.cloud.unlink")(
         dependencies.secrets.remove(RELAY_ENVIRONMENT_CREDENTIAL_SECRET),
         dependencies.secrets.remove(CLOUD_MINT_PUBLIC_KEY),
         dependencies.secrets.remove(CLOUD_ENDPOINT_RUNTIME_CONFIG),
+        dependencies.secrets.remove(CLOUD_MANAGED_ENDPOINT_URL),
         dependencies.secrets.remove(PUBLISH_AGENT_ACTIVITY_SECRET),
       ],
-      { concurrency: 7 },
+      { concurrency: 8 },
     );
     yield* setCliDesiredCloudLink(false);
     return { ok: true, endpointRuntimeStatus } satisfies EnvironmentCloudRelayConfigResult;
