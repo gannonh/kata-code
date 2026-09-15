@@ -384,10 +384,17 @@ export const PRESERVATION_CHECKS = [
     ],
     specRefs: ["FORK.md", "docs/upstream/kat-3297-decisions.tsv"],
     commands: [
-      vpTestCommand([
-        "scripts/release-asset-names.test.ts",
-        "scripts/update-release-package-versions.test.ts",
-      ]),
+      {
+        ...vpTestCommand([
+          "scripts/release-asset-names.test.ts",
+          "scripts/update-release-package-versions.test.ts",
+        ]),
+        requiredPaths: [
+          "scripts/release-asset-names.test.ts",
+          "scripts/update-release-package-versions.test.ts",
+        ],
+        trustedPaths: ["scripts/update-release-package-versions.test.ts"],
+      },
     ],
   },
   {
