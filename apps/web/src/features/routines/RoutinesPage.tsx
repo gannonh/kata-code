@@ -223,6 +223,7 @@ function RoutineEnvironmentRows({
         status: "ready",
         routines: query.data.map((routine) => ({
           ...routine,
+          environmentId,
           ownerLabel,
           connectionPhase,
         })),

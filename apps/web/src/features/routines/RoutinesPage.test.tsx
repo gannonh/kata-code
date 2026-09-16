@@ -37,7 +37,7 @@ const testState = vi.hoisted(() => ({
       ],
     },
   ],
-  listData: [] as const,
+  listDataByEnvironment: {} as Record<string, readonly unknown[]>,
   connectionsData: [] as Array<Record<string, unknown>>,
   metadataData: {
     repositories: [] as Array<{ nameWithOwner: string; defaultBranch: string }>,
@@ -77,7 +77,10 @@ vi.mock("../../state/vcs", () => ({
 }));
 vi.mock("../../state/routines", () => ({
   routineEnvironment: {
-    list: () => testState.queries.list,
+    list: (input: { environmentId: string }) => ({
+      tag: testState.queries.list,
+      environmentId: input.environmentId,
+    }),
     connections: () => testState.queries.connections,
     preview: () => testState.queries.preview,
     gitHubMetadata: () => testState.queries.metadata,
@@ -94,38 +97,42 @@ vi.mock("../../state/routines", () => ({
 vi.mock("../../state/use-atom-command", () => ({
   useAtomCommand: () => testState.command,
 }));
-vi.mock("../../state/query", () => ({
-  useEnvironmentQuery: (query: unknown) => {
-    if (query === testState.queries.list) {
-      return {
-        data: testState.listData,
-        error: null,
-        isPending: false,
-        isSuccess: true,
-        refresh: vi.fn(),
-      };
-    }
-    if (query === testState.queries.connections) {
-      return {
-        data: testState.connectionsData,
-        error: null,
-        isPending: false,
-        isSuccess: true,
-        refresh: vi.fn(),
-      };
-    }
-    if (query === testState.queries.metadata) {
-      return {
-        data: testState.metadataData,
-        error: null,
-        isPending: false,
-        isSuccess: true,
-        refresh: vi.fn(),
-      };
-    }
-    return { data: null, error: null, isPending: false, isSuccess: false, refresh: vi.fn() };
-  },
-}));
+vi.mock("../../state/query", () => {
+  const emptyRoutineList: readonly unknown[] = [];
+  return {
+    useEnvironmentQuery: (query: unknown) => {
+      const listQuery = query as { tag?: symbol; environmentId?: string } | null;
+      if (listQuery?.tag === testState.queries.list) {
+        return {
+          data: testState.listDataByEnvironment[listQuery.environmentId ?? ""] ?? emptyRoutineList,
+          error: null,
+          isPending: false,
+          isSuccess: true,
+          refresh: vi.fn(),
+        };
+      }
+      if (query === testState.queries.connections) {
+        return {
+          data: testState.connectionsData,
+          error: null,
+          isPending: false,
+          isSuccess: true,
+          refresh: vi.fn(),
+        };
+      }
+      if (query === testState.queries.metadata) {
+        return {
+          data: testState.metadataData,
+          error: null,
+          isPending: false,
+          isSuccess: true,
+          refresh: vi.fn(),
+        };
+      }
+      return { data: null, error: null, isPending: false, isSuccess: false, refresh: vi.fn() };
+    },
+  };
+});
 vi.mock("../../components/ui/menu", () => ({
   Menu: ({ children }: { children: ReactNode }) => children,
   MenuItem: ({ children, onClick }: { children: ReactNode; onClick?: () => void }) => (
@@ -493,5 +500,141 @@ describe("RoutinesPage GitHub trigger setup", () => {
       event: "issue_opened",
       includeDrafts: false,
     });
+  });
+});
+
+describe("RoutinesPage routine environment ownership", () => {
+  let renderer: ReactTestRenderer | undefined;
+
+  const sharedRoutineConfiguration = {
+    name: "Daily brief",
+    instruction: "Summarize what changed.",
+    projectId: "project-1",
+    modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+    runtimeMode: "approval-required",
+    workspace: { kind: "shared", directory: "/tmp/widgets" },
+    trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
+  };
+
+  function copiedRoutine(recordEnvironmentId: string, revision: number) {
+    return {
+      id: "routine-shared",
+      environmentId: recordEnvironmentId,
+      revision,
+      configuration: sharedRoutineConfiguration,
+      state: "enabled",
+      nextDueAt: "2026-01-02T09:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+  }
+
+  function routineCardsNamed(current: ReactTestRenderer, name: string): ReactTestInstance[] {
+    return current.root.findAll(
+      (node) =>
+        node.type === "button" &&
+        node.props["aria-pressed"] !== undefined &&
+        nodeText(node).includes(name),
+    );
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    testState.command.mockReset();
+    testState.command.mockImplementation(async () => ({
+      _tag: "Success",
+      value: { conversation: { kind: "unconfirmed" } },
+    }));
+    testState.environments = [
+      { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
+      { environmentId: "environment-2", label: "Copied", connection: { phase: "connected" } },
+    ];
+    testState.listDataByEnvironment = {
+      "environment-1": [copiedRoutine("environment-1", 3)],
+      "environment-2": [copiedRoutine("environment-1", 7)],
+    };
+  });
+
+  afterEach(async () => {
+    await act(async () => renderer?.unmount());
+    vi.unstubAllGlobals();
+    testState.environments = [
+      { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
+    ];
+    testState.listDataByEnvironment = {};
+  });
+
+  it("sends a test run for a copied routine to the environment that served it", async () => {
+    await act(async () => {
+      renderer = create(<RoutinesPage />);
+    });
+    const current = renderer!;
+
+    const cards = routineCardsNamed(current, "Daily brief");
+    expect(cards).toHaveLength(2);
+    const copiedCard = cards.find((card) => nodeText(card).includes("Copied"));
+    if (!copiedCard) throw new Error("Copied routine card not found");
+    await act(async () => {
+      copiedCard.props.onClick?.();
+    });
+
+    await act(async () => {
+      buttonWithText(current, "Test run").props.onClick?.();
+      await Promise.resolve();
+    });
+
+    const testCalls = testState.command.mock.calls.filter(
+      ([value]) => (value as { input?: { id?: string } }).input?.id === "routine-shared",
+    );
+    expect(testCalls).toHaveLength(1);
+    expect(testCalls[0]?.[0]).toEqual({
+      environmentId: "environment-2",
+      input: {
+        id: "routine-shared",
+        expectedRevision: 7,
+        requestId: expect.any(String),
+      },
+    });
+    expect(
+      testState.command.mock.calls.every(
+        ([value]) => (value as { environmentId?: string }).environmentId !== "environment-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps an offline copied routine from reaching the environment named in its record", async () => {
+    testState.environments = [
+      { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
+      { environmentId: "environment-2", label: "Copied", connection: { phase: "connecting" } },
+    ];
+    await act(async () => {
+      renderer = create(<RoutinesPage />);
+    });
+    const current = renderer!;
+
+    const cards = routineCardsNamed(current, "Daily brief");
+    expect(cards).toHaveLength(2);
+    const copiedCard = cards.find((card) => nodeText(card).includes("Copied"));
+    if (!copiedCard) throw new Error("Copied routine card not found");
+    await act(async () => {
+      copiedCard.props.onClick?.();
+    });
+
+    expect(
+      current.root.findAll((node) => nodeText(node).includes("This environment is offline")).length,
+    ).toBeGreaterThan(0);
+    const testButton = buttonWithText(current, "Test run");
+    expect(testButton.props.disabled).toBe(true);
+
+    await act(async () => {
+      testButton.props.onClick?.();
+      await Promise.resolve();
+    });
+
+    expect(
+      testState.command.mock.calls.filter(
+        ([value]) => (value as { environmentId?: string }).environmentId === "environment-1",
+      ),
+    ).toHaveLength(0);
   });
 });
