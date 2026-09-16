@@ -192,4 +192,43 @@ describe("routine draft generation", () => {
       expect(result.assistantMessage).toMatch(/unavailable/i);
     }),
   );
+  it.effect("repairs a colon-joined model selection into the allowed model", () =>
+    Effect.gen(function* () {
+      const result = yield* service({
+        draft: {
+          ...fields,
+          modelSelection: { instanceId: "codex:model", model: "Model" },
+        },
+        assistantMessage: "Ready",
+      }).generate(input);
+      expect(result.draft?.modelSelection).toEqual(modelSelection);
+    }),
+  );
+  it.effect("clarifies an unrepairable model selection without returning a draft", () =>
+    Effect.gen(function* () {
+      const result = yield* service({
+        draft: {
+          ...fields,
+          modelSelection: { instanceId: "unknown provider", model: "Unknown" },
+        },
+        assistantMessage: "Ready",
+      }).generate(input);
+      expect(result.draft).toBeNull();
+      expect(result.assistantMessage).toMatch(/execution model/i);
+    }),
+  );
+  it.effect(
+    "repairs a display-name model selection when the evidence matches one allowed model",
+    () =>
+      Effect.gen(function* () {
+        const result = yield* service({
+          draft: {
+            ...fields,
+            modelSelection: { instanceId: "codex", model: "Model" },
+          },
+          assistantMessage: "Ready",
+        }).generate(input);
+        expect(result.draft?.modelSelection).toEqual(modelSelection);
+      }),
+  );
 });

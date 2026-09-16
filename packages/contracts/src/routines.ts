@@ -13,7 +13,6 @@ import {
   PositiveInt,
   NonNegativeInt,
 } from "./baseSchemas.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
 import { ModelSelection, RuntimeMode } from "./orchestration.ts";
 import { RoutineOwnerGeneration, RoutineProviderSubmission, RoutineRunId } from "./routineFence.ts";
 
@@ -76,13 +75,19 @@ export type RoutineDraft = typeof RoutineDraft.Type;
 /**
  * The only fields a text-generation provider is allowed to propose. Runtime
  * permissions and workspace placement are owned by the user and are seeded
- * by the server from the selected project.
+ * by the server from the selected project. The model selection stays a loose
+ * string pair here: models occasionally merge the list's `id:model` format,
+ * and the server repairs or clarifies against the provider registry before
+ * any draft is accepted.
  */
 export const RoutineDraftGeneratedFields = Schema.Struct({
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
   instruction: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
   projectId: ProjectId,
-  modelSelection: Schema.Struct({ instanceId: ProviderInstanceId, model: TrimmedNonEmptyString }),
+  modelSelection: Schema.Struct({
+    instanceId: Schema.String.check(Schema.isMaxLength(200)),
+    model: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  }),
   trigger: ScheduleTrigger,
 });
 export type RoutineDraftGeneratedFields = typeof RoutineDraftGeneratedFields.Type;

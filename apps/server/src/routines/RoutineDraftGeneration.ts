@@ -31,6 +31,39 @@ const permittedModel = (models: readonly RoutineDraftPromptModel[], selection: M
     (model) => model.instanceId === selection.instanceId && model.model === selection.model,
   );
 
+/**
+ * Models occasionally merge the list's `instanceId:model: Name` format into a
+ * colon-joined instance id or copy the display name into the model field.
+ * Re-identify the intended model from the allowed list; anything ambiguous
+ * stays unpermitted and becomes a clarification turn.
+ */
+const repairGeneratedModelSelection = (
+  selection: { readonly instanceId: string; readonly model: string },
+  models: readonly RoutineDraftPromptModel[],
+): { readonly instanceId: string; readonly model: string } => {
+  if (permittedModel(models, selection as ModelSelection)) return selection;
+  const [head, ...rest] = selection.instanceId.split(":");
+  if (head !== undefined && rest.length > 0) {
+    const joinedModel = rest.join(":");
+    if (permittedModel(models, { instanceId: head, model: joinedModel } as ModelSelection)) {
+      return { instanceId: head, model: joinedModel };
+    }
+  }
+  if (selection.model.trim().length > 0) {
+    const byName = models.filter(
+      (model) => model.name.toLowerCase() === selection.model.trim().toLowerCase(),
+    );
+    const intended = byName.length === 1 ? byName[0] : undefined;
+    if (
+      intended !== undefined &&
+      selection.instanceId.toLowerCase().includes(intended.instanceId.toLowerCase())
+    ) {
+      return { instanceId: intended.instanceId, model: intended.model };
+    }
+  }
+  return selection;
+};
+
 /** Drafting deliberately has no store, scheduler, or conversation dependencies. */
 export function makeRoutineDraftGeneration(dependencies: {
   readonly projects: Effect.Effect<readonly Project[], RoutineError>;
@@ -88,7 +121,11 @@ export function makeRoutineDraftGeneration(dependencies: {
           "The selected generation model is unavailable. Choose an enabled provider and model.",
         );
       }
-      if (!permittedModel(currentModels, output.draft.modelSelection))
+      const repairedModelSelection = repairGeneratedModelSelection(
+        output.draft.modelSelection,
+        currentModels,
+      );
+      if (!permittedModel(currentModels, repairedModelSelection as ModelSelection))
         return {
           draft: null,
           draftRevision: input.draftRevision,
@@ -103,11 +140,13 @@ export function makeRoutineDraftGeneration(dependencies: {
       const draft = yield* decodeDraft({
         ...output.draft,
         modelSelection:
-          input.currentDraft?.modelSelection.instanceId ===
-            output.draft.modelSelection.instanceId &&
-          input.currentDraft.modelSelection.model === output.draft.modelSelection.model
+          input.currentDraft?.modelSelection.instanceId === repairedModelSelection.instanceId &&
+          input.currentDraft.modelSelection.model === repairedModelSelection.model
             ? input.currentDraft.modelSelection
-            : output.draft.modelSelection,
+            : {
+                instanceId: repairedModelSelection.instanceId,
+                model: repairedModelSelection.model,
+              },
         runtimeMode: input.currentDraft?.runtimeMode ?? "approval-required",
         workspace:
           input.currentDraft?.projectId === target.id
