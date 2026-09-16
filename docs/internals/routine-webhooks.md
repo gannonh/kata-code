@@ -23,8 +23,10 @@ and handed to `RoutineStore.admitEvent`, which runs one SQLite transaction:
 delivery-id and content-digest dedupe, filter matching against enabled routines
 with `trigger_kind='github'`, run insertion through the same path scheduled
 routines use (including the active-slot short circuit), the delivery row, and
-the connection counters. The 2xx is sent only after that commit. Digest rows
-older than seven days are pruned on each accepted delivery. A failed SQLite
+the connection counters. Signed pings use the same repository validation,
+durable receipt, and deduplication path; they verify the connection without
+creating a run. The 2xx is sent only after that commit. Digest rows older than
+seven days are pruned before replay checks within the admission transaction. A failed SQLite
 write answers 503 so the operator can redeliver from GitHub.
 
 ## Startup readiness

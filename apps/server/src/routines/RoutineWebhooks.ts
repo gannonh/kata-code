@@ -129,12 +129,6 @@ export const routineWebhookRouteLayer = HttpRouter.add(
       return yield* rejected(400, "Body is not valid JSON.");
     }
     const payload = decoded.value;
-    if (eventName === "ping") {
-      yield* store
-        .markConnectionVerified(connection.id, deliveryId, now)
-        .pipe(Effect.ignoreCause({ log: true }));
-      return reply(200, "Ping received.");
-    }
     const repositoryId = payloadRepositoryId(payload);
     if (repositoryId !== connection.repositoryId) {
       return yield* rejected(403, "Delivery names a different repository.");
@@ -166,7 +160,7 @@ export const routineWebhookRouteLayer = HttpRouter.add(
     }
     return HttpServerResponse.jsonUnsafe(
       { ok: true, status, runIds: runs.map((run) => run.id) },
-      { status: status === "accepted" ? 202 : 200 },
+      { status: status === "accepted" && eventName !== "ping" ? 202 : 200 },
     );
   }),
 );

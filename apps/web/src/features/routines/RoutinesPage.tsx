@@ -61,10 +61,14 @@ import { requestConfirmDialog } from "../../confirmDialog";
 import {
   canSaveRoutineDraft,
   confirmDialogAccepted,
+  defaultGitHubTriggerDraft,
   DELETE_ROUTINE_MESSAGE,
   DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
   firstEnabledProviderModel,
+  isCompleteGitHubTrigger,
+  isRoutineEditorDraftComplete,
+  isRoutineEditorScheduleTrigger,
   isRoutineDraftDirty,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
@@ -86,6 +90,8 @@ import {
   ROUTINE_DELIVERY_STATUS_LABELS,
   routineTriggerKind,
   selectableConnections,
+  type RoutineEditorDraft,
+  type RoutineEditorGitHubTrigger,
 } from "./RoutinesPage.logic";
 import { RoutineChat } from "./RoutineChat";
 
@@ -100,7 +106,7 @@ type DraftState = {
   readonly id: RoutineId;
   readonly environmentId: EnvironmentId;
   readonly expectedRevision: number;
-  readonly configuration: RoutineDraft;
+  readonly configuration: RoutineEditorDraft;
 };
 
 type EnvironmentRoutineLoad = {
@@ -312,6 +318,10 @@ function FieldLabel({
   );
 }
 
+type GitHubTriggerPatch = Partial<
+  Pick<GitHubEventTrigger, "event" | "branch" | "includeDrafts" | "issueLabelId">
+>;
+
 function GitHubTriggerFields({
   environmentId,
   trigger,
@@ -323,12 +333,12 @@ function GitHubTriggerFields({
   onConnectionCreated,
 }: {
   readonly environmentId: EnvironmentId;
-  readonly trigger: GitHubEventTrigger;
+  readonly trigger: RoutineEditorGitHubTrigger;
   readonly connections: readonly RoutineConnection[];
   readonly selectedConnection: RoutineConnection | undefined;
   readonly offline: boolean;
   readonly busy: boolean;
-  readonly onTriggerChange: (patch: Partial<GitHubEventTrigger>) => void;
+  readonly onTriggerChange: (patch: GitHubTriggerPatch) => void;
   readonly onConnectionCreated: (connection: RoutineConnection) => void;
 }) {
   const createConnection = useAtomCommand(routineEnvironment.createConnection, {
@@ -424,7 +434,7 @@ function GitHubTriggerFields({
         <select
           id="routine-connection"
           className={ROUTINE_CONTROL_CLASS}
-          value={trigger.connectionId}
+          value={selectedConnection?.id ?? ""}
           disabled={disabled}
           onChange={(event) => {
             const next = connections.find((candidate) => candidate.id === event.target.value);
@@ -666,8 +676,8 @@ function RoutineEditor({
   readonly onOwnerChange: (environmentId: EnvironmentId) => void;
   readonly onSaved: (routine: Routine) => void;
   readonly onCancel: () => void;
-  readonly baseline: RoutineDraft;
-  readonly onBaselineChange: (baseline: RoutineDraft) => void;
+  readonly baseline: RoutineEditorDraft;
+  readonly onBaselineChange: (baseline: RoutineEditorDraft) => void;
 }) {
   const save = useAtomCommand(routineEnvironment.save, { reportFailure: false });
   const change = useAtomCommand(routineEnvironment.change, { reportFailure: false });
@@ -704,7 +714,7 @@ function RoutineEditor({
     setHistoryBefore(null);
   }, [historyBefore, olderHistory.data]);
   const preview = useEnvironmentQuery(
-    isScheduleTrigger(draft.configuration.trigger)
+    isRoutineEditorScheduleTrigger(draft.configuration.trigger)
       ? routineEnvironment.preview({
           environmentId: draft.environmentId,
           input: { trigger: draft.configuration.trigger },
@@ -715,7 +725,7 @@ function RoutineEditor({
     routineEnvironment.connections({ environmentId: draft.environmentId, input: {} }),
   );
   const [scheduleTrigger, setScheduleTrigger] = useState<ScheduleTrigger>(() =>
-    isScheduleTrigger(draft.configuration.trigger)
+    isRoutineEditorScheduleTrigger(draft.configuration.trigger)
       ? draft.configuration.trigger
       : { kind: "daily", time: "09:00", timezone: "UTC" },
   );
@@ -724,20 +734,29 @@ function RoutineEditor({
   const [testRun, setTestRun] = useState<RoutineRun | null>(null);
 
   const configuration = draft.configuration;
-  const setConfiguration = (patch: Partial<RoutineDraft>) =>
+  const setConfiguration = (patch: Partial<RoutineEditorDraft>) =>
     onDraftChange({ ...draft, configuration: { ...configuration, ...patch } });
   const setTrigger = (patch: Partial<ScheduleTrigger>) => {
-    if (!isScheduleTrigger(configuration.trigger)) return;
+    if (!isRoutineEditorScheduleTrigger(configuration.trigger)) return;
     setConfiguration({ trigger: { ...configuration.trigger, ...patch } as ScheduleTrigger });
   };
-  const setGitHubTrigger = (patch: Partial<GitHubEventTrigger>) => {
-    if (isScheduleTrigger(configuration.trigger)) return;
-    const next = { ...configuration.trigger, ...patch };
-    if (next.branch !== undefined && next.branch.trim().length === 0) delete next.branch;
+  const setGitHubTrigger = (patch: GitHubTriggerPatch) => {
+    if (isRoutineEditorScheduleTrigger(configuration.trigger)) return;
+    const normalizedPatch =
+      patch.branch !== undefined && patch.branch.trim().length === 0
+        ? (() => {
+            const { branch: _branch, ...rest } = patch;
+            return rest;
+          })()
+        : patch;
+    const next: RoutineEditorGitHubTrigger = {
+      ...configuration.trigger,
+      ...normalizedPatch,
+    };
     setConfiguration({ trigger: next });
   };
   const triggerKind = routineTriggerKind(configuration.trigger);
-  const scheduleFields: ScheduleTrigger = isScheduleTrigger(configuration.trigger)
+  const scheduleFields: ScheduleTrigger = isRoutineEditorScheduleTrigger(configuration.trigger)
     ? configuration.trigger
     : scheduleTrigger;
   const savedConnectionId =
@@ -745,11 +764,12 @@ function RoutineEditor({
       ? routine.configuration.trigger.connectionId
       : null;
   const availableConnections = selectableConnections(connections.data ?? [], savedConnectionId);
-  const selectedConnection = !isScheduleTrigger(configuration.trigger)
+  const selectedGitHubTrigger = isCompleteGitHubTrigger(configuration.trigger)
+    ? configuration.trigger
+    : undefined;
+  const selectedConnection = selectedGitHubTrigger
     ? (connections.data ?? []).find(
-        (candidate) =>
-          !isScheduleTrigger(configuration.trigger) &&
-          candidate.id === configuration.trigger.connectionId,
+        (candidate) => candidate.id === selectedGitHubTrigger.connectionId,
       )
     : undefined;
   const switchTriggerKind = (kind: "schedule" | "github") => {
@@ -758,18 +778,11 @@ function RoutineEditor({
       setConfiguration({ trigger: scheduleTrigger });
       return;
     }
-    if (isScheduleTrigger(configuration.trigger)) setScheduleTrigger(configuration.trigger);
+    if (isRoutineEditorScheduleTrigger(configuration.trigger))
+      setScheduleTrigger(configuration.trigger);
     const first = availableConnections[0];
     setConfiguration({
-      trigger: first
-        ? defaultGitHubTrigger(first)
-        : {
-            kind: "github",
-            connectionId: RoutineConnectionId.make(""),
-            repositoryId: 1,
-            event: "pr_opened",
-            includeDrafts: false,
-          },
+      trigger: first ? defaultGitHubTrigger(first) : defaultGitHubTriggerDraft(),
     });
   };
   const project = projects.find((candidate) => candidate.id === configuration.projectId);
@@ -813,6 +826,7 @@ function RoutineEditor({
       }),
     });
   };
+  const hasCompleteTrigger = isRoutineEditorDraftComplete(configuration);
   const canSave =
     canSaveRoutineDraft({
       name: configuration.name,
@@ -822,12 +836,13 @@ function RoutineEditor({
       busy,
       provider,
     }) &&
+    hasCompleteTrigger &&
     (triggerKind === "schedule" || selectedConnection !== undefined);
   const isSaved = routine !== null;
   const historyRuns = [...(history.data?.runs ?? []), ...extraRuns];
 
   const submitSave = async () => {
-    if (!canSave) return;
+    if (!canSave || !isRoutineEditorDraftComplete(configuration)) return;
     setBusy(true);
     setMessage(null);
     const result = await save({
@@ -1174,7 +1189,7 @@ function RoutineEditor({
                 <WebhookIcon className="size-3.5" /> GitHub event
               </Button>
             </div>
-            {triggerKind === "github" && !isScheduleTrigger(configuration.trigger) ? (
+            {triggerKind === "github" && !isRoutineEditorScheduleTrigger(configuration.trigger) ? (
               <GitHubTriggerFields
                 environmentId={draft.environmentId}
                 trigger={configuration.trigger}
@@ -1188,7 +1203,7 @@ function RoutineEditor({
                 }
               />
             ) : null}
-            {triggerKind === "schedule" && isScheduleTrigger(configuration.trigger) ? (
+            {triggerKind === "schedule" && isRoutineEditorScheduleTrigger(configuration.trigger) ? (
               <>
                 <div className={ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS}>
                   {(["daily", "weekdays", "weekly", "cron"] as const).map((kind) => (
@@ -1262,7 +1277,7 @@ function RoutineEditor({
                       <span key={date}>
                         {formatDateInTimezone(
                           date,
-                          isScheduleTrigger(configuration.trigger)
+                          isRoutineEditorScheduleTrigger(configuration.trigger)
                             ? configuration.trigger.timezone
                             : "UTC",
                         )}
@@ -1465,7 +1480,7 @@ export function RoutinesPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [editorRoutine, setEditorRoutine] = useState<RoutineWithOwner | null>(null);
-  const [baseline, setBaseline] = useState<RoutineDraft | null>(null);
+  const [baseline, setBaseline] = useState<RoutineEditorDraft | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatRevision, setChatRevision] = useState(0);
   const [generationModelSelection, setGenerationModelSelection] = useState<ModelSelection | null>(

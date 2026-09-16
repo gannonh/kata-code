@@ -18,6 +18,7 @@ import * as Schema from "effect/Schema";
 import {
   canSaveRoutineDraft,
   confirmDialogAccepted,
+  defaultGitHubTriggerDraft,
   defaultGitHubTrigger,
   DELETE_ROUTINE_MESSAGE,
   formatRoutineTrigger,
@@ -26,6 +27,7 @@ import {
   enabledProviders,
   firstEnabledProviderModel,
   isRoutineDraftDirty,
+  isCompleteGitHubTrigger,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
   preferredWorktreeBaseBranch,
@@ -470,6 +472,13 @@ describe("GitHub event triggers", () => {
       "GitHub · Pull request opened on main",
     );
     expect(routineTriggerKind(defaultGitHubTrigger(connection()))).toBe("github");
+  });
+
+  it("keeps an unconnected GitHub choice outside the saved trigger contract", () => {
+    const trigger = defaultGitHubTriggerDraft();
+
+    expect(trigger).toEqual({ kind: "github", event: "pr_opened", includeDrafts: false });
+    expect(isCompleteGitHubTrigger(trigger)).toBe(false);
   });
 
   it("defaults a new GitHub trigger to PR opened on the repository default branch", () => {

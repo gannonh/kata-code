@@ -13,6 +13,7 @@ import {
   type RoutineTrigger,
   type RuntimeMode,
   type ServerProvider,
+  type ScheduleTrigger,
   type VcsRef,
 } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
@@ -112,7 +113,24 @@ export const DELETE_ROUTINE_MESSAGE =
 export const ROUTINE_CANCEL_HINT =
   "Discards unsaved changes. A canceled draft is not saved as a routine.";
 
-export function isRoutineDraftDirty(current: RoutineDraft, baseline: RoutineDraft): boolean {
+/** Editor-only state while GitHub setup has not produced a real connection. */
+export type GitHubTriggerDraft = {
+  readonly kind: "github";
+  readonly event: GitHubEventTrigger["event"];
+  readonly branch?: GitHubEventTrigger["branch"];
+  readonly includeDrafts: boolean;
+  readonly issueLabelId?: GitHubEventTrigger["issueLabelId"];
+};
+export type RoutineEditorGitHubTrigger = GitHubTriggerDraft | GitHubEventTrigger;
+export type RoutineEditorTrigger = ScheduleTrigger | RoutineEditorGitHubTrigger;
+export type RoutineEditorDraft = Omit<RoutineDraft, "trigger"> & {
+  readonly trigger: RoutineEditorTrigger;
+};
+
+export function isRoutineDraftDirty(
+  current: RoutineEditorDraft,
+  baseline: RoutineEditorDraft,
+): boolean {
   return JSON.stringify(current) !== JSON.stringify(baseline);
 }
 
@@ -221,10 +239,10 @@ export function confirmDialogAccepted(result: boolean | undefined): boolean {
 
 /** Automatic init (default-branch fill) is not a user edit. Keep real edits dirty. */
 export function routineDraftBaselineAfterAutomaticChange(
-  current: RoutineDraft,
-  baseline: RoutineDraft,
-  next: RoutineDraft,
-): RoutineDraft {
+  current: RoutineEditorDraft,
+  baseline: RoutineEditorDraft,
+  next: RoutineEditorDraft,
+): RoutineEditorDraft {
   return isRoutineDraftDirty(current, baseline) ? baseline : next;
 }
 
@@ -243,8 +261,24 @@ export function keepDeletedRoutineInEditor(state: Routine["state"]): boolean {
 
 export type RoutineTriggerKind = "schedule" | "github";
 
-export function routineTriggerKind(trigger: RoutineTrigger): RoutineTriggerKind {
-  return isScheduleTrigger(trigger) ? "schedule" : "github";
+export function isRoutineEditorScheduleTrigger(
+  trigger: RoutineEditorTrigger,
+): trigger is ScheduleTrigger {
+  return trigger.kind !== "github";
+}
+
+export function isCompleteGitHubTrigger(
+  trigger: RoutineEditorTrigger,
+): trigger is GitHubEventTrigger {
+  return trigger.kind === "github" && "connectionId" in trigger && "repositoryId" in trigger;
+}
+
+export function isRoutineEditorDraftComplete(draft: RoutineEditorDraft): draft is RoutineDraft {
+  return isRoutineEditorScheduleTrigger(draft.trigger) || isCompleteGitHubTrigger(draft.trigger);
+}
+
+export function routineTriggerKind(trigger: RoutineEditorTrigger): RoutineTriggerKind {
+  return isRoutineEditorScheduleTrigger(trigger) ? "schedule" : "github";
 }
 
 export function formatRoutineTrigger(trigger: RoutineTrigger): string {
@@ -274,6 +308,14 @@ export function defaultGitHubTrigger(connection: RoutineConnection): GitHubEvent
   };
 }
 
+export function defaultGitHubTriggerDraft(): GitHubTriggerDraft {
+  return {
+    kind: "github",
+    event: "pr_opened",
+    includeDrafts: false,
+  };
+}
+
 /** Connections a new trigger may target; disabled ones stay listed only when already saved. */
 export function selectableConnections(
   connections: readonly RoutineConnection[],
@@ -290,10 +332,14 @@ export function gitHubHookSettingsUrl(connection: RoutineConnection): string | n
     : `${connection.repositoryUrl}/settings/hooks/${connection.hookId}`;
 }
 
-export const ROUTINE_CONNECTION_STATUS_LABELS: Record<RoutineConnection["status"], string> = {
+export const ROUTINE_CONNECTION_STATUS_LABELS: Record<
+  RoutineConnection["status"] | "unavailable",
+  string
+> = {
   pending: "Waiting for GitHub ping",
   verified: "Verified",
   disabled: "Disabled",
+  unavailable: "Unavailable",
 };
 
 export const ROUTINE_DELIVERY_STATUS_LABELS: Record<RoutineDeliveryStatus, string> = {

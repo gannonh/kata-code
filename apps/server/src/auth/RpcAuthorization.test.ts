@@ -70,4 +70,18 @@ describe("RPC authorization scopes", () => {
       );
     }
   });
+
+  it("allows reading GitHub routine connections without granting webhook control", () => {
+    for (const method of [WS_METHODS.routinesConnectionsList, WS_METHODS.routinesGitHubMetadata]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    }
+    for (const method of [
+      WS_METHODS.routinesConnectionsCreate,
+      WS_METHODS.routinesConnectionsVerify,
+      WS_METHODS.routinesConnectionsDisable,
+      WS_METHODS.routinesConnectionsRotateSecret,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
+  });
 });

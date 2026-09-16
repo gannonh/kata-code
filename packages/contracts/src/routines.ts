@@ -52,7 +52,9 @@ export const ScheduleTrigger = Schema.Union([
   }),
 ]);
 export type ScheduleTrigger = typeof ScheduleTrigger.Type;
-export const RoutineConnectionId = TrimmedNonEmptyString.pipe(Schema.brand("RoutineConnectionId"));
+export const RoutineConnectionId = TrimmedNonEmptyString.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]{1,128}$/u),
+).pipe(Schema.brand("RoutineConnectionId"));
 export type RoutineConnectionId = typeof RoutineConnectionId.Type;
 export const GitHubRoutineEvent = Schema.Literals([
   "pr_opened",
@@ -279,7 +281,12 @@ export const RoutineDelivery = Schema.Struct({
   receivedAt: IsoDateTime,
 });
 export type RoutineDelivery = typeof RoutineDelivery.Type;
-export const RoutineConnectionStatus = Schema.Literals(["pending", "verified", "disabled"]);
+export const RoutineConnectionStatus = Schema.Literals([
+  "pending",
+  "verified",
+  "disabled",
+  "unavailable",
+]);
 export type RoutineConnectionStatus = typeof RoutineConnectionStatus.Type;
 /**
  * A repository webhook owned by this environment. The signing secret lives only

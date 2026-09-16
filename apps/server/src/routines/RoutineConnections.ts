@@ -17,6 +17,7 @@ import * as Schema from "effect/Schema";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
+import * as CloudManagedEndpointRuntime from "../cloud/ManagedEndpointRuntime.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import { routineConnectionSecretName, routineWebhookCallbackPath } from "./RoutineWebhooks.ts";
 import { RoutineStore } from "./RoutineStore.ts";
@@ -66,6 +67,16 @@ const decodeJson = <S extends Schema.Top>(schema: S, stdout: string) =>
 
 const failure = (code: RoutineError["code"], message: string) =>
   new RoutineError({ code, message });
+const decodeConnectionId = Schema.decodeUnknownSync(RoutineConnectionId);
+const validateConnectionId = (id: RoutineConnectionId) =>
+  Effect.try({
+    try: () => decodeConnectionId(id),
+    catch: () =>
+      failure(
+        "validation",
+        "Connection ID must be 1-128 characters using only letters, numbers, underscore, or hyphen.",
+      ),
+  });
 
 export interface RoutineConnectionsShape {
   readonly list: (
@@ -112,6 +123,7 @@ export const makeRoutineConnections = Effect.gen(function* () {
   const github = yield* GitHubCli.GitHubCli;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const config = yield* ServerConfig.ServerConfig;
+  const endpointRuntime = yield* CloudManagedEndpointRuntime.CloudManagedEndpointRuntime;
   const cwd = config.cwd;
   const isoNow = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -132,21 +144,29 @@ export const makeRoutineConnections = Effect.gen(function* () {
       ? Effect.fail(failure("validation", "Use the owner/name form for the repository."))
       : Effect.succeed(`repos/${parsed.owner}/${parsed.name}`);
   };
-  const callbackBaseUrl = secrets.get(CLOUD_MANAGED_ENDPOINT_URL).pipe(
-    Effect.mapError(() => failure("persistence", "Could not read the environment link state.")),
-    Effect.flatMap(
-      Option.match({
-        onNone: () =>
-          Effect.fail(
-            failure(
-              "blocked",
-              "This environment has no public callback URL. Link it through Kata Code Connect with a managed tunnel, then try again.",
-            ),
+  const callbackBaseUrl = Effect.gen(function* () {
+    const runtimeStatus = yield* endpointRuntime.getStatus;
+    if (runtimeStatus.status !== "running")
+      return yield* failure(
+        "blocked",
+        "The managed endpoint runtime is not running. Start Kata Code Connect, then try again.",
+      );
+    const endpointUrl = yield* secrets
+      .get(CLOUD_MANAGED_ENDPOINT_URL)
+      .pipe(
+        Effect.mapError(() => failure("persistence", "Could not read the environment link state.")),
+      );
+    return yield* Option.match(endpointUrl, {
+      onNone: () =>
+        Effect.fail(
+          failure(
+            "blocked",
+            "This environment has no public callback URL. Link it through Kata Code Connect with a managed tunnel, then try again.",
           ),
-        onSome: (bytes) => Effect.succeed(new TextDecoder().decode(bytes).replace(/\/+$/u, "")),
-      }),
-    ),
-  );
+        ),
+      onSome: (bytes) => Effect.succeed(new TextDecoder().decode(bytes).replace(/\/+$/u, "")),
+    });
+  });
   const secretBytes = () => Effect.sync(() => NodeCrypto.randomBytes(32));
   const secretText = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
   const hookConfig = (callbackUrl: string, secret: string) => ({
@@ -159,12 +179,33 @@ export const makeRoutineConnections = Effect.gen(function* () {
     store.getConnection(environmentId, id);
 
   const list: RoutineConnectionsShape["list"] = (environmentId) =>
-    store.listConnections(environmentId);
+    Effect.gen(function* () {
+      const connections = yield* store.listConnections(environmentId);
+      if ((yield* endpointRuntime.getStatus).status === "running") return connections;
+      return connections.map((connection) =>
+        connection.status === "disabled" ? connection : { ...connection, status: "unavailable" },
+      );
+    });
 
   const create: RoutineConnectionsShape["create"] = Effect.fn("RoutineConnections.create")(
     function* (input) {
+      const id = yield* validateConnectionId(input.id);
       const path = yield* repositoryPath(input.repository);
+      const existing = yield* store.findConnection(id);
+      if (existing !== null)
+        return yield* failure("conflict", "A routine connection with this ID already exists.");
       const baseUrl = yield* callbackBaseUrl;
+      const secret = yield* secretBytes();
+      const secretValue = secretText(secret);
+      yield* secrets
+        .create(routineConnectionSecretName(id), new TextEncoder().encode(secretValue))
+        .pipe(
+          Effect.mapError((error) =>
+            ServerSecretStore.isSecretAlreadyExistsError(error)
+              ? failure("conflict", "A routine connection with this ID already exists.")
+              : failure("persistence", "Could not reserve the signing secret."),
+          ),
+        );
       yield* github
         .assertAuthenticated({ cwd })
         .pipe(Effect.mapError(gitHubFailure("GitHub authentication")));
@@ -180,26 +221,22 @@ export const makeRoutineConnections = Effect.gen(function* () {
           ),
         ),
       );
-      const callbackUrl = `${baseUrl}${routineWebhookCallbackPath(input.id)}`;
-      const secret = yield* secretBytes();
+      const callbackUrl = `${baseUrl}${routineWebhookCallbackPath(id)}`;
       // The secret is stored before the hook exists so a delivery that races the
       // create call can already be verified; it never enters argv or logs.
-      yield* secrets
-        .set(routineConnectionSecretName(input.id), secret)
-        .pipe(Effect.mapError(() => failure("persistence", "Could not store the signing secret.")));
       const hook = yield* api(
         ["-X", "POST", `${path}/hooks`, "--input", "-"],
         encodeHookCreate({
           name: "web",
           active: true,
           events: [...HOOK_EVENTS],
-          config: hookConfig(callbackUrl, secretText(secret)),
+          config: hookConfig(callbackUrl, secretValue),
         }),
         "Webhook creation",
       ).pipe(Effect.flatMap((output) => decodeJson(HookJson, output.stdout)));
       const now = yield* isoNow;
       const connection: RoutineConnection = {
-        id: input.id,
+        id,
         environmentId: input.environmentId,
         provider: "github",
         repositoryId: repository.id,
@@ -234,17 +271,19 @@ export const makeRoutineConnections = Effect.gen(function* () {
 
   const verify: RoutineConnectionsShape["verify"] = Effect.fn("RoutineConnections.verify")(
     function* (input) {
-      const first = yield* awaitPing(input.environmentId, input.id, PING_WAIT_MS / 3);
+      const id = yield* validateConnectionId(input.id);
+      const first = yield* awaitPing(input.environmentId, id, PING_WAIT_MS / 3);
       if (first.status !== "pending" || first.hookId === null) return first;
       const path = yield* repositoryPath(first.repositoryName);
       yield* api(["-X", "POST", `${path}/hooks/${first.hookId}/pings`], undefined, "Webhook ping");
-      return yield* awaitPing(input.environmentId, input.id, PING_WAIT_MS);
+      return yield* awaitPing(input.environmentId, id, PING_WAIT_MS);
     },
   );
 
   const disable: RoutineConnectionsShape["disable"] = Effect.fn("RoutineConnections.disable")(
     function* (input) {
-      const current = yield* owned(input.environmentId, input.id);
+      const id = yield* validateConnectionId(input.id);
+      const current = yield* owned(input.environmentId, id);
       // Local acceptance ends first; the provider-side delete is best effort.
       yield* secrets
         .remove(routineConnectionSecretName(current.id))
@@ -278,7 +317,8 @@ export const makeRoutineConnections = Effect.gen(function* () {
   const rotateSecret: RoutineConnectionsShape["rotateSecret"] = Effect.fn(
     "RoutineConnections.rotateSecret",
   )(function* (input) {
-    const current = yield* owned(input.environmentId, input.id);
+    const id = yield* validateConnectionId(input.id);
+    const current = yield* owned(input.environmentId, id);
     if (current.status === "disabled" || current.hookId === null)
       return yield* failure("blocked", "Reconnect the repository before rotating its secret.");
     const path = yield* repositoryPath(current.repositoryName);

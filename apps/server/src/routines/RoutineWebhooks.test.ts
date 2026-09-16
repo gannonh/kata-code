@@ -15,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -150,7 +151,7 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
         const routine = yield* seed;
         const store = yield* RoutineStore;
         const ping = yield* post({
-          body: encodeJson({ zen: "Keep it logically awesome." }),
+          body: encodeJson({ zen: "Keep it logically awesome.", repository: { id: 42 } }),
           event: "ping",
           deliveryId: "ping-1",
         });
@@ -175,6 +176,46 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
         assert.equal(replayed.json.status, "duplicate");
         assert.equal((yield* store.history(environmentId, { id: routine.id })).runs.length, 1);
         assert.equal(yield* Ref.get(wakeCount), 1);
+      }),
+    );
+
+    it.effect("records a ping durably and deduplicates its signed body", () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const sql = yield* SqlClient.SqlClient;
+        const before = yield* store.getConnection(environmentId, connectionId);
+        const body = encodeJson({ repository: { id: 42 }, zen: "Durable ping" });
+        const response = yield* post({ body, event: "ping", deliveryId: "ping-durable" });
+        assert.equal(response.status, 200);
+        const rows = yield* sql<{ status: string }>`SELECT status FROM routine_deliveries
+          WHERE connection_id=${connectionId} AND delivery_id='ping-durable'`;
+        assert.equal(rows[0]?.status, "accepted");
+        assert.equal(
+          (yield* store.getConnection(environmentId, connectionId)).acceptedCount,
+          before.acceptedCount + 1,
+        );
+        const replay = yield* post({ body, event: "ping", deliveryId: "ping-replay" });
+        assert.equal(replay.json.status, "duplicate");
+        assert.equal(
+          (yield* store.getConnection(environmentId, connectionId)).acceptedCount,
+          before.acceptedCount + 1,
+        );
+      }),
+    );
+
+    it.effect("rejects a signed ping for a different repository", () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const before = yield* store.getConnection(environmentId, connectionId);
+        const response = yield* post({
+          body: encodeJson({ repository: { id: 43 } }),
+          event: "ping",
+          deliveryId: "ping-wrong-repository",
+        });
+        assert.equal(response.status, 403);
+        const after = yield* store.getConnection(environmentId, connectionId);
+        assert.equal(after.rejectedCount, before.rejectedCount + 1);
+        assert.equal(after.lastDelivery?.status, "rejected");
       }),
     );
 
@@ -228,6 +269,24 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
           });
           assert.equal(routineHistory.runs.length, 1);
         }),
+    );
+
+    it.effect("returns 503 instead of acknowledging a ping whose durable receipt fails", () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`CREATE TEMP TRIGGER fail_ping_receipt BEFORE INSERT ON routine_deliveries
+          WHEN NEW.delivery_id='ping-write-failure'
+          BEGIN SELECT RAISE(FAIL, 'simulated write failure'); END`;
+        const response = yield* post({
+          body: encodeJson({ repository: { id: 42 }, zen: "Failed durable write" }),
+          event: "ping",
+          deliveryId: "ping-write-failure",
+        }).pipe(Effect.ensuring(sql`DROP TRIGGER fail_ping_receipt`.pipe(Effect.orDie)));
+        assert.equal(response.status, 503);
+        const rows =
+          yield* sql`SELECT delivery_id FROM routine_deliveries WHERE delivery_id='ping-write-failure'`;
+        assert.equal(rows.length, 0);
+      }),
     );
 
     it.effect("admits nothing for a disabled connection even with a valid signature", () =>

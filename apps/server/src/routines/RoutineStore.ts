@@ -465,7 +465,10 @@ export const makeRoutineStore = Effect.gen(function* () {
     );
   const saveConnection = (connection: RoutineConnection) =>
     transaction(
-      writeConnection(connection).pipe(Effect.andThen(recordChange(connection.environmentId))),
+      sql`INSERT INTO routine_connections (id, environment_id, status, record)
+        VALUES (${connection.id}, ${connection.environmentId}, ${connection.status}, ${encodeConnection(connection)})`.pipe(
+        Effect.andThen(recordChange(connection.environmentId)),
+      ),
     );
   const updateConnection = (
     id: string,
@@ -497,20 +500,6 @@ export const makeRoutineStore = Effect.gen(function* () {
       },
       updatedAt: isoAt(now),
     })).pipe(Effect.asVoid);
-  const markConnectionVerified = (connectionId: string, deliveryId: string, now: number) =>
-    updateConnection(connectionId, (connection) => ({
-      ...connection,
-      status: connection.status === "disabled" ? "disabled" : "verified",
-      lastDelivery: {
-        deliveryId,
-        event: "ping",
-        status: "accepted",
-        detail: "GitHub ping received.",
-        runId: null,
-        receivedAt: isoAt(now),
-      },
-      updatedAt: isoAt(now),
-    }));
   /**
    * Records a signed delivery and every run it admits in one transaction, so a
    * 2xx to the provider always means the intent is durable. Runs reuse the
@@ -522,6 +511,10 @@ export const makeRoutineStore = Effect.gen(function* () {
     transaction(
       Effect.gen(function* () {
         const connection = yield* readConnection(input.connectionId);
+        // Expire the window before checking replay identity, so an old digest
+        // cannot suppress every later delivery and prevent its own pruning.
+        yield* sql`DELETE FROM routine_deliveries WHERE connection_id=${connection.id}
+          AND received_at < ${input.now - DELIVERY_DIGEST_WINDOW_MS}`;
         const duplicate = yield* sql<{
           delivery_id: string;
         }>`SELECT delivery_id FROM routine_deliveries WHERE connection_id=${connection.id}
@@ -529,10 +522,13 @@ export const makeRoutineStore = Effect.gen(function* () {
         if (duplicate[0]) return { status: "duplicate", runs: [] } satisfies RoutineEventAdmission;
         const runs: RoutineRun[] = [];
         let detail: string | null = null;
-        if (input.summary === null) {
-          detail = `Unsupported event ${input.eventName}.`;
-        } else if (connection.status === "disabled") {
+        const ping = input.eventName === "ping" && connection.status !== "disabled";
+        if (connection.status === "disabled") {
           detail = "Connection is disabled.";
+        } else if (ping) {
+          detail = "GitHub ping received.";
+        } else if (input.summary === null) {
+          detail = `Unsupported event ${input.eventName}.`;
         } else if (input.summary.repositoryId !== connection.repositoryId) {
           detail = "Delivery names a different repository.";
         } else {
@@ -563,7 +559,7 @@ export const makeRoutineStore = Effect.gen(function* () {
           }
           if (runs.length === 0) detail = "No enabled routine matched this event.";
         }
-        const status = runs.length > 0 ? "accepted" : "ignored";
+        const status = ping || runs.length > 0 ? "accepted" : "ignored";
         const delivery: RoutineDelivery = {
           deliveryId: input.deliveryId,
           event: input.eventName,
@@ -574,12 +570,9 @@ export const makeRoutineStore = Effect.gen(function* () {
         };
         yield* sql`INSERT INTO routine_deliveries (connection_id, delivery_id, digest, status, run_id, received_at, record)
           VALUES (${connection.id}, ${delivery.deliveryId}, ${input.digest}, ${status}, ${delivery.runId}, ${input.now}, ${encodeDelivery(delivery)})`;
-        if (status === "accepted") {
-          yield* sql`DELETE FROM routine_deliveries WHERE connection_id=${connection.id}
-            AND received_at < ${input.now - DELIVERY_DIGEST_WINDOW_MS}`;
-        }
         yield* writeConnection({
           ...connection,
+          status: ping ? "verified" : connection.status,
           acceptedCount: connection.acceptedCount + (status === "accepted" ? 1 : 0),
           ignoredCount: connection.ignoredCount + (status === "ignored" ? 1 : 0),
           lastDelivery: delivery,
@@ -1303,7 +1296,6 @@ export const makeRoutineStore = Effect.gen(function* () {
     saveConnection,
     updateConnection,
     recordRejectedDelivery,
-    markConnectionVerified,
     admitEvent,
   };
 });

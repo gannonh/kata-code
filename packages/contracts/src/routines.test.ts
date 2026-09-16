@@ -9,6 +9,7 @@ import {
   RoutineDraftGenerationInput,
   RoutineDraftGenerationResult,
   RoutineError,
+  RoutineConnectionCreateInput,
   RoutineRun,
   ScheduleTrigger,
   isScheduleTrigger,
@@ -208,5 +209,18 @@ describe("routine trigger union", () => {
     });
     expect(run.source).toBe("github");
     expect(run.sourceUrl).toBe("https://github.com/acme/widgets/pull/7");
+  });
+});
+
+describe("routine connection identifiers", () => {
+  const decodeCreateInput = Schema.decodeUnknownSync(RoutineConnectionCreateInput);
+
+  it("accepts the client identifier shape and rejects path-like values", () => {
+    expect(decodeCreateInput({ id: " connection_1-abc ", repository: "acme/widgets" }).id).toBe(
+      "connection_1-abc",
+    );
+    for (const id of ["../escape", "connection/secret", "connection.with.dot", "a".repeat(129)]) {
+      expect(() => decodeCreateInput({ id, repository: "acme/widgets" })).toThrow();
+    }
   });
 });

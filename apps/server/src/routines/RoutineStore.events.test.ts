@@ -77,6 +77,23 @@ const storeLayer = Layer.mergeAll(
 );
 
 it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
+  it.effect("refuses to replace an existing connection with a reused id", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const original = { ...connection, id: RoutineConnectionId.make("connection-collision") };
+      yield* store.saveConnection(original);
+      const result = yield* store
+        .saveConnection({
+          ...original,
+          environmentId: EnvironmentId.make("different-environment"),
+          repositoryId: 99,
+        })
+        .pipe(Effect.result);
+      assert.equal(result._tag, "Failure");
+      assert.deepEqual(yield* store.getConnection(environmentId, original.id), original);
+    }),
+  );
+
   it.effect("never selects an event routine as due and rejects unknown connections", () =>
     Effect.gen(function* () {
       const store = yield* RoutineStore;
@@ -282,6 +299,40 @@ it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
         now: 10_000 + 8 * DAY + 1,
       });
       assert.equal(again.status, "accepted");
+    }),
+  );
+
+  it.effect("expires a digest after seven days without requiring an intervening delivery", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const id = RoutineConnectionId.make("connection-expired-digest");
+      yield* store.saveConnection({ ...connection, id });
+      yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-expired-digest"),
+          expectedRevision: 0,
+          configuration: {
+            ...configuration,
+            trigger: { ...configuration.trigger, connectionId: id },
+          },
+        },
+        1000,
+      );
+      yield* store.admitEvent({
+        connectionId: id,
+        ...prOpened(1, "digest-first"),
+        digest: "same-body",
+        now: 10000,
+      });
+      const replay = yield* store.admitEvent({
+        connectionId: id,
+        ...prOpened(1, "digest-expired"),
+        digest: "same-body",
+        now: 10000 + 8 * DAY,
+      });
+      assert.equal(replay.status, "accepted");
+      assert.equal(replay.runs.length, 1);
     }),
   );
 });

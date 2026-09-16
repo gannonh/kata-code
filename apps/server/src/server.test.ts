@@ -1168,6 +1168,7 @@ const buildAppUnderTest = (options?: {
             CloudManagedEndpointRuntime.CloudManagedEndpointRuntime,
             CloudManagedEndpointRuntime.CloudManagedEndpointRuntime.of({
               applyConfig: () => Effect.succeed({ status: "disabled" }),
+              getStatus: Effect.succeed({ status: "disabled" }),
               ...options?.layers?.cloudManagedEndpointRuntime,
             }),
           ),
@@ -1820,7 +1821,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         Effect.tap(() => Deferred.succeed(completed, undefined)),
         Effect.forkChild,
       );
-      const body = new TextEncoder().encode(encodeTestJson({ zen: "ready" }));
+      const body = new TextEncoder().encode(
+        encodeTestJson({ repository: { id: 42 }, zen: "ready" }),
+      );
       const response = yield* HttpClient.execute(
         HttpClientRequest.post(routineWebhookCallbackPath(connectionId)).pipe(
           HttpClientRequest.setHeaders({
@@ -1842,9 +1845,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.isTrue(yield* Deferred.isDone(completed));
     }).pipe(
       Effect.provide(
-        RoutineStore.RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+        Layer.mergeAll(
+          RoutineStore.RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+          NodeHttpServer.layerTest,
+        ),
       ),
-      Effect.provide(NodeHttpServer.layerTest),
     ),
   );
 

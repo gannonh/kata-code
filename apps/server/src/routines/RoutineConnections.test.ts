@@ -1,3 +1,4 @@
+import * as NodeCrypto from "node:crypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { EnvironmentId, RoutineConnectionId, RoutineError } from "@kata-sh/code-contracts";
@@ -11,6 +12,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
+import * as CloudManagedEndpointRuntime from "../cloud/ManagedEndpointRuntime.ts";
 import * as ServerConfig from "../config.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
@@ -104,10 +106,19 @@ const githubLayer = Layer.mock(GitHubCli.GitHubCli)({
 });
 const configLayer = ServerConfig.layerTest(process.cwd(), { prefix: "t3-routine-connections-" });
 const secretsLayer = ServerSecretStore.layer.pipe(Layer.provide(configLayer));
+const endpointRuntimeLayer = Layer.succeed(
+  CloudManagedEndpointRuntime.CloudManagedEndpointRuntime,
+  CloudManagedEndpointRuntime.CloudManagedEndpointRuntime.of({
+    applyConfig: () =>
+      Effect.succeed({ status: "running", providerKind: "cloudflare_tunnel", pid: 1 }),
+    getStatus: Effect.succeed({ status: "running", providerKind: "cloudflare_tunnel", pid: 1 }),
+  }),
+);
 const layer = RoutineConnectionsLive.pipe(
   Layer.provideMerge(RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory))),
   Layer.provideMerge(secretsLayer),
   Layer.provide(githubLayer),
+  Layer.provide(endpointRuntimeLayer),
   Layer.provideMerge(configLayer),
   Layer.provide(NodeServices.layer),
 );
@@ -164,7 +175,12 @@ it.layer(layer)("RoutineConnections", (it) => {
       assert.equal(payload.config.url, connection.callbackUrl);
       const stored = yield* secrets.get(routineConnectionSecretName(id));
       assert.isTrue(Option.isSome(stored));
-      assert.equal(Buffer.from(Option.getOrThrow(stored)).toString("hex"), payload.config.secret);
+      const storedSecret = Option.getOrThrow(stored);
+      assert.equal(new TextDecoder().decode(storedSecret), payload.config.secret);
+      const body = Buffer.from('{"provider":"github"}');
+      const providerSignature = `sha256=${NodeCrypto.createHmac("sha256", payload.config.secret).update(body).digest("hex")}`;
+      const localSignature = `sha256=${NodeCrypto.createHmac("sha256", storedSecret).update(body).digest("hex")}`;
+      assert.equal(localSignature, providerSignature);
       assert.isFalse(
         calls.some((call) => call.args.some((arg) => arg.includes(payload.config.secret))),
       );
@@ -200,7 +216,14 @@ it.layer(layer)("RoutineConnections", (it) => {
       yield* connections.create({ environmentId, id, repository: "acme/widgets" });
       const verifying = yield* connections.verify({ environmentId, id }).pipe(Effect.forkChild);
       yield* TestClock.adjust("600 millis");
-      yield* store.markConnectionVerified(id, "ping-1", 5_000);
+      yield* store.admitEvent({
+        connectionId: id,
+        deliveryId: "ping-1",
+        digest: "ping-1-digest",
+        eventName: "ping",
+        summary: null,
+        now: 5_000,
+      });
       yield* TestClock.adjust("600 millis");
       const verified = yield* Fiber.join(verifying);
       assert.equal(verified.status, "verified");
