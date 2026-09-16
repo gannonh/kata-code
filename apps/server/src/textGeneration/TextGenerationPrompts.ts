@@ -369,9 +369,7 @@ export function buildRoutineDraftPrompt(input: RoutineDraftPromptInput) {
     ? input.projects.map((project) => `- ${project.id}: ${project.title}`).join("\n")
     : "(No projects are available.)";
   const modelList = input.availableModels.length
-    ? input.availableModels
-        .map((model) => `- ${model.instanceId}:${model.model}: ${model.name}`)
-        .join("\n")
+    ? JSON.stringify(input.availableModels, null, 2)
     : "(No execution models are available.)";
   const currentDraft = input.currentDraft
     ? JSON.stringify({
@@ -392,8 +390,8 @@ export function buildRoutineDraftPrompt(input: RoutineDraftPromptInput) {
     "- instruction is the prompt that will run later; keep it explicit and actionable.",
     "- projectId must be one of the available project IDs below. If the user names a project absent from that list, return draft:null and ask them to choose an existing project; never substitute the target project.",
     "- modelSelection is the model that will execute the saved routine. Keep the current routine model unless the user explicitly asks to change it; the generation model is separate.",
-    "- The execution models list shows lines as `instanceId:model: Display Name`. Put the text before the first colon into modelSelection.instanceId and the text between the first and second colons into modelSelection.model. Never copy the Display Name and never include a colon in either field.",
-    `- For a new draft, use the first available routine execution model (${input.availableModels[0]?.instanceId ?? "none"}:${input.availableModels[0]?.model ?? "none"}) unless the user explicitly requests another execution model. Do not change it merely to match the generation model.`,
+    "- Copy modelSelection.instanceId and modelSelection.model verbatim from one entry in the execution models list. Never copy the display name and never paraphrase either field.",
+    "- For a new draft, use the first entry in the execution models list unless the user explicitly requests another execution model. Do not change it merely to match the generation model.",
     "- trigger must describe a schedule only: daily, weekdays, weekly, or a valid five-field cron expression with an IANA timezone.",
     "- Do not create event triggers, GitHub triggers, webhooks, or one-off runs. For these requests return draft:null and explain that only schedules are supported.",
     "- If the request is ambiguous or does not clearly describe a schedule, set draft to null and ask one concise clarification in assistantMessage. Never encode a clarification as an executable instruction.",

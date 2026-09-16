@@ -86,7 +86,11 @@ describe("buildRoutineDraftPrompt", () => {
     expect(result.prompt).toContain("exactly these keys: draft, assistantMessage");
     expect(result.prompt).toContain("Do not return runtimeMode, workspace");
     expect(result.prompt).toContain("project-1: Kata Code");
-    expect(result.prompt).toContain("codex:gpt-6-astra: GPT-6 Astra");
+    expect(result.prompt).toContain('"instanceId": "codex"');
+    expect(result.prompt).toContain('"model": "gpt-6-astra"');
+    expect(result.prompt).toContain(
+      "Copy modelSelection.instanceId and modelSelection.model verbatim",
+    );
     expect(result.outputSchema).toBeDefined();
   });
 });
