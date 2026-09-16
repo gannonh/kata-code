@@ -100,6 +100,8 @@ const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
 
 type RoutineWithOwner = Routine & {
   readonly ownerLabel: string;
+  /** The environment whose library query returned this row, which may differ from the routine payload after a state copy. */
+  readonly servedBy: EnvironmentId;
   readonly connectionPhase: string;
 };
 
@@ -224,6 +226,7 @@ function RoutineEnvironmentRows({
         routines: query.data.map((routine) => ({
           ...routine,
           ownerLabel,
+          servedBy: environmentId,
           connectionPhase,
         })),
       });
@@ -1507,7 +1510,7 @@ export function RoutinesPage() {
       : null);
   const selectedEnvironment = environments.find(
     (environment) =>
-      environment.environmentId === (draft?.environmentId ?? selectedRoutine?.environmentId),
+      environment.environmentId === (selectedRoutine?.servedBy ?? draft?.environmentId),
   );
   const selectedProviders = useAtomValue(
     serverEnvironment.providersValueAtom(
@@ -1705,6 +1708,7 @@ export function RoutinesPage() {
         (editorRoutine?.id === routine.id ? editorRoutine : undefined);
       const replacement: RoutineWithOwner = {
         ...routine,
+        servedBy: owner?.servedBy ?? routine.environmentId,
         ownerLabel: owner?.ownerLabel ?? "Environment",
         connectionPhase: owner?.connectionPhase ?? "connected",
       };
@@ -1716,6 +1720,7 @@ export function RoutinesPage() {
     });
     setEditorRoutine((previous) => ({
       ...routine,
+      servedBy: previous?.id === routine.id ? previous.servedBy : routine.environmentId,
       ownerLabel: previous?.id === routine.id ? previous.ownerLabel : "Environment",
       connectionPhase: previous?.id === routine.id ? previous.connectionPhase : "connected",
     }));

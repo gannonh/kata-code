@@ -37,7 +37,8 @@ const testState = vi.hoisted(() => ({
       ],
     },
   ],
-  listData: [] as const,
+  listByEnvironment: {} as Record<string, ReadonlyArray<Record<string, unknown>>>,
+  emptyRoutineList: [] as ReadonlyArray<Record<string, unknown>>,
   connectionsData: [] as Array<Record<string, unknown>>,
   metadataData: {
     repositories: [] as Array<{ nameWithOwner: string; defaultBranch: string }>,
@@ -50,7 +51,6 @@ const testState = vi.hoisted(() => ({
     },
   },
   queries: {
-    list: Symbol("list"),
     connections: Symbol("connections"),
     preview: Symbol("preview"),
     metadata: Symbol("metadata"),
@@ -77,7 +77,10 @@ vi.mock("../../state/vcs", () => ({
 }));
 vi.mock("../../state/routines", () => ({
   routineEnvironment: {
-    list: () => testState.queries.list,
+    list: (target: { environmentId: string }) => ({
+      kind: "list",
+      environmentId: target.environmentId,
+    }),
     connections: () => testState.queries.connections,
     preview: () => testState.queries.preview,
     gitHubMetadata: () => testState.queries.metadata,
@@ -96,9 +99,15 @@ vi.mock("../../state/use-atom-command", () => ({
 }));
 vi.mock("../../state/query", () => ({
   useEnvironmentQuery: (query: unknown) => {
-    if (query === testState.queries.list) {
+    if (
+      typeof query === "object" &&
+      query !== null &&
+      (query as { kind?: unknown }).kind === "list"
+    ) {
       return {
-        data: testState.listData,
+        data:
+          testState.listByEnvironment[(query as { environmentId: string }).environmentId] ??
+          testState.emptyRoutineList,
         error: null,
         isPending: false,
         isSuccess: true,
@@ -196,6 +205,57 @@ async function openNewRoutineEditor(): Promise<ReactTestRenderer> {
   return current;
 }
 
+function routineFixture(input: {
+  id: string;
+  environmentId: string;
+  name: string;
+  state?: "enabled" | "paused";
+}): Record<string, unknown> {
+  return {
+    id: input.id,
+    environmentId: input.environmentId,
+    revision: 1,
+    configuration: {
+      name: input.name,
+      instruction: "Reply with exactly: routine-ok",
+      projectId: "project-1",
+      modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+      runtimeMode: "approval-required",
+      workspace: { kind: "shared", directory: "/tmp/widgets" },
+      trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
+    },
+    state: input.state ?? "enabled",
+    nextDueAt: "2026-09-17T09:00:00.000Z",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+function withEnvironmentPhases(secondPhase: string): void {
+  testState.environments = [
+    { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
+    { environmentId: "environment-2", label: "Remote", connection: { phase: secondPhase } },
+  ];
+}
+
+function withSingleEnvironment(): void {
+  testState.environments = [
+    { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
+  ];
+}
+
+async function openRoutineEditor(name: string): Promise<ReactTestRenderer> {
+  let renderer: ReactTestRenderer;
+  await act(async () => {
+    renderer = create(<RoutinesPage />);
+  });
+  const current = renderer!;
+  await act(async () => {
+    buttonWithText(current, name).props.onClick?.();
+  });
+  return current;
+}
+
 describe("RoutinesPage GitHub trigger setup", () => {
   let renderer: ReactTestRenderer | undefined;
 
@@ -204,6 +264,8 @@ describe("RoutinesPage GitHub trigger setup", () => {
     testState.command.mockReset();
     testState.connectionsData.length = 0;
     testState.metadataData.repository = null;
+    testState.listByEnvironment = {};
+    withSingleEnvironment();
   });
 
   afterEach(async () => {
@@ -493,5 +555,188 @@ describe("RoutinesPage GitHub trigger setup", () => {
       event: "issue_opened",
       includeDrafts: false,
     });
+  });
+});
+
+describe("RoutinesPage offline environments", () => {
+  let renderer: ReactTestRenderer | undefined;
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    testState.command.mockReset();
+    testState.connectionsData.length = 0;
+    testState.metadataData.repository = null;
+    testState.listByEnvironment = {};
+    withEnvironmentPhases("offline");
+  });
+
+  afterEach(async () => {
+    await act(async () => renderer?.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it("disables mutations for a routine a disconnected environment serves", async () => {
+    testState.listByEnvironment = {
+      "environment-2": [
+        routineFixture({
+          id: "routine-shared",
+          environmentId: "environment-1",
+          name: "Remote routine",
+        }),
+      ],
+    };
+
+    renderer = await openRoutineEditor("Remote routine");
+
+    expect(nodeText(buttonWithText(renderer, "Remote routine"))).toContain("Offline");
+    expect(buttonWithText(renderer, "Test run").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Pause").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Delete").props.disabled).toBe(true);
+  });
+
+  it("disables Resume for a paused routine a disconnected environment serves", async () => {
+    testState.listByEnvironment = {
+      "environment-2": [
+        routineFixture({
+          id: "routine-paused",
+          environmentId: "environment-1",
+          name: "Remote paused",
+          state: "paused",
+        }),
+      ],
+    };
+
+    renderer = await openRoutineEditor("Remote paused");
+
+    expect(buttonWithText(renderer, "Resume").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Delete").props.disabled).toBe(true);
+  });
+
+  it("re-enables mutations when the environment reconnects without a reload", async () => {
+    testState.listByEnvironment = {
+      "environment-2": [
+        routineFixture({
+          id: "routine-shared",
+          environmentId: "environment-1",
+          name: "Remote routine",
+        }),
+      ],
+    };
+    renderer = await openRoutineEditor("Remote routine");
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
+
+    withEnvironmentPhases("connected");
+    await act(async () => {
+      renderer!.update(<RoutinesPage />);
+    });
+
+    expect(buttonWithText(renderer, "Test run").props.disabled).toBe(false);
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(false);
+    expect(buttonWithText(renderer, "Pause").props.disabled).toBe(false);
+    expect(buttonWithText(renderer, "Delete").props.disabled).toBe(false);
+  });
+
+  it("disables mutations when the environment disconnects while the editor is open", async () => {
+    withEnvironmentPhases("connected");
+    testState.listByEnvironment = {
+      "environment-2": [
+        routineFixture({
+          id: "routine-shared",
+          environmentId: "environment-1",
+          name: "Remote routine",
+        }),
+      ],
+    };
+    renderer = await openRoutineEditor("Remote routine");
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(false);
+
+    withEnvironmentPhases("offline");
+    await act(async () => {
+      renderer!.update(<RoutinesPage />);
+    });
+
+    expect(buttonWithText(renderer, "Test run").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Pause").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Delete").props.disabled).toBe(true);
+  });
+
+  it("keeps the offline gate after saving a routine a disconnected environment serves", async () => {
+    withEnvironmentPhases("connected");
+    testState.listByEnvironment = {
+      "environment-2": [
+        routineFixture({
+          id: "routine-shared",
+          environmentId: "environment-1",
+          name: "Remote routine",
+        }),
+      ],
+    };
+    testState.command.mockImplementation(async () => ({
+      _tag: "Success",
+      value: routineFixture({
+        id: "routine-shared",
+        environmentId: "environment-1",
+        name: "Remote routine",
+      }),
+    }));
+    renderer = await openRoutineEditor("Remote routine");
+    await act(async () => {
+      buttonWithText(renderer!, "Save").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    withEnvironmentPhases("offline");
+    await act(async () => {
+      renderer!.update(<RoutinesPage />);
+    });
+
+    expect(buttonWithText(renderer, "Test run").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Delete").props.disabled).toBe(true);
+  });
+
+  it("keeps the offline gate when an unavailable environment drops its rows", async () => {
+    testState.listByEnvironment = {
+      "environment-2": [
+        routineFixture({
+          id: "routine-shared",
+          environmentId: "environment-1",
+          name: "Remote routine",
+        }),
+      ],
+    };
+    renderer = await openRoutineEditor("Remote routine");
+
+    testState.listByEnvironment = {};
+    await act(async () => {
+      renderer!.update(<RoutinesPage />);
+    });
+
+    expect(buttonWithText(renderer, "Test run").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
+    expect(buttonWithText(renderer, "Delete").props.disabled).toBe(true);
+  });
+
+  it("keeps a connected environment's controls enabled", async () => {
+    testState.listByEnvironment = {
+      "environment-1": [
+        routineFixture({
+          id: "routine-local",
+          environmentId: "environment-1",
+          name: "Local routine",
+        }),
+      ],
+    };
+
+    renderer = await openRoutineEditor("Local routine");
+
+    expect(buttonWithText(renderer, "Test run").props.disabled).toBe(false);
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(false);
+    expect(buttonWithText(renderer, "Pause").props.disabled).toBe(false);
+    expect(buttonWithText(renderer, "Delete").props.disabled).toBe(false);
   });
 });
