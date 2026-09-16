@@ -55,6 +55,11 @@ import type { ProviderDriver, ProviderInstance } from "../ProviderDriver.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
+  codexApiKeyFromEnvironment,
+  managedCodexAuthHome,
+  writeCodexApiKeyAuth,
+} from "../providerAuthMode.ts";
+import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
@@ -134,8 +139,18 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const modelManifest = yield* ModelManifest.ModelManifest;
+      const serverConfig = yield* ServerConfig;
       const processEnv = mergeProviderInstanceEnvironment(environment);
-      const homeLayout = yield* resolveCodexHomeLayout(config);
+      const codexApiKey = codexApiKeyFromEnvironment(processEnv);
+      const managedAuthHomePath =
+        codexApiKey === undefined
+          ? undefined
+          : managedCodexAuthHome(serverConfig.baseDir, instanceId);
+      const configWithAuth: CodexSettings =
+        managedAuthHomePath !== undefined && config.shadowHomePath.trim().length === 0
+          ? { ...config, shadowHomePath: managedAuthHomePath }
+          : config;
+      const homeLayout = yield* resolveCodexHomeLayout(configWithAuth);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
       const stampIdentity = withInstanceIdentity({
         instanceId,
@@ -155,6 +170,26 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             }),
         ),
       );
+      if (
+        codexApiKey !== undefined &&
+        managedAuthHomePath !== undefined &&
+        homeLayout.effectiveHomePath === pathService.resolve(managedAuthHomePath)
+      ) {
+        yield* writeCodexApiKeyAuth({
+          homePath: homeLayout.effectiveHomePath,
+          apiKey: codexApiKey,
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: "Could not write the Codex API-key auth file.",
+                cause,
+              }),
+          ),
+        );
+      }
       const effectiveConfig = {
         ...config,
         enabled,
