@@ -261,10 +261,19 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateRoutineDraft: TextGeneration.TextGeneration["Service"]["generateRoutineDraft"] =
+    Effect.fn("GrokTextGeneration.generateRoutineDraft")(function* (_input) {
+      return yield* new TextGenerationError({
+        operation: "generateRoutineDraft",
+        detail: "Routine draft generation is unsupported by Grok.",
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateRoutineDraft,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

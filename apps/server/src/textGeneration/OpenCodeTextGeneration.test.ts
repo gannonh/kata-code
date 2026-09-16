@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
@@ -20,28 +21,48 @@ const runtimeMock = {
     startCalls: [] as string[],
     promptUrls: [] as string[],
     promptParts: [] as ReadonlyArray<unknown>[],
+    promptInputs: [] as Array<Record<string, unknown>>,
     authHeaders: [] as Array<string | null>,
     closeCalls: [] as string[],
     sessionCreateCalls: 0,
+    sessionCreateInputs: [] as Array<Record<string, unknown>>,
+    sessionCreateStarted: false,
+    sessionCreatePending: false,
+    sessionCreateSignalProvided: false,
+    resolvePendingSession: undefined as (() => void) | undefined,
+    sessionAbortCalls: [] as string[],
+    sessionDeleteCalls: [] as string[],
     connectionError: undefined as Error | undefined,
     sessionCreateError: undefined as unknown,
     sessionResult: undefined as { data?: { id: string } } | undefined,
     promptRequestError: undefined as unknown,
+    promptStarted: false,
+    promptNever: false,
     promptResult: undefined as
-      | { data?: { info?: { error?: unknown }; parts?: Array<unknown> } }
+      | { data?: { info?: { error?: unknown; structured?: unknown }; parts?: Array<unknown> } }
       | undefined,
   },
   reset() {
     this.state.startCalls.length = 0;
     this.state.promptUrls.length = 0;
     this.state.promptParts.length = 0;
+    this.state.promptInputs.length = 0;
     this.state.authHeaders.length = 0;
     this.state.closeCalls.length = 0;
     this.state.sessionCreateCalls = 0;
+    this.state.sessionCreateInputs.length = 0;
+    this.state.sessionCreateStarted = false;
+    this.state.sessionCreatePending = false;
+    this.state.sessionCreateSignalProvided = false;
+    this.state.resolvePendingSession = undefined;
+    this.state.sessionAbortCalls.length = 0;
+    this.state.sessionDeleteCalls.length = 0;
     this.state.connectionError = undefined;
     this.state.sessionCreateError = undefined;
     this.state.sessionResult = undefined;
     this.state.promptRequestError = undefined;
+    this.state.promptStarted = false;
+    this.state.promptNever = false;
     this.state.promptResult = undefined;
   },
 };
@@ -94,21 +115,59 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
   createOpenCodeSdkClient: ({ baseUrl, serverPassword }) =>
     ({
       session: {
-        create: async () => {
+        create: async (
+          input: Record<string, unknown>,
+          options?: { readonly signal?: AbortSignal },
+        ) => {
           runtimeMock.state.sessionCreateCalls += 1;
+          runtimeMock.state.sessionCreateInputs.push(input);
+          runtimeMock.state.sessionCreateStarted = true;
+          runtimeMock.state.sessionCreateSignalProvided = options?.signal !== undefined;
           if (runtimeMock.state.sessionCreateError !== undefined) {
             throw runtimeMock.state.sessionCreateError;
           }
-          return runtimeMock.state.sessionResult ?? { data: { id: `${baseUrl}/session` } };
+          const session = runtimeMock.state.sessionResult ?? { data: { id: `${baseUrl}/session` } };
+          if (runtimeMock.state.sessionCreatePending) {
+            return await new Promise<typeof session>((resolve) => {
+              runtimeMock.state.resolvePendingSession = () => resolve(session);
+            });
+          }
+          return session;
         },
-        prompt: async (input: { readonly parts: ReadonlyArray<unknown> }) => {
+        abort: async ({ sessionID }: { readonly sessionID: string }) => {
+          runtimeMock.state.sessionAbortCalls.push(sessionID);
+          return { data: {} };
+        },
+        delete: async ({ sessionID }: { readonly sessionID: string }) => {
+          runtimeMock.state.sessionDeleteCalls.push(sessionID);
+          return { data: {} };
+        },
+        prompt: async (
+          input: {
+            readonly parts: ReadonlyArray<unknown>;
+            readonly [key: string]: unknown;
+          },
+          options?: { readonly signal?: AbortSignal },
+        ) => {
+          runtimeMock.state.promptStarted = true;
           runtimeMock.state.promptUrls.push(baseUrl);
           runtimeMock.state.promptParts.push(input.parts);
+          runtimeMock.state.promptInputs.push(input as Record<string, unknown>);
           runtimeMock.state.authHeaders.push(
             serverPassword ? `Basic ${btoa(`opencode:${serverPassword}`)}` : null,
           );
           if (runtimeMock.state.promptRequestError !== undefined) {
             throw runtimeMock.state.promptRequestError;
+          }
+          if (runtimeMock.state.promptNever) {
+            return await new Promise<never>((_resolve, reject) => {
+              const abort = () => reject(new Error("prompt aborted"));
+              if (options?.signal?.aborted) {
+                abort();
+              } else {
+                options?.signal?.addEventListener("abort", abort, { once: true });
+              }
+            });
           }
           return (
             runtimeMock.state.promptResult ?? {
@@ -151,6 +210,21 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
 const DEFAULT_TEST_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("opencode"),
   model: "openai/gpt-5",
+};
+const OPENCODE_ROUTINE_OUTPUT = {
+  draft: {
+    name: "Weekday brief",
+    instruction: "Summarize repository changes.",
+    projectId: "project-1",
+    modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+    trigger: { kind: "weekdays", time: "09:00", timezone: "UTC" },
+  },
+  assistantMessage: "I drafted a weekday brief.",
+};
+const OPENCODE_ROUTINE_INPUT = {
+  cwd: process.cwd(),
+  prompt: "Return one JSON object for the scheduled routine draft.",
+  modelSelection: DEFAULT_TEST_MODEL_SELECTION,
 };
 const DEFAULT_COMMIT_MESSAGE_INPUT = {
   cwd: process.cwd(),
@@ -270,6 +344,155 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
           expect.objectContaining({ type: "text" }),
           expect.objectContaining({ type: "file", filename: "screenshot.png" }),
         ]);
+      }),
+    ),
+  );
+
+  it.effect("generates a strict routine draft with no tools and cleans up its session", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: {
+            info: { structured: OPENCODE_ROUTINE_OUTPUT },
+            parts: [],
+          },
+        };
+
+        const generated = yield* textGeneration.generateRoutineDraft(OPENCODE_ROUTINE_INPUT);
+        expect(generated).toEqual(OPENCODE_ROUTINE_OUTPUT);
+        expect(runtimeMock.state.sessionCreateInputs[0]).toMatchObject({
+          permission: [{ permission: "*", pattern: "*", action: "deny" }],
+        });
+        expect(runtimeMock.state.promptInputs[0]).toMatchObject({
+          tools: { "*": false },
+          format: { type: "json_schema", retryCount: 1 },
+        });
+        expect(runtimeMock.state.promptInputs[0]).not.toHaveProperty("agent");
+        expect((runtimeMock.state.promptInputs[0]?.format as { schema?: unknown }).schema).toEqual(
+          expect.objectContaining({ type: "object" }),
+        );
+        expect(runtimeMock.state.sessionAbortCalls).toEqual(["http://127.0.0.1:4301/session"]);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual(["http://127.0.0.1:4301/session"]);
+      }),
+    ),
+  );
+
+  it.effect("rejects permission and workspace fields in a routine draft", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: {
+            info: {
+              structured: {
+                ...OPENCODE_ROUTINE_OUTPUT,
+                draft: {
+                  ...OPENCODE_ROUTINE_OUTPUT.draft,
+                  runtimeMode: "full-access",
+                  workspace: { kind: "shared", directory: process.cwd() },
+                },
+              },
+            },
+            parts: [],
+          },
+        };
+
+        const error = yield* textGeneration
+          .generateRoutineDraft(OPENCODE_ROUTINE_INPUT)
+          .pipe(Effect.flip);
+        expect(error._tag).toBe("TextGenerationError");
+        expect(error.operation).toBe("generateRoutineDraft");
+        expect(error.detail).toMatch(/invalid structured output/i);
+      }),
+    ),
+  );
+
+  it.effect("accepts a clarification routine response", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: {
+            info: {
+              structured: {
+                draft: null,
+                assistantMessage: "Which project should own this routine?",
+              },
+            },
+            parts: [],
+          },
+        };
+
+        const generated = yield* textGeneration.generateRoutineDraft(OPENCODE_ROUTINE_INPUT);
+        expect(generated).toEqual({
+          draft: null,
+          assistantMessage: "Which project should own this routine?",
+        });
+      }),
+    ),
+  );
+
+  it.effect("fails closed when OpenCode returns a non-structured tool part", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptResult = {
+          data: {
+            info: { structured: OPENCODE_ROUTINE_OUTPUT },
+            parts: [{ type: "tool", tool: "shell" }],
+          },
+        };
+
+        const error = yield* textGeneration
+          .generateRoutineDraft(OPENCODE_ROUTINE_INPUT)
+          .pipe(Effect.flip);
+        expect(error._tag).toBe("TextGenerationError");
+        expect(error.operation).toBe("generateRoutineDraft");
+        expect(error.detail).toMatch(/tool work/i);
+      }),
+    ),
+  );
+
+  it.effect("aborts and deletes a routine session when the caller cancels", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.promptNever = true;
+        const child = yield* textGeneration
+          .generateRoutineDraft(OPENCODE_ROUTINE_INPUT)
+          .pipe(Effect.forkChild);
+        for (;;) {
+          if (runtimeMock.state.promptStarted) break;
+          yield* Effect.yieldNow;
+        }
+        yield* Fiber.interrupt(child);
+        expect(runtimeMock.state.sessionAbortCalls).toEqual(["http://127.0.0.1:4301/session"]);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual(["http://127.0.0.1:4301/session"]);
+      }),
+    ),
+  );
+
+  it.effect("cleans up when cancellation races pending routine session creation", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.sessionCreatePending = true;
+        runtimeMock.state.sessionResult = { data: { id: "pending-routine-session" } };
+        const child = yield* textGeneration
+          .generateRoutineDraft(OPENCODE_ROUTINE_INPUT)
+          .pipe(Effect.forkChild);
+        for (;;) {
+          if (runtimeMock.state.sessionCreateStarted) break;
+          yield* Effect.yieldNow;
+        }
+
+        const interruption = yield* Fiber.interrupt(child).pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        expect(runtimeMock.state.sessionCreateSignalProvided).toBe(true);
+        if (!runtimeMock.state.resolvePendingSession) {
+          return yield* Effect.die("Pending session create was not registered.");
+        }
+        runtimeMock.state.resolvePendingSession();
+        yield* Fiber.join(interruption);
+
+        expect(runtimeMock.state.sessionAbortCalls).toEqual(["pending-routine-session"]);
+        expect(runtimeMock.state.sessionDeleteCalls).toEqual(["pending-routine-session"]);
+        expect(runtimeMock.state.promptStarted).toBe(false);
       }),
     ),
   );

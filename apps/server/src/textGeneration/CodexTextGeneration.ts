@@ -11,6 +11,7 @@ import {
   type CodexSettings,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
   type ModelSelection,
+  RoutineDraftModelOutput,
   type ServerProviderModel,
   TextGenerationError,
 } from "@kata-sh/code-contracts";
@@ -39,6 +40,23 @@ import { codexModelFamily, getModelSelectionStringOptionValue } from "@kata-sh/c
 import { getCodexServiceTierOptionValue } from "../codexModelOptions.ts";
 
 const CODEX_TIMEOUT_MS = 180_000;
+const CODEX_ROUTINE_SAFETY_CONFIG = [
+  "features.shell_tool=false",
+  "features.unified_exec=false",
+  "features.multi_agent=false",
+  "features.apps=false",
+  "features.plugins=false",
+  "features.browser_use=false",
+  "features.computer_use=false",
+  "features.image_generation=false",
+  "features.view_image=false",
+  "features.goals=false",
+  "features.hooks=false",
+  "features.skill_search=false",
+  "features.sleep_tool=false",
+  "mcp_servers={}",
+  'web_search="disabled"',
+] as const;
 const encodeJsonString = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 /**
  * Build a Codex text-generation closure bound to a specific `CodexSettings`
@@ -103,7 +121,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateRoutineDraft",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -159,18 +178,21 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     imagePaths = [],
     cleanupPaths = [],
     modelSelection,
+    strictRoutineOutput = false,
   }: {
     operation:
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateRoutineDraft";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
     imagePaths?: ReadonlyArray<string>;
     cleanupPaths?: ReadonlyArray<string>;
     modelSelection: ModelSelection;
+    strictRoutineOutput?: boolean;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const schemaJson = yield* encodeJsonForOperation(
       operation,
@@ -180,6 +202,19 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     const outputPath = yield* writeTempFile(operation, "codex-output", "");
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
+      const workingDirectory =
+        operation === "generateRoutineDraft"
+          ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3code-codex-routine-" }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TextGenerationError({
+                    operation,
+                    detail: "Failed to create routine draft directory.",
+                    cause,
+                  }),
+              ),
+            )
+          : cwd;
       const models = yield* getModels;
       const requestedModel = modelSelection.model;
       const model =
@@ -212,6 +247,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           "--output-last-message",
           outputPath,
           ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
+          ...(strictRoutineOutput
+            ? CODEX_ROUTINE_SAFETY_CONFIG.flatMap((value) => ["--config", value])
+            : []),
           "-",
         ],
         { env: resolvedEnvironment },
@@ -221,7 +259,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...resolvedEnvironment,
           ...(codexConfig.homePath ? { CODEX_HOME: expandHomePath(codexConfig.homePath) } : {}),
         },
-        cwd,
+        cwd: workingDirectory,
         shell: spawnCommand.shell,
         stdin: {
           stream: Stream.encodeText(Stream.make(prompt)),
@@ -285,7 +323,10 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         ),
       );
 
-      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson));
+      const decodeOutput = Schema.decodeEffect(
+        Schema.fromJsonString(outputSchemaJson),
+        strictRoutineOutput ? { onExcessProperty: "error" } : undefined,
+      );
 
       return yield* fileSystem.readFileString(outputPath).pipe(
         Effect.mapError(
@@ -415,10 +456,23 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateRoutineDraft: TextGeneration.TextGeneration["Service"]["generateRoutineDraft"] =
+    Effect.fn("CodexTextGeneration.generateRoutineDraft")(function* (input) {
+      return yield* runCodexJson({
+        operation: "generateRoutineDraft",
+        cwd: input.cwd,
+        prompt: input.prompt,
+        outputSchemaJson: RoutineDraftModelOutput,
+        modelSelection: input.modelSelection,
+        strictRoutineOutput: true,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateRoutineDraft,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

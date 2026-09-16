@@ -1,5 +1,4 @@
 import {
-  DEFAULT_RUNTIME_MODE,
   ModelSelection,
   ProviderInstanceId,
   type ProviderOptionSelection,
@@ -14,7 +13,6 @@ import {
   type ScheduleTrigger,
 } from "@kata-sh/code-contracts";
 import { useAtomValue } from "@effect/atom-react";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import * as Schema from "effect/Schema";
 import type { ReactNode } from "react";
 import {
@@ -65,6 +63,7 @@ import {
   libraryRoutinesAfterChange,
   preferredWorktreeBaseBranch,
   routineDraftBaselineAfterAutomaticChange,
+  routineDraftRevisionAfterEdit,
   ROUTINE_CANCEL_HINT,
   ROUTINE_CONTROL_CLASS,
   ROUTINE_EDITOR_COLUMN_CLASS,
@@ -73,6 +72,7 @@ import {
   ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS,
   routinesLibraryEmptyKind,
 } from "./RoutinesPage.logic";
+import { RoutineChat } from "./RoutineChat";
 
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
 
@@ -1019,6 +1019,11 @@ export function RoutinesPage() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [editorRoutine, setEditorRoutine] = useState<RoutineWithOwner | null>(null);
   const [baseline, setBaseline] = useState<RoutineDraft | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatRevision, setChatRevision] = useState(0);
+  const [generationModelSelection, setGenerationModelSelection] = useState<ModelSelection | null>(
+    null,
+  );
   const newRoutineTriggerRef = useRef<HTMLButtonElement | null>(null);
   const allRoutines = useMemo(
     () => Array.from(routinesByEnvironment.values()).flatMap((load) => load.routines),
@@ -1071,7 +1076,7 @@ export function RoutinesPage() {
     setRoutinesByEnvironment((previous) => new Map(previous).set(environmentId, load));
   }, []);
 
-  const startNew = () => {
+  const startNew = (mode: "manual" | "chat" = "manual") => {
     if (connectedOwners.length === 0) {
       setCreateError("Import a project on a connected environment before creating a routine.");
       setShowMenu(false);
@@ -1079,6 +1084,9 @@ export function RoutinesPage() {
       setDraft(null);
       setEditorRoutine(null);
       setBaseline(null);
+      setChatOpen(false);
+      setGenerationModelSelection(null);
+      setChatRevision(0);
       return;
     }
     setCreateError(null);
@@ -1087,6 +1095,9 @@ export function RoutinesPage() {
     setDraft(null);
     setEditorRoutine(null);
     setBaseline(null);
+    setChatOpen(mode === "chat");
+    setGenerationModelSelection(null);
+    setChatRevision(0);
     setEditing(true);
   };
 
@@ -1102,14 +1113,34 @@ export function RoutinesPage() {
       setCreateError(null);
       setDraft(next);
       setBaseline(next.configuration);
+      setChatRevision(0);
+      if (chatOpen && generationModelSelection === null) {
+        setGenerationModelSelection(firstEnabledProviderModel(providers));
+      }
       return;
     }
     setEditing(false);
     setCreateError("Import a project on a connected environment before creating a routine.");
-  }, [draft, editing, projects, saveDraftEnvironment, selectedProviders]);
+  }, [
+    chatOpen,
+    draft,
+    editing,
+    generationModelSelection,
+    projects,
+    saveDraftEnvironment,
+    selectedProviders,
+  ]);
+
+  useEffect(() => {
+    if (!chatOpen || generationModelSelection !== null) return;
+    const firstModel = firstEnabledProviderModel(selectedProviders ?? []);
+    if (firstModel !== null) setGenerationModelSelection(firstModel);
+  }, [chatOpen, generationModelSelection, selectedProviders]);
 
   const changeOwner = (environmentId: EnvironmentId) => {
     if (!draft) return;
+    if (environmentId === draft.environmentId) return;
+    setChatRevision((revision) => revision + 1);
     setDraft({ ...draft, environmentId });
   };
 
@@ -1132,6 +1163,9 @@ export function RoutinesPage() {
       name: draft.configuration.name,
       instruction: draft.configuration.instruction,
     };
+    setChatRevision((revision) =>
+      routineDraftRevisionAfterEdit(draft.configuration, nextConfiguration, revision),
+    );
     setDraft({
       ...next,
       id: draft.id,
@@ -1156,6 +1190,9 @@ export function RoutinesPage() {
     setShowMenu(false);
     setEditorRoutine(routine);
     setBaseline(routine.configuration);
+    setChatOpen(false);
+    setGenerationModelSelection(null);
+    setChatRevision(0);
   };
 
   const cancelEditing = () => {
@@ -1165,7 +1202,24 @@ export function RoutinesPage() {
     setCreateError(null);
     setEditorRoutine(null);
     setBaseline(null);
+    setChatOpen(false);
+    setGenerationModelSelection(null);
+    setChatRevision(0);
     queueMicrotask(() => newRoutineTriggerRef.current?.focus());
+  };
+
+  const updateDraft = (next: DraftState) => {
+    if (draft !== null) {
+      setChatRevision((revision) =>
+        routineDraftRevisionAfterEdit(draft.configuration, next.configuration, revision),
+      );
+    }
+    setDraft(next);
+  };
+
+  const updateDraftConfiguration = (configuration: RoutineDraft) => {
+    if (draft === null) return;
+    updateDraft({ ...draft, configuration });
   };
 
   const ownerOffline = selectedEnvironment?.connection.phase !== "connected";
@@ -1177,6 +1231,7 @@ export function RoutinesPage() {
       configuration: routine.configuration,
     });
     setBaseline(routine.configuration);
+    setChatRevision(0);
     setSelectedKey(`${routine.environmentId}:${routine.id}`);
     setEditing(routine.state !== "deleted" || keepDeletedRoutineInEditor(routine.state));
     setRoutinesByEnvironment((previous) => {
@@ -1238,10 +1293,10 @@ export function RoutinesPage() {
               <PlusIcon className="size-4" /> New routine <ChevronDownIcon className="size-3.5" />
             </MenuTrigger>
             <MenuPopup align="end" className="w-48">
-              <MenuItem onClick={startNew}>
+              <MenuItem onClick={() => startNew("manual")}>
                 <Settings2Icon className="size-4 text-muted-foreground" /> Set up manually
               </MenuItem>
-              <MenuItem disabled>
+              <MenuItem onClick={() => startNew("chat")}>
                 <CalendarClockIcon className="size-4 text-muted-foreground" /> Create in chat
               </MenuItem>
             </MenuPopup>
@@ -1305,23 +1360,37 @@ export function RoutinesPage() {
           )}
         </div>
         {editing && draft ? (
-          <RoutineEditor
-            draft={draft}
-            routine={selectedRoutine}
-            projects={projects.filter((project) => project.environmentId === draft.environmentId)}
-            providers={selectedProviders ?? []}
-            owners={connectedOwners.map((owner) => ({
-              environmentId: owner.environmentId,
-              label: owner.label,
-            }))}
-            offline={ownerOffline === true}
-            baseline={baseline ?? draft.configuration}
-            onDraftChange={setDraft}
-            onBaselineChange={setBaseline}
-            onOwnerChange={changeOwner}
-            onSaved={updateSavedRoutine}
-            onCancel={cancelEditing}
-          />
+          <>
+            {chatOpen ? (
+              <RoutineChat
+                key={draft.id}
+                draft={draft}
+                draftRevision={chatRevision}
+                providers={selectedProviders ?? []}
+                generationModelSelection={generationModelSelection}
+                onGenerationModelChange={setGenerationModelSelection}
+                onDraftChange={updateDraftConfiguration}
+                onCancel={cancelEditing}
+              />
+            ) : null}
+            <RoutineEditor
+              draft={draft}
+              routine={selectedRoutine}
+              projects={projects.filter((project) => project.environmentId === draft.environmentId)}
+              providers={selectedProviders ?? []}
+              owners={connectedOwners.map((owner) => ({
+                environmentId: owner.environmentId,
+                label: owner.label,
+              }))}
+              offline={ownerOffline === true}
+              baseline={baseline ?? draft.configuration}
+              onDraftChange={updateDraft}
+              onBaselineChange={setBaseline}
+              onOwnerChange={changeOwner}
+              onSaved={updateSavedRoutine}
+              onCancel={cancelEditing}
+            />
+          </>
         ) : null}
       </main>
     </SidebarInset>

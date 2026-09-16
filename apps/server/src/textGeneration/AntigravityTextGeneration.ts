@@ -1,6 +1,7 @@
 import {
   type ModelSelection,
   type ProviderSetupError,
+  RoutineDraftModelOutput,
   TextGenerationError,
 } from "@kata-sh/code-contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
@@ -125,6 +126,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       readonly prompt: string;
       readonly outputSchema: S;
       readonly modelSelection: ModelSelection;
+      readonly strictRoutineOutput?: boolean;
     }) {
       const { operation } = input;
       const scope = yield* Scope.make();
@@ -290,7 +292,10 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
             detail: "Antigravity returned empty text generation output.",
           });
         }
-        const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(input.outputSchema));
+        const decodeOutput = Schema.decodeEffect(
+          Schema.fromJsonString(input.outputSchema),
+          input.strictRoutineOutput ? { onExcessProperty: "error" } : undefined,
+        );
         return yield* decodeOutput(extractJsonObject(rawResult)).pipe(
           Effect.mapError(
             (cause) =>
@@ -401,10 +406,22 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       return { title: sanitizeThreadTitle(generated.title) };
     });
 
+  const generateRoutineDraft: TextGeneration.TextGeneration["Service"]["generateRoutineDraft"] =
+    Effect.fn("AntigravityTextGeneration.generateRoutineDraft")(function* (input) {
+      return yield* runAntigravityJson({
+        operation: "generateRoutineDraft",
+        prompt: input.prompt,
+        outputSchema: RoutineDraftModelOutput,
+        modelSelection: input.modelSelection,
+        strictRoutineOutput: true,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateRoutineDraft,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

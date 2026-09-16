@@ -25,6 +25,26 @@ const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const mockAgentPath = NodePath.join(__dirname, "../../scripts/acp-mock-agent.ts");
+const CURSOR_ROUTINE_MODEL_SELECTION = createModelSelection(
+  ProviderInstanceId.make("cursor"),
+  "composer-2",
+);
+const CURSOR_ROUTINE_OUTPUT = {
+  draft: {
+    name: "Weekday brief",
+    instruction: "Summarize repository changes.",
+    projectId: "project-1",
+    modelSelection: CURSOR_ROUTINE_MODEL_SELECTION,
+    trigger: { kind: "weekdays", time: "09:00", timezone: "UTC" },
+  },
+  assistantMessage: "I drafted a weekday brief.",
+};
+
+const cursorRoutineInput = {
+  cwd: process.cwd(),
+  prompt: "Return one JSON object for the scheduled routine draft.",
+  modelSelection: CURSOR_ROUTINE_MODEL_SELECTION,
+};
 
 const CursorTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-cursor-text-generation-test-",
@@ -221,6 +241,105 @@ it.layer(CursorTextGenerationTestLayer)("CursorTextGeneration", (it) => {
 
           expect(generated.title).toBe("Trim reconnect spinner status after resume.");
         }),
+    ),
+  );
+
+  it.effect("generates a strict routine draft with no ACP capabilities", () => {
+    const requestLogDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-cursor-routine-log-"),
+    );
+    const requestLogPath = NodePath.join(requestLogDir, "requests.ndjson");
+
+    return withFakeAcpAgent(
+      {
+        T3_ACP_REQUEST_LOG_PATH: requestLogPath,
+        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify(CURSOR_ROUTINE_OUTPUT),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateRoutineDraft(cursorRoutineInput);
+          expect(generated).toEqual(CURSOR_ROUTINE_OUTPUT);
+
+          const requests = NodeFS.readFileSync(requestLogPath, "utf8")
+            .trim()
+            .split("\n")
+            .filter((line) => line.length > 0)
+            .map(
+              (line) => JSON.parse(line) as { method?: string; params?: Record<string, unknown> },
+            );
+          expect(
+            requests.find((request) => request.method === "initialize")?.params?.clientCapabilities,
+          ).toMatchObject({
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+          });
+          expect(
+            requests.some(
+              (request) =>
+                request.method === "session/set_config_option" &&
+                request.params?.configId === "model" &&
+                request.params?.value === "composer-2",
+            ),
+          ).toBe(true);
+
+          NodeFS.rmSync(requestLogDir, { recursive: true, force: true });
+        }),
+    );
+  });
+
+  it.effect("rejects permission and workspace fields in a routine draft", () =>
+    withFakeAcpAgent(
+      {
+        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+          ...CURSOR_ROUTINE_OUTPUT,
+          draft: {
+            ...CURSOR_ROUTINE_OUTPUT.draft,
+            runtimeMode: "full-access",
+            workspace: { kind: "shared", directory: process.cwd() },
+          },
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const error = yield* textGeneration
+            .generateRoutineDraft(cursorRoutineInput)
+            .pipe(Effect.flip);
+          expect(error._tag).toBe("TextGenerationError");
+          expect(error.operation).toBe("generateRoutineDraft");
+          expect(error.detail).toMatch(/invalid structured output/i);
+        }),
+    ),
+  );
+
+  it.effect("accepts a clarification routine response", () =>
+    withFakeAcpAgent(
+      {
+        T3_ACP_PROMPT_RESPONSE_TEXT: JSON.stringify({
+          draft: null,
+          assistantMessage: "Which project should own this routine?",
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateRoutineDraft(cursorRoutineInput);
+          expect(generated).toEqual({
+            draft: null,
+            assistantMessage: "Which project should own this routine?",
+          });
+        }),
+    ),
+  );
+
+  it.effect("fails closed when a routine helper emits tool work", () =>
+    withFakeAcpAgent({ T3_ACP_EMIT_TOOL_CALLS: "1" }, (textGeneration) =>
+      Effect.gen(function* () {
+        const error = yield* textGeneration
+          .generateRoutineDraft(cursorRoutineInput)
+          .pipe(Effect.flip);
+        expect(error._tag).toBe("TextGenerationError");
+        expect(error.operation).toBe("generateRoutineDraft");
+        expect(error.detail).toMatch(/tool|user input/i);
+      }),
     ),
   );
 

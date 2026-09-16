@@ -52,6 +52,13 @@ export function createRoutineEnvironmentAtoms<R, E>(
     staleTimeMs: 0,
   });
 
+  const draft = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:routines:draft",
+    tag: WS_METHODS.routinesDraft,
+    staleTimeMs: 0,
+    idleTtlMs: 0,
+  });
+
   const mutationConcurrency = {
     mode: "serial",
     key: ({ environmentId, input }: { environmentId: EnvironmentId; input: { id: string } }) =>
@@ -79,5 +86,5 @@ export function createRoutineEnvironmentAtoms<R, E>(
     },
   });
 
-  return { changes, list, get, history, preview, save, change, test };
+  return { changes, list, get, history, preview, draft, save, change, test };
 }

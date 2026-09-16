@@ -13,6 +13,7 @@ import {
   PositiveInt,
   NonNegativeInt,
 } from "./baseSchemas.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
 import { ModelSelection, RuntimeMode } from "./orchestration.ts";
 import { RoutineOwnerGeneration, RoutineProviderSubmission, RoutineRunId } from "./routineFence.ts";
 
@@ -71,6 +72,69 @@ export const RoutineDraft = Schema.Struct({
   trigger: ScheduleTrigger,
 });
 export type RoutineDraft = typeof RoutineDraft.Type;
+
+/**
+ * The only fields a text-generation provider is allowed to propose. Runtime
+ * permissions and workspace placement are owned by the user and are seeded
+ * by the server from the selected project.
+ */
+export const RoutineDraftGeneratedFields = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
+  instruction: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
+  projectId: ProjectId,
+  modelSelection: Schema.Struct({ instanceId: ProviderInstanceId, model: TrimmedNonEmptyString }),
+  trigger: ScheduleTrigger,
+});
+export type RoutineDraftGeneratedFields = typeof RoutineDraftGeneratedFields.Type;
+
+/** Structured provider output. A null draft is a clarification response. */
+export const RoutineDraftModelOutput = Schema.Struct({
+  draft: Schema.NullOr(RoutineDraftGeneratedFields),
+  assistantMessage: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
+});
+export type RoutineDraftModelOutput = typeof RoutineDraftModelOutput.Type;
+
+export const RoutineDraftConversationMessage = Schema.Struct({
+  role: Schema.Literals(["user", "assistant"]),
+  content: Schema.String.check(Schema.isMaxLength(100_000)),
+});
+export type RoutineDraftConversationMessage = typeof RoutineDraftConversationMessage.Type;
+
+/**
+ * Editor draft sent back to the assistant. Name and instruction may be
+ * mid-edit (empty) so a refinement always carries the authoritative editor
+ * state instead of discarding manual edits to blank fields.
+ */
+export const RoutineDraftConversationState = Schema.Struct({
+  name: Schema.String.check(Schema.isMaxLength(120)),
+  instruction: Schema.String.check(Schema.isMaxLength(100_000)),
+  projectId: ProjectId,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  workspace: RoutineWorkspace,
+  trigger: ScheduleTrigger,
+});
+export type RoutineDraftConversationState = typeof RoutineDraftConversationState.Type;
+
+/** Input to the conversational routine draft generator. */
+export const RoutineDraftGenerationInput = Schema.Struct({
+  message: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
+  currentDraft: Schema.NullOr(RoutineDraftConversationState),
+  draftRevision: NonNegativeInt,
+  history: Schema.Array(RoutineDraftConversationMessage).check(Schema.isMaxLength(20)),
+  projectId: ProjectId,
+  generationModelSelection: ModelSelection,
+});
+export type RoutineDraftGenerationInput = typeof RoutineDraftGenerationInput.Type;
+
+/** Full draft returned after a model turn has been validated and merged. */
+export const RoutineDraftGenerationResult = Schema.Struct({
+  /** Null when the assistant needs clarification and must leave the draft untouched. */
+  draft: Schema.NullOr(RoutineDraft),
+  assistantMessage: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
+  draftRevision: NonNegativeInt,
+});
+export type RoutineDraftGenerationResult = typeof RoutineDraftGenerationResult.Type;
 export const Routine = Schema.Struct({
   id: RoutineId,
   environmentId: EnvironmentId,

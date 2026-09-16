@@ -3,6 +3,8 @@ import {
   isProviderAvailable,
   type Routine,
   type RoutineDraft,
+  type RoutineDraftConversationMessage,
+  type RoutineDraftGenerationResult,
   type RuntimeMode,
   type ServerProvider,
   type VcsRef,
@@ -106,6 +108,104 @@ export const ROUTINE_CANCEL_HINT =
 
 export function isRoutineDraftDirty(current: RoutineDraft, baseline: RoutineDraft): boolean {
   return JSON.stringify(current) !== JSON.stringify(baseline);
+}
+
+export type RoutineDraftChatMessage = RoutineDraftConversationMessage;
+
+/** Renderable chat turn with a stable identity independent of list position. */
+export type RoutineDraftChatTurn = RoutineDraftConversationMessage & { readonly id: number };
+
+/** Increment the chat revision only when a user-visible draft value changed. */
+export function routineDraftRevisionAfterEdit(
+  previous: RoutineDraft,
+  next: RoutineDraft,
+  revision: number,
+): number {
+  return isRoutineDraftDirty(previous, next) ? revision + 1 : revision;
+}
+
+/**
+ * The server only sees an untouched default editor. Once a generation or a
+ * user edit initialized the draft, send the authoritative editor state,
+ * including mid-edit blank name or instruction fields.
+ */
+export function routineDraftForGenerationInput(
+  current: RoutineDraft,
+  initialized: boolean,
+): RoutineDraft | null {
+  return initialized ? current : null;
+}
+
+/** Keep the bounded transcript sent to the draft model. */
+export function routineDraftChatHistoryAfterTurn(
+  history: readonly RoutineDraftChatTurn[],
+  userMessage: string,
+  assistantMessage: string,
+  nextTurnId: () => number,
+): readonly RoutineDraftChatTurn[] {
+  return [
+    ...history,
+    { id: nextTurnId(), role: "user" as const, content: userMessage },
+    { id: nextTurnId(), role: "assistant" as const, content: assistantMessage },
+  ].slice(-20);
+}
+
+/** The wire transcript carries only the conversational fields. */
+export function routineDraftChatHistoryForRequest(
+  history: readonly RoutineDraftChatTurn[],
+): readonly RoutineDraftConversationMessage[] {
+  return history.map(({ role, content }) => ({ role, content }));
+}
+
+export type RoutineDraftGenerationApplyResult =
+  | {
+      readonly status: "applied" | "clarification";
+      readonly draft: RoutineDraft;
+      readonly revision: number;
+    }
+  | {
+      readonly status: "stale";
+      readonly draft: RoutineDraft;
+      readonly revision: number;
+      readonly reviewDraft: RoutineDraft;
+    };
+
+/** Merge only model-owned fields, keeping editor-owned permission settings. */
+export function mergeRoutineDraftGeneratedFields(
+  current: RoutineDraft,
+  generated: RoutineDraft,
+): RoutineDraft {
+  return {
+    ...generated,
+    runtimeMode: current.runtimeMode,
+    ...(generated.projectId === current.projectId ? { workspace: current.workspace } : {}),
+  };
+}
+
+/**
+ * Apply generated fields only after matching the revision sent with the request.
+ * Runtime mode and workspace belong to the editor and always come from it.
+ */
+export function applyRoutineDraftGenerationResponse(
+  current: RoutineDraft,
+  currentRevision: number,
+  response: RoutineDraftGenerationResult,
+): RoutineDraftGenerationApplyResult {
+  if (response.draft === null) {
+    return { status: "clarification", draft: current, revision: currentRevision };
+  }
+
+  const reviewDraft = mergeRoutineDraftGeneratedFields(current, response.draft);
+  if (response.draftRevision !== currentRevision) {
+    return {
+      status: "stale",
+      draft: current,
+      revision: currentRevision,
+      reviewDraft,
+    };
+  }
+
+  return { status: "applied", draft: reviewDraft, revision: currentRevision + 1 };
 }
 
 /** Fail closed when the themed confirm host is not registered yet (`undefined`). */

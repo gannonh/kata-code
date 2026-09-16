@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
-import { ClaudeSettings, ProviderInstanceId } from "@kata-sh/code-contracts";
+import { ClaudeSettings, ProviderInstanceId, TextGenerationError } from "@kata-sh/code-contracts";
 import { HostProcessPlatform, isHostWindows } from "@kata-sh/code-shared/hostProcess";
 import { createModelSelection } from "@kata-sh/code-shared/model";
 import * as Effect from "effect/Effect";
@@ -27,6 +27,20 @@ const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 const ClaudeTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-claude-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
+
+const ROUTINE_DRAFT_OUTPUT = {
+  draft: {
+    name: "Weekday brief",
+    instruction: "Summarize repository changes.",
+    projectId: "project-1",
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+    },
+    trigger: { kind: "weekdays", time: "09:00", timezone: "UTC" },
+  },
+  assistantMessage: "I drafted a weekday brief.",
+};
 
 // The stub behaviour lives in Node so the same implementation runs on Windows,
 // where a shebang file is not executable and would fall through to the real
@@ -260,6 +274,89 @@ function withFakeClaudeEnv<A, E, R>(
 }
 
 it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
+  it.effect("generates a strict routine draft with tools and project cwd disabled", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({ structured_output: ROUTINE_DRAFT_OUTPUT }),
+        cwdMustNotBe: process.cwd(),
+        stdinMustContain: "Return one JSON object",
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateRoutineDraft({
+            cwd: process.cwd(),
+            prompt: "Return one JSON object. Create a weekday brief at 9am.",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          });
+
+          expect(result).toEqual(ROUTINE_DRAFT_OUTPUT);
+        }),
+    ),
+  );
+
+  it.effect("rejects permission and workspace fields in a routine draft", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: {
+            ...ROUTINE_DRAFT_OUTPUT,
+            draft: {
+              ...ROUTINE_DRAFT_OUTPUT.draft,
+              runtimeMode: "full-access",
+              workspace: { kind: "shared", directory: process.cwd() },
+            },
+          },
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const error = yield* textGeneration
+            .generateRoutineDraft({
+              cwd: process.cwd(),
+              prompt: "Return one JSON object.",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+              },
+            })
+            .pipe(Effect.flip);
+
+          expect(error).toBeInstanceOf(TextGenerationError);
+          expect(error.operation).toBe("generateRoutineDraft");
+          expect(error.detail).toContain("invalid structured output");
+        }),
+    ),
+  );
+
+  it.effect("accepts a clarification routine response", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: { draft: null, assistantMessage: "Which timezone should I use?" },
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateRoutineDraft({
+            cwd: process.cwd(),
+            prompt: "Return one JSON object and ask for clarification.",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("claudeAgent"),
+              model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            },
+          });
+
+          expect(result).toEqual({
+            draft: null,
+            assistantMessage: "Which timezone should I use?",
+          });
+        }),
+    ),
+  );
+
   it.effect("forwards Claude thinking settings without passing unsupported effort", () =>
     withFakeClaudeEnv(
       {
