@@ -12,6 +12,7 @@ packages/*/dist
 .env
 .env.local
 build/
+!.opencode/skills/build/
 .logs/
 release/
 release-mock/
