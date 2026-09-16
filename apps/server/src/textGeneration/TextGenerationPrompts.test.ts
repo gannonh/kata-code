@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
+import * as Schema from "effect/Schema";
+import { RoutineDraftModelOutput } from "@kata-sh/code-contracts";
 
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildRoutineDraftPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import { normalizeCliError, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
@@ -65,6 +68,30 @@ describe("buildCommitMessagePrompt", () => {
 
     expect(result.prompt).toContain("Additional instructions:");
     expect(result.prompt).toContain("Use a terse repository-specific subject.");
+  });
+});
+
+describe("buildRoutineDraftPrompt", () => {
+  it("limits generated fields and excludes permission/workspace output", () => {
+    const result = buildRoutineDraftPrompt({
+      message: "Create a weekday summary at 9am",
+      currentDraft: null,
+      history: [],
+      projectId: "project-1",
+      projects: [{ id: "project-1", title: "Kata Code" }],
+      availableModels: [{ instanceId: "codex", model: "gpt-6-astra", name: "GPT-6 Astra" }],
+      generationModelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+    });
+
+    expect(result.prompt).toContain("exactly these keys: draft, assistantMessage");
+    expect(result.prompt).toContain("Do not return runtimeMode, workspace");
+    expect(result.prompt).toContain("project-1: Kata Code");
+    expect(result.prompt).toContain('"instanceId": "codex"');
+    expect(result.prompt).toContain('"model": "gpt-6-astra"');
+    expect(result.prompt).toContain(
+      "Copy modelSelection.instanceId and modelSelection.model verbatim",
+    );
+    expect(result.outputSchema).toBeDefined();
   });
 });
 
@@ -321,5 +348,34 @@ describe("normalizeCliError", () => {
 
     expect(result.detail).toBe("Failed to generate a commit message");
     expect(result.message).not.toContain("secret-token");
+  });
+});
+
+describe("decodeStrictRoutineDraftModelOutput", () => {
+  it("rejects permission and workspace fields from provider output", () => {
+    const output = {
+      draft: {
+        name: "Daily brief",
+        instruction: "Summarize changes",
+        projectId: "project-1",
+        modelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+        trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
+        runtimeMode: "full-access",
+        workspace: { kind: "shared", directory: "/tmp" },
+      },
+      assistantMessage: "Drafted a daily brief.",
+    };
+    const decode = Schema.decodeUnknownSync(RoutineDraftModelOutput, {
+      onExcessProperty: "error",
+    });
+    expect(() => decode(output)).toThrow(/excess property|unexpected key/i);
+  });
+
+  it("accepts an explicit clarification envelope", () => {
+    expect(
+      Schema.decodeUnknownSync(RoutineDraftModelOutput, {
+        onExcessProperty: "error",
+      })({ draft: null, assistantMessage: "Which time zone should I use?" }).draft,
+    ).toBeNull();
   });
 });

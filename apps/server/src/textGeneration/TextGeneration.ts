@@ -1,7 +1,12 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import type { ChatAttachment, ModelSelection, ProviderInstanceId } from "@kata-sh/code-contracts";
+import type {
+  ChatAttachment,
+  ModelSelection,
+  ProviderInstanceId,
+  RoutineDraftModelOutput,
+} from "@kata-sh/code-contracts";
 import { TextGenerationError } from "@kata-sh/code-contracts";
 
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
@@ -73,6 +78,15 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+export interface RoutineDraftGenerationInput {
+  cwd: string;
+  prompt: string;
+  /** The provider-selected model used for this generation turn. */
+  modelSelection: ModelSelection;
+}
+
+export interface RoutineDraftGenerationResult extends RoutineDraftModelOutput {}
+
 /**
  * TextGeneration - Service tag for commit and change request text generation.
  */
@@ -104,6 +118,11 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    /** Generate the model-owned fields of a scheduled routine draft. */
+    readonly generateRoutineDraft: (
+      input: RoutineDraftGenerationInput,
+    ) => Effect.Effect<RoutineDraftGenerationResult, TextGenerationError>;
   }
 >()("@kata-sh/code-cli/textGeneration/TextGeneration") {}
 
@@ -111,7 +130,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateRoutineDraft";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -150,6 +170,10 @@ export const makeTextGenerationFromRegistry = (
     generateThreadTitle: (input) =>
       resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+      ),
+    generateRoutineDraft: (input) =>
+      resolveInstance(registry, "generateRoutineDraft", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateRoutineDraft(input)),
       ),
   });
 

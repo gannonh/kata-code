@@ -2,10 +2,19 @@ import { describe, expect, it } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 
-import { RoutineError, ScheduleTrigger, previewRoutineSchedule } from "./routines.ts";
+import { ProjectId } from "./baseSchemas.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
+import {
+  RoutineError,
+  RoutineDraftGenerationInput,
+  RoutineDraftGenerationResult,
+  ScheduleTrigger,
+  previewRoutineSchedule,
+} from "./routines.ts";
 
 const decodeTrigger = Schema.decodeUnknownSync(ScheduleTrigger);
 const testDate = (iso: string) => DateTime.toDateUtc(DateTime.makeUnsafe(iso));
+const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6-astra" };
 
 describe("scheduled routine schedules", () => {
   it("builds a five-field expression and three upcoming local occurrences", () => {
@@ -49,5 +58,61 @@ describe("scheduled routine schedules", () => {
         testDate("2026-01-01T00:00:00.000Z"),
       ),
     ).toThrow(RoutineError);
+  });
+});
+
+const decodeDraftRequest = Schema.decodeUnknownSync(RoutineDraftGenerationInput);
+const decodeDraftResult = Schema.decodeUnknownSync(RoutineDraftGenerationResult);
+describe("routine draft generation contracts", () => {
+  it("accepts a bounded conversational request and a clarification result", () => {
+    const input = decodeDraftRequest({
+      message: "Run a weekday brief at 9am",
+      currentDraft: null,
+      draftRevision: 0,
+      history: [{ role: "user", content: "Run a weekday brief at 9am" }],
+      projectId: ProjectId.make("project-1"),
+      generationModelSelection: modelSelection,
+    });
+    expect(input.history).toHaveLength(1);
+    expect(
+      decodeDraftRequest({ ...input, history: Array.from({ length: 20 }, () => input.history[0]) })
+        .history,
+    ).toHaveLength(20);
+    expect(() =>
+      decodeDraftRequest({ ...input, history: Array.from({ length: 21 }, () => input.history[0]) }),
+    ).toThrow();
+
+    const result = decodeDraftResult({
+      draft: null,
+      assistantMessage: "Which project should own this routine?",
+      draftRevision: 0,
+    });
+    expect(result.draft).toBeNull();
+    expect(result.assistantMessage).toContain("project");
+  });
+
+  it("accepts a mid-edit current draft so refinements carry authoritative editor state", () => {
+    const input = decodeDraftRequest({
+      message: "Move it to 3pm",
+      currentDraft: {
+        name: "",
+        instruction: "",
+        projectId: ProjectId.make("project-1"),
+        modelSelection,
+        runtimeMode: "approval-required",
+        workspace: { kind: "shared", directory: "/project" },
+        trigger: { kind: "weekdays", time: "09:00", timezone: "UTC" },
+      },
+      draftRevision: 2,
+      history: [],
+      projectId: ProjectId.make("project-1"),
+      generationModelSelection: modelSelection,
+    });
+    expect(input.currentDraft?.name).toBe("");
+    expect(input.currentDraft?.trigger).toEqual({
+      kind: "weekdays",
+      time: "09:00",
+      timezone: "UTC",
+    });
   });
 });

@@ -21,6 +21,11 @@ const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 
 const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
 const mockAgentPath = NodePath.join(__dirname, "../../scripts/acp-mock-agent.ts");
+const GROK_ROUTINE_INPUT = {
+  cwd: process.cwd(),
+  prompt: "Return one JSON object for the scheduled routine draft.",
+  modelSelection: createModelSelection(ProviderInstanceId.make("grok"), "grok-build"),
+};
 
 const GrokTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-grok-text-generation-test-",
@@ -67,6 +72,26 @@ function readJsonRpcRequests(
 }
 
 it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
+  it.effect("rejects routine drafts before spawning the unsupported Grok ACP", () => {
+    const requestLogDir = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "t3code-grok-routine-log-"),
+    );
+    const requestLogPath = NodePath.join(requestLogDir, "requests.ndjson");
+
+    return withFakeAcpGrok({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }, (textGeneration) =>
+      Effect.gen(function* () {
+        const error = yield* textGeneration
+          .generateRoutineDraft(GROK_ROUTINE_INPUT)
+          .pipe(Effect.flip);
+        expect(error._tag).toBe("TextGenerationError");
+        expect(error.operation).toBe("generateRoutineDraft");
+        expect(error.detail).toMatch(/unsupported by Grok/i);
+        expect(NodeFS.existsSync(requestLogPath)).toBe(false);
+        NodeFS.rmSync(requestLogDir, { recursive: true, force: true });
+      }),
+    );
+  });
+
   it.effect("uses ACP with disabled tool capabilities and forwards the requested model id", () => {
     const requestLogDir = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "t3code-grok-text-log-"),

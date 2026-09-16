@@ -1,11 +1,18 @@
 import * as Crypto from "effect/Crypto";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import { AcpRequestError } from "effect-acp/errors";
 
-import { type CursorSettings, type ModelSelection } from "@kata-sh/code-contracts";
+import {
+  type CursorSettings,
+  type ModelSelection,
+  RoutineDraftModelOutput,
+} from "@kata-sh/code-contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
 import { extractJsonObject } from "@kata-sh/code-shared/schemaJson";
 
@@ -40,6 +47,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
   environment?: NodeJS.ProcessEnv,
 ) {
   const crypto = yield* Crypto.Crypto;
+  const fileSystem = yield* FileSystem.FileSystem;
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const resolvedEnvironment = environment ?? process.env;
 
@@ -49,29 +57,63 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
     prompt,
     outputSchemaJson,
     modelSelection,
+    strictRoutineOutput = false,
   }: {
     operation:
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateRoutineDraft";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
     modelSelection: ModelSelection;
+    strictRoutineOutput?: boolean;
   }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
     Effect.gen(function* () {
       const outputRef = yield* Ref.make("");
+      const rejected = yield* Deferred.make<never, TextGenerationError>();
+      const workingDirectory = strictRoutineOutput
+        ? yield* fileSystem.makeTempDirectoryScoped({ prefix: "kata-cursor-routine-" }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new TextGenerationError({
+                  operation,
+                  detail: "Failed to create isolated draft directory.",
+                  cause,
+                }),
+            ),
+          )
+        : cwd;
       const runtime = yield* makeCursorAcpRuntime({
         cursorSettings,
+        runtimeMode: "approval-required",
         environment: resolvedEnvironment,
         childProcessSpawner: commandSpawner,
-        cwd,
+        cwd: workingDirectory,
         clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
       }).pipe(Effect.provideService(Crypto.Crypto, crypto));
 
+      const reject = (detail: string) =>
+        Deferred.fail(rejected, new TextGenerationError({ operation, detail })).pipe(Effect.asVoid);
+      const rejectToolRequest = () =>
+        reject("Cursor text generation requested a tool or user input.").pipe(
+          Effect.andThen(
+            Effect.fail(
+              new AcpRequestError({
+                code: -32601,
+                errorMessage: "Tools and user input are disabled for text generation.",
+              }),
+            ),
+          ),
+        );
+
       yield* runtime.handleSessionUpdate((notification) => {
         const update = notification.update;
+        if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") {
+          return reject("Cursor text generation attempted tool work.");
+        }
         if (update.sessionUpdate !== "agent_message_chunk") {
           return Effect.void;
         }
@@ -82,9 +124,44 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
         return Ref.update(outputRef, (current) => current + content.text);
       });
 
+      yield* runtime.handleRequestPermission(() =>
+        reject("Cursor text generation requested a tool permission or user input.").pipe(
+          Effect.as({ outcome: { outcome: "cancelled" as const } }),
+        ),
+      );
+      yield* runtime.handleElicitation(() =>
+        reject("Cursor text generation requested user input.").pipe(
+          Effect.as({ action: { action: "decline" as const } }),
+        ),
+      );
+      yield* runtime.handleReadTextFile(rejectToolRequest);
+      yield* runtime.handleWriteTextFile(rejectToolRequest);
+      yield* runtime.handleCreateTerminal(rejectToolRequest);
+      yield* runtime.handleTerminalOutput(rejectToolRequest);
+      yield* runtime.handleTerminalWaitForExit(rejectToolRequest);
+      yield* runtime.handleTerminalKill(rejectToolRequest);
+      yield* runtime.handleTerminalRelease(rejectToolRequest);
+      yield* runtime.handleUnknownExtRequest(rejectToolRequest);
+      yield* runtime.handleUnknownExtNotification(() => rejectToolRequest());
+
       const promptResult = yield* Effect.gen(function* () {
         yield* runtime.start();
-        yield* Effect.ignore(runtime.setMode("ask"));
+        yield* runtime.setMode("ask").pipe(
+          Effect.mapError(
+            (cause) =>
+              new TextGenerationError({
+                operation,
+                detail: "Failed to set Cursor ACP ask mode for text generation.",
+                cause,
+              }),
+          ),
+        );
+        if (strictRoutineOutput && (yield* runtime.getModeState)?.currentModeId !== "ask") {
+          return yield* new TextGenerationError({
+            operation,
+            detail: "Cursor did not confirm ask mode; routine generation was stopped.",
+          });
+        }
         yield* applyCursorAcpModelSelection({
           runtime,
           model: modelSelection.model,
@@ -126,6 +203,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
                 cause,
               }),
         ),
+        Effect.raceFirst(Deferred.await(rejected)),
       );
 
       const rawResult = (yield* Ref.get(outputRef)).trim();
@@ -139,7 +217,10 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
         });
       }
 
-      const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(outputSchemaJson));
+      const decodeOutput = Schema.decodeEffect(
+        Schema.fromJsonString(outputSchemaJson),
+        strictRoutineOutput ? { onExcessProperty: "error" } : undefined,
+      );
       return yield* decodeOutput(extractJsonObject(rawResult)).pipe(
         Effect.catchTags({
           SchemaError: (cause) =>
@@ -259,10 +340,23 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateRoutineDraft: TextGeneration.TextGeneration["Service"]["generateRoutineDraft"] =
+    Effect.fn("CursorTextGeneration.generateRoutineDraft")(function* (input) {
+      return yield* runCursorJson({
+        operation: "generateRoutineDraft",
+        cwd: input.cwd,
+        prompt: input.prompt,
+        outputSchemaJson: RoutineDraftModelOutput,
+        modelSelection: input.modelSelection,
+        strictRoutineOutput: true,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateRoutineDraft,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

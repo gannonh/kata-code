@@ -151,6 +151,9 @@ import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as RoutineStore from "./routines/RoutineStore.ts";
+import { makeRoutineDraftGeneration } from "./routines/RoutineDraftGeneration.ts";
+import { makeTextGenerationFromRegistry } from "./textGeneration/TextGeneration.ts";
+import { isProviderAvailable } from "@kata-sh/code-contracts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -610,6 +613,47 @@ const makeWsRpcLayer = (
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+      const routineDraftGeneration = makeRoutineDraftGeneration({
+        projects: projectionSnapshotQuery.getProjectShells().pipe(
+          Effect.mapError(
+            () =>
+              new RoutineError({
+                code: "blocked",
+                message: "Unable to read available projects.",
+              }),
+          ),
+        ),
+        models: Effect.gen(function* () {
+          const instances = yield* providerInstances.listInstances;
+          const providers = yield* providerRegistry.getProviders;
+          const enabledInstanceIds = new Set(
+            instances.filter((instance) => instance.enabled).map((instance) => instance.instanceId),
+          );
+          return providers
+            .filter(
+              (provider) =>
+                enabledInstanceIds.has(provider.instanceId) &&
+                provider.enabled &&
+                provider.status !== "disabled" &&
+                isProviderAvailable(provider),
+            )
+            .flatMap((provider) =>
+              provider.models.map((model) => ({
+                instanceId: provider.instanceId,
+                model: model.slug,
+                name: model.name,
+              })),
+            );
+        }),
+        generate: (input) =>
+          makeTextGenerationFromRegistry(providerInstances)
+            .generateRoutineDraft(input)
+            .pipe(
+              Effect.mapError(
+                (cause) => new RoutineError({ code: "blocked", message: cause.detail }),
+              ),
+            ),
+      });
       const routineStore = yield* Effect.serviceOption(RoutineStore.RoutineStore);
       const withRoutineStore = <A, E>(
         run: (store: RoutineStore.RoutineStore["Service"]) => Effect.Effect<A, E>,
@@ -1631,6 +1675,10 @@ const makeWsRpcLayer = (
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
       return WsRpcGroup.of({
+        [WS_METHODS.routinesDraft]: (input) =>
+          observeRpcEffect(WS_METHODS.routinesDraft, routineDraftGeneration.generate(input), {
+            "rpc.aggregate": "routines",
+          }),
         [WS_METHODS.routinesList]: (_input) =>
           observeRpcEffect(
             WS_METHODS.routinesList,

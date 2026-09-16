@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { Routine, RoutineDraft, ServerProvider, VcsRef } from "@kata-sh/code-contracts";
+import type {
+  Routine,
+  RoutineDraft,
+  RoutineDraftGenerationResult,
+  ServerProvider,
+  VcsRef,
+} from "@kata-sh/code-contracts";
 import { ModelSelection, ProjectId, ProviderInstanceId } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
 
@@ -20,6 +26,10 @@ import {
   ROUTINE_PERMISSION_MODE_LABELS,
   ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS,
   routineDraftBaselineAfterAutomaticChange,
+  applyRoutineDraftGenerationResponse,
+  routineDraftChatHistoryAfterTurn,
+  routineDraftForGenerationInput,
+  routineDraftRevisionAfterEdit,
   routinesLibraryEmptyKind,
   worktreeBaseExists,
 } from "./RoutinesPage.logic";
@@ -214,6 +224,193 @@ describe("unsaved routine cancel", () => {
     const next = draft({ name: "Daily brief", workspace: { ...worktree, baseBranch: "develop" } });
     expect(routineDraftBaselineAfterAutomaticChange(current, baseline, next)).toEqual(baseline);
     expect(isRoutineDraftDirty(next, baseline)).toBe(true);
+  });
+});
+
+describe("routine draft chat state", () => {
+  it("increments the revision for a real manual edit while ignoring equal values", () => {
+    const baseline = draft();
+    expect(routineDraftRevisionAfterEdit(baseline, baseline, 3)).toBe(3);
+    expect(routineDraftRevisionAfterEdit(baseline, draft({ name: "Daily brief" }), 3)).toBe(4);
+  });
+
+  it("keeps only the latest ten conversation turns", () => {
+    const history = Array.from({ length: 20 }, (_, index) => ({
+      id: index,
+      role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      content: `message-${index}`,
+    }));
+    let nextId = 100;
+    const next = routineDraftChatHistoryAfterTurn(
+      history,
+      "new request",
+      "new answer",
+      () => ++nextId,
+    );
+    expect(next).toHaveLength(20);
+    expect(next[0]?.content).toBe("message-2");
+    expect(next.at(-2)).toMatchObject({ id: 101, content: "new request", role: "user" });
+    expect(next.at(-1)).toMatchObject({ id: 102, content: "new answer", role: "assistant" });
+  });
+
+  it("applies a current response while preserving the manual runtime and workspace", () => {
+    const current = draft({
+      name: "Manual name",
+      runtimeMode: "full-access",
+      workspace: { kind: "shared", directory: "/manual/workspace" },
+    });
+    const generated = draft({
+      name: "Generated name",
+      instruction: "Summarize the repository",
+      runtimeMode: "approval-required",
+      workspace: {
+        kind: "worktree",
+        baseBranch: "main",
+        startFromOrigin: true,
+        runSetupScript: true,
+      },
+    });
+    const response: RoutineDraftGenerationResult = {
+      draft: generated,
+      assistantMessage: "I prepared the routine.",
+      draftRevision: 2,
+    };
+    expect(applyRoutineDraftGenerationResponse(current, 2, response)).toEqual({
+      status: "applied",
+      draft: {
+        ...generated,
+        runtimeMode: current.runtimeMode,
+        workspace: current.workspace,
+      },
+      revision: 3,
+    });
+  });
+
+  it("uses server workspace defaults when generation changes the project", () => {
+    const current = draft({
+      runtimeMode: "full-access",
+      workspace: { kind: "shared", directory: "/manual/workspace" },
+    });
+    const generated = draft({
+      projectId: ProjectId.make("project-2"),
+      workspace: {
+        kind: "worktree",
+        baseBranch: "main",
+        startFromOrigin: true,
+        runSetupScript: true,
+      },
+    });
+    const response: RoutineDraftGenerationResult = {
+      draft: generated,
+      assistantMessage: "I moved the routine to the other project.",
+      draftRevision: 2,
+    };
+    expect(applyRoutineDraftGenerationResponse(current, 2, response)).toMatchObject({
+      status: "applied",
+      draft: {
+        projectId: ProjectId.make("project-2"),
+        runtimeMode: "full-access",
+        workspace: generated.workspace,
+      },
+    });
+  });
+
+  it("returns a stale response as a review offer without changing the current draft", () => {
+    const current = draft({ name: "User edit" });
+    const generated = draft({ name: "Old generated name" });
+    const response: RoutineDraftGenerationResult = {
+      draft: generated,
+      assistantMessage: "I prepared the routine.",
+      draftRevision: 1,
+    };
+    expect(applyRoutineDraftGenerationResponse(current, 2, response)).toEqual({
+      status: "stale",
+      draft: current,
+      revision: 2,
+      reviewDraft: {
+        ...generated,
+        runtimeMode: current.runtimeMode,
+        workspace: current.workspace,
+      },
+    });
+  });
+
+  it("leaves the draft and revision unchanged for a clarification response", () => {
+    const current = draft({ name: "User edit" });
+    const response: RoutineDraftGenerationResult = {
+      draft: null,
+      assistantMessage: "Which timezone should I use?",
+      draftRevision: 2,
+    };
+    expect(applyRoutineDraftGenerationResponse(current, 2, response)).toEqual({
+      status: "clarification",
+      draft: current,
+      revision: 2,
+    });
+  });
+
+  it("omits an untouched initial draft so the assistant does not treat defaults as user input", () => {
+    expect(routineDraftForGenerationInput(draft(), false)).toBeNull();
+  });
+
+  it("sends the authoritative editor state once the draft is initialized", () => {
+    const touched = draft({ name: "Daily brief", instruction: "Summarize recent changes" });
+    expect(routineDraftForGenerationInput(touched, true)).toEqual(touched);
+  });
+
+  it("carries mid-edit blank fields after initialization instead of dropping manual edits", () => {
+    const midEdit = draft({
+      name: "",
+      instruction: "",
+      trigger: { kind: "daily", time: "15:00", timezone: "America/Los_Angeles" },
+    });
+    expect(routineDraftForGenerationInput(midEdit, true)).toEqual(midEdit);
+  });
+
+  it("keeps manual editor fields when a generated response applies on the matching revision", () => {
+    const current = draft({
+      name: "Manual name",
+      instruction: "Manual instruction",
+      runtimeMode: "full-access",
+      workspace: { kind: "shared", directory: "/manual/workspace" },
+      trigger: { kind: "daily", time: "15:00", timezone: "America/Los_Angeles" },
+    });
+    const response: RoutineDraftGenerationResult = {
+      draft: draft({ name: "Generated name", instruction: "Generated instruction" }),
+      assistantMessage: "I refined the routine.",
+      draftRevision: 4,
+    };
+    const applied = applyRoutineDraftGenerationResponse(current, 4, response);
+    expect(applied.status).toBe("applied");
+    if (applied.status !== "applied") return;
+    expect(applied.draft.runtimeMode).toBe("full-access");
+    expect(applied.draft.workspace).toEqual({ kind: "shared", directory: "/manual/workspace" });
+    expect(applied.draft.name).toBe("Generated name");
+    expect(applied.draft.instruction).toBe("Generated instruction");
+    expect(applied.revision).toBe(5);
+  });
+
+  it("offers review instead of overwriting manual edits made while refining", () => {
+    const current = draft({
+      name: "Manual name",
+      runtimeMode: "full-access",
+      workspace: { kind: "shared", directory: "/manual/workspace" },
+    });
+    const generated = draft({ name: "Old generated name" });
+    const response: RoutineDraftGenerationResult = {
+      draft: generated,
+      assistantMessage: "I refined the routine.",
+      draftRevision: 3,
+    };
+    expect(applyRoutineDraftGenerationResponse(current, 4, response)).toMatchObject({
+      status: "stale",
+      revision: 4,
+      reviewDraft: {
+        name: "Old generated name",
+        runtimeMode: "full-access",
+        workspace: current.workspace,
+      },
+    });
   });
 });
 

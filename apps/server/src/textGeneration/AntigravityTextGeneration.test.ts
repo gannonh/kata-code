@@ -36,9 +36,20 @@ const modelSelection = {
   instanceId: ProviderInstanceId.make("antigravity-test"),
   model: "gemini-test",
 };
+const ANTIGRAVITY_ROUTINE_OUTPUT = {
+  draft: {
+    name: "Weekday brief",
+    instruction: "Summarize repository changes.",
+    projectId: "project-1",
+    modelSelection,
+    trigger: { kind: "weekdays", time: "09:00", timezone: "UTC" },
+  },
+  assistantMessage: "I drafted a weekday brief.",
+};
 const encodeMetadata = Schema.encodeEffect(
   Schema.fromJsonString(Schema.Struct({ cwd: Schema.String })),
 );
+const encodeJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 interface PromptContext {
   readonly emit: (
@@ -333,6 +344,108 @@ it.layer(NodeServices.layer)("AntigravityTextGeneration", (it) => {
         ]);
         yield* fixture.assertCleaned;
       }).pipe(Effect.scoped),
+  );
+
+  it.effect("generates a strict routine draft in an empty workspace", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({
+        outputs: [encodeJson(ANTIGRAVITY_ROUTINE_OUTPUT)],
+      });
+      const generated = yield* fixture.textGeneration.generateRoutineDraft({
+        cwd: fixture.projectDirectory,
+        prompt: "Return one JSON object for the scheduled routine draft.",
+        modelSelection,
+      });
+
+      expect(generated).toEqual(ANTIGRAVITY_ROUTINE_OUTPUT);
+      expect(fixture.state.workspaces).toHaveLength(1);
+      expect(fixture.state.workspaces).not.toContain(fixture.projectDirectory);
+      expect(fixture.state.selectedModes).toEqual(["default"]);
+      expect(fixture.state.selectedModels).toEqual([modelSelection.model]);
+      expect(fixture.state.prompts[0]?.prompt).toEqual([
+        {
+          type: "text",
+          text: expect.stringContaining(
+            "Do not use tools, read or write files, run commands, or ask questions.",
+          ),
+        },
+      ]);
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("rejects permission and workspace fields in a routine draft", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({
+        outputs: [
+          encodeJson({
+            ...ANTIGRAVITY_ROUTINE_OUTPUT,
+            draft: {
+              ...ANTIGRAVITY_ROUTINE_OUTPUT.draft,
+              runtimeMode: "full-access",
+              workspace: { kind: "shared", directory: "/tmp/ignored-by-schema" },
+            },
+          }),
+        ],
+      });
+      const error = yield* fixture.textGeneration
+        .generateRoutineDraft({
+          cwd: fixture.projectDirectory,
+          prompt: "Return one JSON object for the scheduled routine draft.",
+          modelSelection,
+        })
+        .pipe(Effect.flip);
+      expect(error._tag).toBe("TextGenerationError");
+      expect(error.detail).toMatch(/invalid structured output/i);
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("accepts a clarification routine response", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({
+        outputs: [
+          encodeJson({
+            draft: null,
+            assistantMessage: "Which project should own this routine?",
+          }),
+        ],
+      });
+      const generated = yield* fixture.textGeneration.generateRoutineDraft({
+        cwd: fixture.projectDirectory,
+        prompt: "Return one JSON object for the scheduled routine draft.",
+        modelSelection,
+      });
+      expect(generated).toEqual({
+        draft: null,
+        assistantMessage: "Which project should own this routine?",
+      });
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("fails closed when a routine helper emits tool work", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeFixture({
+        prompt: ({ emit }) =>
+          emit({
+            sessionUpdate: "tool_call",
+            toolCallId: "routine-tool-1",
+            title: "Read files",
+          }).pipe(Effect.andThen(Effect.never)),
+      });
+      const error = yield* fixture.textGeneration
+        .generateRoutineDraft({
+          cwd: fixture.projectDirectory,
+          prompt: "Return one JSON object for the scheduled routine draft.",
+          modelSelection,
+        })
+        .pipe(Effect.flip);
+      expect(error._tag).toBe("TextGenerationError");
+      expect(error.detail).toMatch(/tool work/i);
+      expect(fixture.state.cancellations).toBe(1);
+      yield* fixture.assertCleaned;
+    }).pipe(Effect.scoped),
   );
 
   it.effect.each(["tool_call", "tool_call_update"] as const)(

@@ -263,6 +263,8 @@ import { VcsError } from "./vcs.ts";
 import {
   Routine,
   RoutineChangeInput,
+  RoutineDraftGenerationInput,
+  RoutineDraftGenerationResult,
   RoutineError,
   RoutineGetInput,
   RoutineHistory,
@@ -286,6 +288,7 @@ export const WS_METHODS = {
   routinesHistory: "routines.history",
   routinesPreview: "routines.preview",
   routinesSubscribe: "routines.subscribe",
+  routinesDraft: "routines.draft",
 
   // Project registry methods
   projectsList: "projects.list",
@@ -498,6 +501,12 @@ const WsRoutinesSubscribeRpc = Rpc.make(WS_METHODS.routinesSubscribe, {
   success: RoutineSubscriptionEvent,
   error: RoutineRpcError,
   stream: true,
+});
+
+const WsRoutinesDraftRpc = Rpc.make(WS_METHODS.routinesDraft, {
+  payload: RoutineDraftGenerationInput,
+  success: RoutineDraftGenerationResult,
+  error: RoutineRpcError,
 });
 
 const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -1399,6 +1408,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsRoutinesHistoryRpc,
   WsRoutinesPreviewRpc,
   WsRoutinesSubscribeRpc,
+  WsRoutinesDraftRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

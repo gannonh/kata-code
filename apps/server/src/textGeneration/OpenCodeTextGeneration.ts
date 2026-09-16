@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 
 import {
   NonNegativeInt,
+  RoutineDraftModelOutput,
   TextGenerationError,
   type ChatAttachment,
   type ModelSelection,
@@ -22,6 +23,7 @@ import {
 } from "./TextGenerationPrompts.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
+  toJsonSchemaObject,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
@@ -34,6 +36,7 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generatePrContent",
   "generateBranchName",
   "generateThreadTitle",
+  "generateRoutineDraft",
 ]);
 
 type OpenCodeTextGenerationOperation = typeof OpenCodeTextGenerationOperation.Type;
@@ -170,6 +173,8 @@ function getOpenCodeTextResponse(parts: ReadonlyArray<unknown> | undefined): str
     .trim();
 }
 
+const encodeUnknownJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+
 export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration")(function* (
   openCodeSettings: OpenCodeSettings,
 ) {
@@ -211,12 +216,15 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
           directory: input.cwd,
           ...(server.serverPassword !== undefined ? { serverPassword: server.serverPassword } : {}),
         });
-        const session = yield* Effect.tryPromise({
-          try: () =>
-            client.session.create({
-              title: `Kata Code ${input.operation}`,
-              permission: [{ permission: "*", pattern: "*", action: "deny" }],
-            }),
+        const createSession = Effect.tryPromise({
+          try: (signal) =>
+            client.session.create(
+              {
+                title: `Kata Code ${input.operation}`,
+                permission: [{ permission: "*", pattern: "*", action: "deny" }],
+              },
+              { signal },
+            ),
           catch: (cause) =>
             new OpenCodeTextGenerationSessionRequestError({
               operation: input.operation,
@@ -224,54 +232,123 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
               cause,
             }),
         });
-        if (!session.data) {
-          return yield* new OpenCodeTextGenerationSessionPayloadError({
-            operation: input.operation,
-            cwd: input.cwd,
+        type OpenCodeSessionPayload = { readonly data: { readonly id: string } | undefined };
+        const cleanupSession = (session: OpenCodeSessionPayload) =>
+          Effect.gen(function* () {
+            const sessionID = session.data?.id;
+            if (!sessionID) return;
+            yield* Effect.tryPromise((signal) =>
+              client.session.abort({ sessionID }, { signal }),
+            ).pipe(Effect.timeout("5 seconds"), Effect.ignore);
+            yield* Effect.tryPromise((signal) =>
+              client.session.delete({ sessionID }, { signal }),
+            ).pipe(Effect.timeout("5 seconds"), Effect.ignore);
           });
-        }
-        const selectedAgent = getModelSelectionStringOptionValue(input.modelSelection, "agent");
-        const selectedVariant = getModelSelectionStringOptionValue(input.modelSelection, "variant");
-        const promptContext = {
-          operation: input.operation,
-          cwd: input.cwd,
-          sessionId: session.data.id,
-          providerId: parsedModel.providerID,
-          modelId: parsedModel.modelID,
-        };
+        const useSession = (session: OpenCodeSessionPayload) =>
+          Effect.gen(function* () {
+            const sessionData = session.data;
+            if (!sessionData) {
+              return yield* new OpenCodeTextGenerationSessionPayloadError({
+                operation: input.operation,
+                cwd: input.cwd,
+              });
+            }
+            const selectedAgent = getModelSelectionStringOptionValue(input.modelSelection, "agent");
+            const selectedVariant = getModelSelectionStringOptionValue(
+              input.modelSelection,
+              "variant",
+            );
+            const promptContext = {
+              operation: input.operation,
+              cwd: input.cwd,
+              sessionId: sessionData.id,
+              providerId: parsedModel.providerID,
+              modelId: parsedModel.modelID,
+            };
 
-        const result = yield* Effect.tryPromise({
-          try: () =>
-            client.session.prompt({
-              sessionID: session.data.id,
-              model: parsedModel,
-              ...(selectedAgent ? { agent: selectedAgent } : {}),
-              ...(selectedVariant ? { variant: selectedVariant } : {}),
-              parts: [{ type: "text", text: input.prompt }, ...fileParts],
-            }),
-          catch: (cause) =>
-            new OpenCodeTextGenerationPromptRequestError({
-              ...promptContext,
-              cause,
-            }),
-        });
-        const promptFailure = getOpenCodePromptFailure(result.data?.info?.error);
-        if (promptFailure) {
-          return yield* new OpenCodeTextGenerationPromptResponseError({
-            ...promptContext,
-            ...(promptFailure.name ? { providerErrorName: promptFailure.name } : {}),
-            providerMessage: promptFailure.message,
+            const result = yield* Effect.tryPromise({
+              try: (signal) =>
+                client.session.prompt(
+                  {
+                    sessionID: sessionData.id,
+                    model: parsedModel,
+                    ...(selectedAgent && input.operation !== "generateRoutineDraft"
+                      ? { agent: selectedAgent }
+                      : {}),
+                    ...(input.operation === "generateRoutineDraft"
+                      ? {
+                          tools: { "*": false },
+                          format: {
+                            type: "json_schema" as const,
+                            schema: toJsonSchemaObject(input.outputSchemaJson) as Record<
+                              string,
+                              unknown
+                            >,
+                            retryCount: 1,
+                          },
+                        }
+                      : {}),
+                    ...(selectedVariant ? { variant: selectedVariant } : {}),
+                    parts: [{ type: "text", text: input.prompt }, ...fileParts],
+                  },
+                  { signal },
+                ),
+              catch: (cause) =>
+                new OpenCodeTextGenerationPromptRequestError({
+                  ...promptContext,
+                  cause,
+                }),
+            });
+            const promptFailure = getOpenCodePromptFailure(result.data?.info?.error);
+            if (promptFailure) {
+              return yield* new OpenCodeTextGenerationPromptResponseError({
+                ...promptContext,
+                ...(promptFailure.name ? { providerErrorName: promptFailure.name } : {}),
+                providerMessage: promptFailure.message,
+              });
+            }
+            const responseParts = result.data?.parts ?? [];
+            if (input.operation === "generateRoutineDraft") {
+              if (
+                responseParts.some(
+                  (part) => part.type === "tool" && part.tool !== "StructuredOutput",
+                )
+              ) {
+                return yield* new TextGenerationError({
+                  operation: input.operation,
+                  detail: "OpenCode attempted tool work during routine generation.",
+                });
+              }
+              if (result.data?.info?.structured !== undefined) {
+                return yield* encodeUnknownJson(result.data.info.structured).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new TextGenerationError({
+                        operation: input.operation,
+                        detail: "Invalid structured output.",
+                        cause,
+                      }),
+                  ),
+                );
+              }
+            }
+            const rawText = getOpenCodeTextResponse(responseParts);
+            if (rawText.length === 0) {
+              return yield* new OpenCodeTextGenerationEmptyOutputError({
+                ...promptContext,
+                responsePartCount: responseParts.length,
+                textPartCount: responseParts.filter(isOpenCodeTextPart).length,
+              });
+            }
+            return rawText;
           });
-        }
-        const responseParts = result.data?.parts ?? [];
-        const rawText = getOpenCodeTextResponse(responseParts);
-        if (rawText.length === 0) {
-          return yield* new OpenCodeTextGenerationEmptyOutputError({
-            ...promptContext,
-            responsePartCount: responseParts.length,
-            textPartCount: responseParts.filter(isOpenCodeTextPart).length,
-          });
-        }
+        // Routine sessions are bracketed: acquisition is uninterruptible, so a
+        // cancellation racing pending creation still reaches the release that
+        // aborts and deletes the created session, and prompt never starts.
+        const rawText =
+          input.operation === "generateRoutineDraft"
+            ? yield* Effect.acquireUseRelease(createSession, useSession, cleanupSession)
+            : yield* Effect.acquireUseRelease(createSession, useSession, () => Effect.void);
         return rawText;
       },
       Effect.catchTags({
@@ -330,7 +407,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
                 : {}),
             })
             .pipe(Effect.flatMap(runAgainstServer), Effect.scoped)
-        : serverOwner.withServer(runAgainstServer);
+        : serverOwner.withServer((server) => runAgainstServer(server).pipe(Effect.scoped));
     const rawOutput = yield* serverOutput.pipe(
       Effect.catchTags({
         OpenCodeRuntimeError: (cause) =>
@@ -344,7 +421,10 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       }),
     );
 
-    const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(input.outputSchemaJson));
+    const decodeOutput = Schema.decodeEffect(
+      Schema.fromJsonString(input.outputSchemaJson),
+      input.operation === "generateRoutineDraft" ? { onExcessProperty: "error" } : undefined,
+    );
     return yield* decodeOutput(extractJsonObject(rawOutput)).pipe(
       Effect.catchTags({
         SchemaError: (cause) =>
@@ -451,10 +531,22 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       };
     });
 
+  const generateRoutineDraft: TextGeneration.TextGeneration["Service"]["generateRoutineDraft"] =
+    Effect.fn("OpenCodeTextGeneration.generateRoutineDraft")(function* (input) {
+      return yield* runOpenCodeJson({
+        operation: "generateRoutineDraft",
+        cwd: input.cwd,
+        prompt: input.prompt,
+        outputSchemaJson: RoutineDraftModelOutput,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateRoutineDraft,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -7,7 +7,12 @@
  * @module textGenerationPrompts
  */
 import * as Schema from "effect/Schema";
-import type { ChatAttachment } from "@kata-sh/code-contracts";
+import { RoutineDraftModelOutput } from "@kata-sh/code-contracts";
+import type {
+  ChatAttachment,
+  RoutineDraftConversationMessage,
+  RoutineDraftConversationState,
+} from "@kata-sh/code-contracts";
 
 import { limitSection } from "./TextGenerationUtils.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
@@ -319,4 +324,95 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
   });
 
   return { prompt, outputSchema };
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled routine draft
+// ---------------------------------------------------------------------------
+
+export interface RoutineDraftPromptProject {
+  readonly id: string;
+  readonly title: string;
+}
+
+export interface RoutineDraftPromptModel {
+  readonly instanceId: string;
+  readonly model: string;
+  readonly name: string;
+}
+
+export interface RoutineDraftPromptInput {
+  readonly message: string;
+  readonly currentDraft: RoutineDraftConversationState | null;
+  readonly history: ReadonlyArray<RoutineDraftConversationMessage>;
+  readonly projectId: string;
+  readonly projects: ReadonlyArray<RoutineDraftPromptProject>;
+  readonly availableModels: ReadonlyArray<RoutineDraftPromptModel>;
+  readonly generationModelSelection: {
+    readonly instanceId: string;
+    readonly model: string;
+  };
+}
+
+/**
+ * Build the bounded prompt used by conversational routine creation. The
+ * model owns the routine's name, instruction, project, model and schedule;
+ * permission mode and workspace are intentionally excluded from the output
+ * contract and are supplied by the server.
+ */
+export function buildRoutineDraftPrompt(input: RoutineDraftPromptInput) {
+  const history = input.history
+    .slice(-20)
+    .map((turn) => `${turn.role.toUpperCase()}: ${limitSection(turn.content, 8_000)}`)
+    .join("\n\n");
+  const projectList = input.projects.length
+    ? input.projects.map((project) => `- ${project.id}: ${project.title}`).join("\n")
+    : "(No projects are available.)";
+  const modelList = input.availableModels.length
+    ? JSON.stringify(input.availableModels, null, 2)
+    : "(No execution models are available.)";
+  const currentDraft = input.currentDraft
+    ? JSON.stringify({
+        name: input.currentDraft.name,
+        instruction: input.currentDraft.instruction,
+        projectId: input.currentDraft.projectId,
+        modelSelection: input.currentDraft.modelSelection,
+        trigger: input.currentDraft.trigger,
+      })
+    : "(No draft exists yet.)";
+  const prompt = [
+    "You create and refine scheduled routines for Kata Code.",
+    "Return one JSON object with exactly these keys: draft, assistantMessage.",
+    "draft must be null when you need clarification. Otherwise draft must contain exactly these keys: name, instruction, projectId, modelSelection, trigger.",
+    "Do not return runtimeMode, workspace, permissions, repository paths, tools, or any other keys.",
+    "Rules:",
+    "- name is a concise label for the scheduled routine.",
+    "- instruction is the prompt that will run later; keep it explicit and actionable.",
+    "- projectId must be one of the available project IDs below. If the user names a project absent from that list, return draft:null and ask them to choose an existing project; never substitute the target project.",
+    "- modelSelection is the model that will execute the saved routine. Keep the current routine model unless the user explicitly asks to change it; the generation model is separate.",
+    "- Copy modelSelection.instanceId and modelSelection.model verbatim from one entry in the execution models list. Never copy the display name and never paraphrase either field.",
+    "- For a new draft, use the first entry in the execution models list unless the user explicitly requests another execution model. Do not change it merely to match the generation model.",
+    "- trigger must describe a schedule only: daily, weekdays, weekly, or a valid five-field cron expression with an IANA timezone.",
+    "- Do not create event triggers, GitHub triggers, webhooks, or one-off runs. For these requests return draft:null and explain that only schedules are supported.",
+    "- If the request is ambiguous or does not clearly describe a schedule, set draft to null and ask one concise clarification in assistantMessage. Never encode a clarification as an executable instruction.",
+    "",
+    "Available projects:",
+    projectList,
+    "",
+    `Target project ID: ${input.projectId}`,
+    "",
+    "Available routine execution models:",
+    modelList,
+    "",
+    `Generation model (used only for this conversation): ${input.generationModelSelection.instanceId}:${input.generationModelSelection.model}`,
+    "",
+    "Current draft state (the user's authoritative values; empty strings are fields the user has not written yet):",
+    currentDraft,
+    ...(history ? ["", "Conversation history:", history] : []),
+    "",
+    "Latest user request:",
+    limitSection(input.message, 12_000),
+  ].join("\n");
+
+  return { prompt, outputSchema: RoutineDraftModelOutput };
 }
