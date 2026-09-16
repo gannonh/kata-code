@@ -281,6 +281,20 @@ export function routineTriggerKind(trigger: RoutineEditorTrigger): RoutineTrigge
   return isRoutineEditorScheduleTrigger(trigger) ? "schedule" : "github";
 }
 
+/**
+ * Branch filters apply to pull requests and workflows; label filters apply to
+ * issues. Dropping the filter an event cannot use keeps a hidden value from
+ * silently blocking every delivery.
+ */
+export function withApplicableTriggerFilters(
+  trigger: RoutineEditorGitHubTrigger,
+): RoutineEditorGitHubTrigger {
+  const omitted = trigger.event === "issue_opened" ? "branch" : "issueLabelId";
+  return Object.fromEntries(
+    Object.entries(trigger).filter(([key]) => key !== omitted),
+  ) as RoutineEditorGitHubTrigger;
+}
+
 export function formatRoutineTrigger(trigger: RoutineTrigger): string {
   if (!isScheduleTrigger(trigger)) {
     const branch = trigger.branch ? ` on ${trigger.branch}` : "";

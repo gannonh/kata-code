@@ -24,6 +24,11 @@ export interface GitHubRoutineEventSummary {
 
 const PR_UPDATED_ACTIONS = new Set(["synchronize", "reopened", "ready_for_review"]);
 const WORKFLOW_FAILURE_CONCLUSIONS = new Set(["failure", "timed_out", "action_required"]);
+const BRANCH_FILTER_EVENTS = new Set<GitHubRoutineEvent>([
+  "pr_opened",
+  "pr_updated",
+  "workflow_failed",
+]);
 const MAX_TEXT = 200;
 
 const asRecord = (value: unknown): Record<string, unknown> | null =>
@@ -145,7 +150,14 @@ export function triggerMatchesEvent(
 ): boolean {
   if (trigger.event !== summary.event) return false;
   if (trigger.repositoryId !== summary.repositoryId) return false;
-  if (trigger.branch !== undefined && trigger.branch !== summary.branch) return false;
+  // The branch filter applies to pull requests and workflows only; issue
+  // deliveries carry no branch and must not be rejected by a saved default.
+  if (
+    trigger.branch !== undefined &&
+    BRANCH_FILTER_EVENTS.has(summary.event) &&
+    trigger.branch !== summary.branch
+  )
+    return false;
   if (!trigger.includeDrafts && summary.draft) return false;
   if (trigger.issueLabelId !== undefined && !summary.labelIds.includes(trigger.issueLabelId))
     return false;

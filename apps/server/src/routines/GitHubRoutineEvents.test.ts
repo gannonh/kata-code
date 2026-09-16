@@ -123,6 +123,9 @@ describe("GitHub routine event mapping", () => {
       issue: { id: 3, number: 12, title: "Broken", html_url: "u", labels: [{ id: 9 }] },
     })!;
     expect(triggerMatchesEvent(trigger({ event: "issue_opened" }), issue)).toBe(true);
+    expect(triggerMatchesEvent(trigger({ event: "issue_opened", branch: "main" }), issue)).toBe(
+      true,
+    );
     expect(triggerMatchesEvent(trigger({ event: "issue_opened", issueLabelId: 9 }), issue)).toBe(
       true,
     );

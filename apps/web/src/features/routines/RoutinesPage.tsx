@@ -90,6 +90,7 @@ import {
   ROUTINE_DELIVERY_STATUS_LABELS,
   routineTriggerKind,
   selectableConnections,
+  withApplicableTriggerFilters,
   type RoutineEditorDraft,
   type RoutineEditorGitHubTrigger,
 } from "./RoutinesPage.logic";
@@ -587,24 +588,26 @@ function GitHubTriggerFields({
           )}
         </select>
       </div>
-      <div className="grid gap-1.5">
-        <FieldLabel htmlFor="routine-github-branch">
-          {trigger.event === "workflow_failed" ? "Head branch" : "Base branch"} (blank for any)
-        </FieldLabel>
-        <Input
-          id="routine-github-branch"
-          list="routine-branch-options"
-          value={trigger.branch ?? ""}
-          onValueChange={(value) => onTriggerChange({ branch: value })}
-          placeholder={selectedConnection?.defaultBranch ?? "main"}
-          disabled={disabled}
-        />
-        <datalist id="routine-branch-options">
-          {branches.map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
-      </div>
+      {trigger.event !== "issue_opened" ? (
+        <div className="grid gap-1.5">
+          <FieldLabel htmlFor="routine-github-branch">
+            {trigger.event === "workflow_failed" ? "Head branch" : "Base branch"} (blank for any)
+          </FieldLabel>
+          <Input
+            id="routine-github-branch"
+            list="routine-branch-options"
+            value={trigger.branch ?? ""}
+            onValueChange={(value) => onTriggerChange({ branch: value })}
+            placeholder={selectedConnection?.defaultBranch ?? "main"}
+            disabled={disabled}
+          />
+          <datalist id="routine-branch-options">
+            {branches.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+        </div>
+      ) : null}
       {trigger.event === "pr_opened" || trigger.event === "pr_updated" ? (
         <label className="flex items-center gap-2 text-xs">
           <input
@@ -749,20 +752,12 @@ function RoutineEditor({
             return rest;
           })()
         : patch;
-    const merged: RoutineEditorGitHubTrigger = {
-      ...configuration.trigger,
-      ...normalizedPatch,
-    };
-    // The label filter only applies to issues; drop it with the control that
-    // would otherwise become invisible and impossible to clear.
-    const next: RoutineEditorGitHubTrigger =
-      merged.event === "issue_opened"
-        ? merged
-        : (() => {
-            const { issueLabelId: _issueLabelId, ...rest } = merged;
-            return rest;
-          })();
-    setConfiguration({ trigger: next });
+    setConfiguration({
+      trigger: withApplicableTriggerFilters({
+        ...configuration.trigger,
+        ...normalizedPatch,
+      }),
+    });
   };
   const triggerKind = routineTriggerKind(configuration.trigger);
   const scheduleFields: ScheduleTrigger = isRoutineEditorScheduleTrigger(configuration.trigger)

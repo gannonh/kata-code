@@ -361,7 +361,54 @@ describe("RoutinesPage GitHub trigger setup", () => {
       connectionId: "connection-filter",
       repositoryId: 42,
       event: "pr_opened",
-      branch: "main",
+      includeDrafts: false,
+    });
+  });
+
+  it("drops the branch default when the trigger selects an issue event", async () => {
+    testState.connectionsData.push(connectionFor("connection-issue"));
+    testState.command.mockImplementation(async (value: unknown) => {
+      const input = value as { input?: { configuration?: unknown } };
+      if (input.input?.configuration !== undefined) {
+        return { _tag: "Failure", cause: new Error("stop after inspecting the save payload") };
+      }
+      return { _tag: "Success", value: connectionFor("connection-issue") };
+    });
+    renderer = await openNewRoutineEditor();
+
+    await act(async () => {
+      renderer!.root.findByProps({ id: "routine-name" }).props.onValueChange("Issue routine");
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-instruction" })
+        .props.onChange({ target: { value: "Handle the issue" } });
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "GitHub event").props.onClick?.();
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-github-event" })
+        .props.onChange({ target: { value: "issue_opened" } });
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Save").props.onClick?.();
+      await Promise.resolve();
+    });
+
+    const saveCall = testState.command.mock.calls.find(
+      ([value]) =>
+        (value as { input?: { configuration?: unknown } }).input?.configuration !== undefined,
+    );
+    expect(
+      (saveCall?.[0] as { input: { configuration: { trigger: Record<string, unknown> } } }).input
+        .configuration.trigger,
+    ).toEqual({
+      kind: "github",
+      connectionId: "connection-issue",
+      repositoryId: 42,
+      event: "issue_opened",
       includeDrafts: false,
     });
   });

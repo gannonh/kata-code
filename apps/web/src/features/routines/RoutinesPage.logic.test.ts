@@ -44,6 +44,7 @@ import {
   routinesLibraryEmptyKind,
   routineTriggerKind,
   selectableConnections,
+  withApplicableTriggerFilters,
   worktreeBaseExists,
 } from "./RoutinesPage.logic";
 
@@ -472,6 +473,26 @@ describe("GitHub event triggers", () => {
       "GitHub · Pull request opened on main",
     );
     expect(routineTriggerKind(defaultGitHubTrigger(connection()))).toBe("github");
+  });
+
+  it("drops filters the selected event cannot use", () => {
+    expect(
+      withApplicableTriggerFilters({
+        kind: "github",
+        event: "issue_opened",
+        branch: "main",
+        includeDrafts: false,
+      }),
+    ).toEqual({ kind: "github", event: "issue_opened", includeDrafts: false });
+    expect(
+      withApplicableTriggerFilters({
+        kind: "github",
+        event: "pr_opened",
+        branch: "main",
+        includeDrafts: false,
+        issueLabelId: 5,
+      }),
+    ).toEqual({ kind: "github", event: "pr_opened", branch: "main", includeDrafts: false });
   });
 
   it("keeps an unconnected GitHub choice outside the saved trigger contract", () => {
