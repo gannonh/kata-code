@@ -13,6 +13,7 @@ import { RoutineStore } from "./RoutineStore.ts";
 
 export const ROUTINE_WEBHOOK_ROUTE_PREFIX = "/api/routines/webhooks";
 export const ROUTINE_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
+const MAX_DELIVERY_HEADER_LENGTH = 128;
 
 /**
  * Deliveries must be recorded even while the server is still starting, because
@@ -83,8 +84,16 @@ export const routineWebhookRouteLayer = HttpRouter.add(
     const store = storeOption.value;
     const secrets = yield* ServerSecretStore.ServerSecretStore;
     const now = yield* Clock.currentTimeMillis;
-    const deliveryId = request.headers["x-github-delivery"] ?? "";
-    const eventName = request.headers["x-github-event"] ?? "";
+    // Rejections are counted before the signature is verified, so bound what is
+    // stored and logged from headers an unauthenticated request controls.
+    const deliveryId = (request.headers["x-github-delivery"] ?? "").slice(
+      0,
+      MAX_DELIVERY_HEADER_LENGTH,
+    );
+    const eventName = (request.headers["x-github-event"] ?? "").slice(
+      0,
+      MAX_DELIVERY_HEADER_LENGTH,
+    );
     const signature = request.headers["x-hub-signature-256"] ?? "";
     const connection = yield* store
       .findConnection(connectionId)

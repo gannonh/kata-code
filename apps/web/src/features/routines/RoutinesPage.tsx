@@ -749,10 +749,19 @@ function RoutineEditor({
             return rest;
           })()
         : patch;
-    const next: RoutineEditorGitHubTrigger = {
+    const merged: RoutineEditorGitHubTrigger = {
       ...configuration.trigger,
       ...normalizedPatch,
     };
+    // The label filter only applies to issues; drop it with the control that
+    // would otherwise become invisible and impossible to clear.
+    const next: RoutineEditorGitHubTrigger =
+      merged.event === "issue_opened"
+        ? merged
+        : (() => {
+            const { issueLabelId: _issueLabelId, ...rest } = merged;
+            return rest;
+          })();
     setConfiguration({ trigger: next });
   };
   const triggerKind = routineTriggerKind(configuration.trigger);

@@ -39,7 +39,16 @@ const testState = vi.hoisted(() => ({
   ],
   listData: [] as const,
   connectionsData: [] as Array<Record<string, unknown>>,
-  metadataData: { repositories: [], repository: null },
+  metadataData: {
+    repositories: [] as Array<{ nameWithOwner: string; defaultBranch: string }>,
+    repository: null as null | {
+      id: number;
+      nameWithOwner: string;
+      defaultBranch: string;
+      branches: string[];
+      labels: Array<{ id: number; name: string }>;
+    },
+  },
   queries: {
     list: Symbol("list"),
     connections: Symbol("connections"),
@@ -194,6 +203,7 @@ describe("RoutinesPage GitHub trigger setup", () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     testState.command.mockReset();
     testState.connectionsData.length = 0;
+    testState.metadataData.repository = null;
   });
 
   afterEach(async () => {
@@ -287,6 +297,72 @@ describe("RoutinesPage GitHub trigger setup", () => {
           },
         },
       },
+    });
+  });
+
+  it("drops an issue label filter when the trigger switches to a pull request event", async () => {
+    testState.connectionsData.push(connectionFor("connection-filter"));
+    testState.metadataData.repository = {
+      id: 42,
+      nameWithOwner: "acme/widgets",
+      defaultBranch: "main",
+      branches: ["main"],
+      labels: [{ id: 5, name: "bug" }],
+    };
+    testState.command.mockImplementation(async (value: unknown) => {
+      const input = value as { input?: { configuration?: unknown } };
+      if (input.input?.configuration !== undefined) {
+        return { _tag: "Failure", cause: new Error("stop after inspecting the save payload") };
+      }
+      return { _tag: "Success", value: connectionFor("connection-filter") };
+    });
+    renderer = await openNewRoutineEditor();
+
+    await act(async () => {
+      renderer!.root.findByProps({ id: "routine-name" }).props.onValueChange("Event routine");
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-instruction" })
+        .props.onChange({ target: { value: "Handle the event" } });
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "GitHub event").props.onClick?.();
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-github-event" })
+        .props.onChange({ target: { value: "issue_opened" } });
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-github-label" })
+        .props.onChange({ target: { value: "5" } });
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-github-event" })
+        .props.onChange({ target: { value: "pr_opened" } });
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Save").props.onClick?.();
+      await Promise.resolve();
+    });
+
+    const saveCall = testState.command.mock.calls.find(
+      ([value]) =>
+        (value as { input?: { configuration?: unknown } }).input?.configuration !== undefined,
+    );
+    expect(
+      (saveCall?.[0] as { input: { configuration: { trigger: Record<string, unknown> } } }).input
+        .configuration.trigger,
+    ).toEqual({
+      kind: "github",
+      connectionId: "connection-filter",
+      repositoryId: 42,
+      event: "pr_opened",
+      branch: "main",
+      includeDrafts: false,
     });
   });
 });

@@ -273,7 +273,9 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
 
     it.effect("returns 503 instead of acknowledging a ping whose durable receipt fails", () =>
       Effect.gen(function* () {
+        const store = yield* RoutineStore;
         const sql = yield* SqlClient.SqlClient;
+        const before = yield* store.getConnection(environmentId, connectionId);
         yield* sql`CREATE TEMP TRIGGER fail_ping_receipt BEFORE INSERT ON routine_deliveries
           WHEN NEW.delivery_id='ping-write-failure'
           BEGIN SELECT RAISE(FAIL, 'simulated write failure'); END`;
@@ -286,6 +288,10 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
         const rows =
           yield* sql`SELECT delivery_id FROM routine_deliveries WHERE delivery_id='ping-write-failure'`;
         assert.equal(rows.length, 0);
+        const after = yield* store.getConnection(environmentId, connectionId);
+        assert.equal(after.rejectedCount, before.rejectedCount + 1);
+        assert.equal(after.lastDelivery?.status, "rejected");
+        assert.equal(after.lastDelivery?.deliveryId, "ping-write-failure");
       }),
     );
 

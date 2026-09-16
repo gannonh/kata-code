@@ -115,6 +115,42 @@ describe("GitHub routine event mapping", () => {
     expect(triggerMatchesEvent(trigger({ issueLabelId: 6 }), summary)).toBe(false);
   });
 
+  it("filters issues on label id and workflows on the head branch", () => {
+    const issue = summarizeGitHubEvent("issues", {
+      action: "opened",
+      repository,
+      sender,
+      issue: { id: 3, number: 12, title: "Broken", html_url: "u", labels: [{ id: 9 }] },
+    })!;
+    expect(triggerMatchesEvent(trigger({ event: "issue_opened" }), issue)).toBe(true);
+    expect(triggerMatchesEvent(trigger({ event: "issue_opened", issueLabelId: 9 }), issue)).toBe(
+      true,
+    );
+    expect(triggerMatchesEvent(trigger({ event: "issue_opened", issueLabelId: 10 }), issue)).toBe(
+      false,
+    );
+    const workflow = summarizeGitHubEvent("workflow_run", {
+      action: "completed",
+      repository,
+      sender,
+      workflow_run: {
+        id: 77,
+        run_number: 5,
+        name: "CI",
+        html_url: "u",
+        head_branch: "feature/x",
+        conclusion: "failure",
+      },
+    })!;
+    expect(triggerMatchesEvent(trigger({ event: "workflow_failed" }), workflow)).toBe(true);
+    expect(
+      triggerMatchesEvent(trigger({ event: "workflow_failed", branch: "feature/x" }), workflow),
+    ).toBe(true);
+    expect(
+      triggerMatchesEvent(trigger({ event: "workflow_failed", branch: "main" }), workflow),
+    ).toBe(false);
+  });
+
   it("keeps matching after a rename because ids are stable", () => {
     const renamed = summarizeGitHubEvent("pull_request", {
       ...pullRequest(),

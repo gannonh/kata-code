@@ -5,6 +5,7 @@ import {
   ProjectId,
   RoutineConnectionId,
   RoutineId,
+  RoutineOwnerGeneration,
   RuntimeMode,
   type RoutineConnection,
 } from "@kata-sh/code-contracts";
@@ -77,6 +78,59 @@ const storeLayer = Layer.mergeAll(
 );
 
 it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
+  it.effect("resumes exactly one event run after a crash and reports uncertainty", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const id = RoutineConnectionId.make("connection-recovery");
+      yield* store.saveConnection({ ...connection, id });
+      const routine = yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-event-recovery"),
+          expectedRevision: 0,
+          configuration: {
+            ...configuration,
+            trigger: { ...configuration.trigger, connectionId: id },
+          },
+        },
+        1_000,
+      );
+      const admission = yield* store.admitEvent({
+        connectionId: id,
+        ...prOpened(21, "delivery-recovery"),
+        now: 2_000,
+      });
+      assert.equal(admission.runs.length, 1);
+      const run = admission.runs[0]!;
+      const claim = yield* store.claim("owner-after-restart", 3_000);
+      assert.equal(claim?.run.id, run.id);
+      yield* store.consumeSubmissionForProvider(
+        {
+          runId: run.id,
+          owner: claim!.owner,
+          generation: RoutineOwnerGeneration.make(claim!.generation),
+          threadId: run.threadId,
+          messageId: run.messageId,
+          commandId: run.commandId,
+        },
+        3_001,
+      );
+      yield* store.recoverConsumed(4_000);
+      const history = yield* store.history(environmentId, { id: routine.id });
+      assert.equal(history.runs.length, 1);
+      assert.equal(history.runs[0]?.status, "needs-attention");
+      // GitHub's redelivery of the same event cannot add a second run after restart.
+      const replay = yield* store.admitEvent({
+        connectionId: id,
+        ...prOpened(21, "delivery-recovery"),
+        now: 5_000,
+      });
+      assert.equal(replay.status, "duplicate");
+      const afterReplay = yield* store.history(environmentId, { id: routine.id });
+      assert.equal(afterReplay.runs.length, 1);
+    }),
+  );
+
   it.effect("refuses to replace an existing connection with a reused id", () =>
     Effect.gen(function* () {
       const store = yield* RoutineStore;
@@ -299,6 +353,25 @@ it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
         now: 10_000 + 8 * DAY + 1,
       });
       assert.equal(again.status, "accepted");
+    }),
+  );
+
+  it.effect("bounds the untrusted delivery headers stored for rejected requests", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const id = RoutineConnectionId.make("connection-rejected-header");
+      yield* store.saveConnection({ ...connection, id });
+      const oversized = "x".repeat(4_000);
+      yield* store.recordRejectedDelivery(
+        id,
+        { deliveryId: oversized, event: oversized, detail: "Signature verification failed." },
+        2_000,
+      );
+      const saved = yield* store.getConnection(environmentId, id);
+      assert.equal(saved.rejectedCount, 1);
+      assert.equal(saved.lastDelivery?.status, "rejected");
+      assert.equal(saved.lastDelivery?.deliveryId.length, 128);
+      assert.equal(saved.lastDelivery?.event.length, 128);
     }),
   );
 

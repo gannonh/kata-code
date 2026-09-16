@@ -49,6 +49,9 @@ const encodeConnection = Schema.encodeSync(Schema.fromJsonString(RoutineConnecti
 const encodeDelivery = Schema.encodeSync(Schema.fromJsonString(RoutineDelivery));
 /** Signed-content digests are only suppressed inside this window. */
 const DELIVERY_DIGEST_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** Rejected deliveries arrive before signature verification, so bound what is stored. */
+const MAX_DELIVERY_HEADER_LENGTH = 128;
+const boundedDeliveryHeader = (value: string) => value.slice(0, MAX_DELIVERY_HEADER_LENGTH);
 export interface RoutineEventAdmissionInput {
   readonly connectionId: RoutineConnectionId;
   readonly deliveryId: string;
@@ -460,7 +463,11 @@ export const makeRoutineStore = Effect.gen(function* () {
   /** Callback lookup by id alone; the caller verifies the signature before trusting anything else. */
   const findConnection = (id: string) =>
     sql<{ record: string }>`SELECT record FROM routine_connections WHERE id = ${id}`.pipe(
-      Effect.map((rows) => (rows[0] ? decodeConnection(rows[0].record) : null)),
+      Effect.flatMap((rows) =>
+        rows[0]
+          ? Effect.try({ try: () => decodeConnection(rows[0]!.record), catch: persistenceError })
+          : Effect.succeed<RoutineConnection | null>(null),
+      ),
       Effect.mapError(persistenceError),
     );
   const saveConnection = (connection: RoutineConnection) =>
@@ -491,8 +498,8 @@ export const makeRoutineStore = Effect.gen(function* () {
       ...connection,
       rejectedCount: connection.rejectedCount + 1,
       lastDelivery: {
-        deliveryId: input.deliveryId,
-        event: input.event,
+        deliveryId: boundedDeliveryHeader(input.deliveryId),
+        event: boundedDeliveryHeader(input.event),
         status: "rejected",
         detail: input.detail,
         runId: null,

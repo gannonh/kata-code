@@ -9,6 +9,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
@@ -34,6 +35,13 @@ const decodeHookCreatePayload = Schema.decodeUnknownEffect(
     }),
   ),
 );
+const decodeHookConfigPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      config: Schema.Struct({ url: Schema.String, secret: Schema.String }),
+    }),
+  ),
+);
 const output = (stdout: string): VcsProcess.VcsProcessOutput => ({
   exitCode: ChildProcessSpawner.ExitCode(0),
   stdout,
@@ -44,6 +52,8 @@ const output = (stdout: string): VcsProcess.VcsProcessOutput => ({
 type Call = { readonly args: ReadonlyArray<string>; readonly stdin: string | undefined };
 const calls: Call[] = [];
 let hooksListStatus: "ok" | "forbidden" = "ok";
+let hookCreateStatus: "ok" | "failure" = "ok";
+let hookPatchStatus: "ok" | "failure" = "ok";
 const githubLayer = Layer.mock(GitHubCli.GitHubCli)({
   assertAuthenticated: () => Effect.void,
   listRepositories: () =>
@@ -88,13 +98,32 @@ const githubLayer = Layer.mock(GitHubCli.GitHubCli)({
             }),
           );
     }
-    if (path === "repos/acme/widgets/hooks")
-      return Effect.succeed(output(JSON.stringify({ id: 1001 })));
+    if (path === "repos/acme/widgets/hooks") {
+      return hookCreateStatus === "ok"
+        ? Effect.succeed(output(JSON.stringify({ id: 1001 })))
+        : Effect.fail(
+            new GitHubCli.GitHubCliCommandError({
+              command: "gh",
+              cwd: input.cwd,
+              cause: "HTTP 500",
+            }),
+          );
+    }
     if (path.startsWith("repos/acme/widgets/branches"))
       return Effect.succeed(output(JSON.stringify([{ name: "main" }, { name: "release" }])));
     if (path.startsWith("repos/acme/widgets/labels"))
       return Effect.succeed(output(JSON.stringify([{ id: 5, name: "bug" }])));
-    if (path.startsWith("repos/acme/widgets/hooks/1001")) return Effect.succeed(output("{}"));
+    if (path.startsWith("repos/acme/widgets/hooks/1001")) {
+      return hookPatchStatus === "ok"
+        ? Effect.succeed(output("{}"))
+        : Effect.fail(
+            new GitHubCli.GitHubCliCommandError({
+              command: "gh",
+              cwd: input.cwd,
+              cause: "HTTP 500",
+            }),
+          );
+    }
     return Effect.fail(
       new GitHubCli.GitHubCliCommandError({
         command: "gh",
@@ -241,12 +270,84 @@ it.layer(layer)("RoutineConnections", (it) => {
       const patch = calls.findLast((call) => call.args.includes("PATCH"))!;
       const after = Option.getOrThrow(yield* secrets.get(routineConnectionSecretName(id)));
       assert.notDeepEqual(Buffer.from(before), Buffer.from(after));
-      assert.include(patch.stdin, Buffer.from(after).toString("hex"));
+      const payload = yield* decodeHookConfigPayload(patch.stdin!);
+      assert.equal(new TextDecoder().decode(after), payload.config.secret);
+      assert.equal(payload.config.url, `https://env.example/api/routines/webhooks/github/${id}`);
       const disabled = yield* connections.disable({ environmentId, id });
       assert.equal(disabled.status, "disabled");
       assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionSecretName(id))));
       assert.isTrue(calls.some((call) => call.args.includes("DELETE")));
     }),
+  );
+
+  it.effect("keeps the previous secret when the GitHub patch fails during rotation", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const id = RoutineConnectionId.make("connection-rotate-failure");
+      yield* connections.create({ environmentId, id, repository: "acme/widgets" });
+      const before = Option.getOrThrow(yield* secrets.get(routineConnectionSecretName(id)));
+      hookPatchStatus = "failure";
+      const error = yield* connections
+        .rotateSecret({ environmentId, id })
+        .pipe(Effect.flip, Effect.ensuring(Effect.sync(() => (hookPatchStatus = "ok"))));
+      assert.equal(error.code, "blocked");
+      assert.include(error.message, "GitHub rejected the request");
+      const after = Option.getOrThrow(yield* secrets.get(routineConnectionSecretName(id)));
+      assert.deepEqual(Buffer.from(after), Buffer.from(before));
+    }),
+  );
+
+  it.effect("releases the reserved secret when setup fails so the id can be retried", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const id = RoutineConnectionId.make("connection-retry");
+      hookCreateStatus = "failure";
+      yield* connections
+        .create({ environmentId, id, repository: "acme/widgets" })
+        .pipe(Effect.flip, Effect.ensuring(Effect.sync(() => (hookCreateStatus = "ok"))));
+      assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionSecretName(id))));
+      const retried = yield* connections.create({ environmentId, id, repository: "acme/widgets" });
+      assert.equal(retried.hookId, 1001);
+    }),
+  );
+
+  it.effect(
+    "removes the created hook and the reserved secret when the connection cannot be saved",
+    () =>
+      Effect.gen(function* () {
+        const connections = yield* RoutineConnections;
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        const sql = yield* SqlClient.SqlClient;
+        const id = RoutineConnectionId.make("connection-hook-cleanup");
+        const callsBefore = calls.length;
+        yield* sql`CREATE TEMP TRIGGER fail_connection_save BEFORE INSERT ON routine_connections
+        WHEN NEW.id='connection-hook-cleanup'
+        BEGIN SELECT RAISE(FAIL, 'simulated save failure'); END`;
+        const failed = yield* connections
+          .create({ environmentId, id, repository: "acme/widgets" })
+          .pipe(
+            Effect.flip,
+            Effect.ensuring(sql`DROP TRIGGER fail_connection_save`.pipe(Effect.orDie)),
+          );
+        assert.equal(failed.code, "persistence");
+        assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionSecretName(id))));
+        assert.isTrue(
+          calls
+            .slice(callsBefore)
+            .some(
+              (call) =>
+                call.args.includes("DELETE") && call.args.includes("repos/acme/widgets/hooks/1001"),
+            ),
+        );
+        const retried = yield* connections.create({
+          environmentId,
+          id,
+          repository: "acme/widgets",
+        });
+        assert.equal(retried.hookId, 1001);
+      }),
   );
 
   it.effect("metadata lists repositories and resolves stable ids for one repository", () =>

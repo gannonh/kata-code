@@ -12,6 +12,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -206,55 +207,95 @@ export const makeRoutineConnections = Effect.gen(function* () {
               : failure("persistence", "Could not reserve the signing secret."),
           ),
         );
-      yield* github
-        .assertAuthenticated({ cwd })
-        .pipe(Effect.mapError(gitHubFailure("GitHub authentication")));
-      const repository = yield* api([path]).pipe(
-        Effect.flatMap((output) => decodeJson(RepositoryJson, output.stdout)),
-      );
-      // Listing hooks requires admin on the repository; a non-admin sees 404.
-      yield* api([`${path}/hooks`], undefined, "Webhook access check").pipe(
-        Effect.mapError(() =>
-          failure(
-            "blocked",
-            `Creating a webhook needs admin access to ${repository.full_name}. Ask a repository admin to grant it.`,
+      const createdHookId = yield* Ref.make<number | null>(null);
+      const saved = yield* Ref.make(false);
+      return yield* Effect.gen(function* () {
+        yield* github
+          .assertAuthenticated({ cwd })
+          .pipe(Effect.mapError(gitHubFailure("GitHub authentication")));
+        const repository = yield* api([path]).pipe(
+          Effect.flatMap((output) => decodeJson(RepositoryJson, output.stdout)),
+        );
+        // Listing hooks requires admin on the repository; a non-admin sees 404.
+        yield* api([`${path}/hooks`], undefined, "Webhook access check").pipe(
+          Effect.mapError(() =>
+            failure(
+              "blocked",
+              `Creating a webhook needs admin access to ${repository.full_name}. Ask a repository admin to grant it.`,
+            ),
           ),
+        );
+        const callbackUrl = `${baseUrl}${routineWebhookCallbackPath(id)}`;
+        // The secret is reserved before the hook exists so GitHub cannot sign a
+        // delivery the server would have no key to verify. It reaches GitHub only
+        // through stdin and never enters argv or logs.
+        const hook = yield* api(
+          ["-X", "POST", `${path}/hooks`, "--input", "-"],
+          encodeHookCreate({
+            name: "web",
+            active: true,
+            events: [...HOOK_EVENTS],
+            config: hookConfig(callbackUrl, secretValue),
+          }),
+          "Webhook creation",
+        ).pipe(Effect.flatMap((output) => decodeJson(HookJson, output.stdout)));
+        yield* Ref.set(createdHookId, hook.id);
+        const now = yield* isoNow;
+        const connection: RoutineConnection = {
+          id,
+          environmentId: input.environmentId,
+          provider: "github",
+          repositoryId: repository.id,
+          repositoryName: repository.full_name,
+          repositoryUrl: repository.html_url,
+          defaultBranch: repository.default_branch,
+          hookId: hook.id,
+          callbackUrl,
+          status: "pending",
+          lastDelivery: null,
+          acceptedCount: 0,
+          ignoredCount: 0,
+          rejectedCount: 0,
+          createdAt: now,
+          updatedAt: now,
+        };
+        yield* store.saveConnection(connection);
+        yield* Ref.set(saved, true);
+        return connection;
+      }).pipe(
+        // A failed setup releases the reserved name so the id can be retried
+        // instead of failing forever on a conflict with itself, and removes the
+        // provider hook when one was already created. A committed connection
+        // keeps both even when the caller is interrupted afterwards.
+        Effect.onError(() =>
+          Effect.gen(function* () {
+            if (yield* Ref.get(saved)) return;
+            yield* secrets.remove(routineConnectionSecretName(id)).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("routine connection secret cleanup failed", {
+                  connectionId: id,
+                  detail: error.message,
+                }),
+              ),
+            );
+            const hookId = yield* Ref.get(createdHookId);
+            if (hookId === null) return;
+            yield* api(
+              ["-X", "DELETE", `${path}/hooks/${hookId}`],
+              undefined,
+              "Webhook cleanup",
+            ).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("routine connection hook cleanup failed", {
+                  connectionId: id,
+                  hookId,
+                  detail: error.message,
+                }),
+              ),
+            );
+          }),
         ),
       );
-      const callbackUrl = `${baseUrl}${routineWebhookCallbackPath(id)}`;
-      // The secret is stored before the hook exists so a delivery that races the
-      // create call can already be verified; it never enters argv or logs.
-      const hook = yield* api(
-        ["-X", "POST", `${path}/hooks`, "--input", "-"],
-        encodeHookCreate({
-          name: "web",
-          active: true,
-          events: [...HOOK_EVENTS],
-          config: hookConfig(callbackUrl, secretValue),
-        }),
-        "Webhook creation",
-      ).pipe(Effect.flatMap((output) => decodeJson(HookJson, output.stdout)));
-      const now = yield* isoNow;
-      const connection: RoutineConnection = {
-        id,
-        environmentId: input.environmentId,
-        provider: "github",
-        repositoryId: repository.id,
-        repositoryName: repository.full_name,
-        repositoryUrl: repository.html_url,
-        defaultBranch: repository.default_branch,
-        hookId: hook.id,
-        callbackUrl,
-        status: "pending",
-        lastDelivery: null,
-        acceptedCount: 0,
-        ignoredCount: 0,
-        rejectedCount: 0,
-        createdAt: now,
-        updatedAt: now,
-      };
-      yield* store.saveConnection(connection);
-      return connection;
     },
   );
 
@@ -322,15 +363,35 @@ export const makeRoutineConnections = Effect.gen(function* () {
     if (current.status === "disabled" || current.hookId === null)
       return yield* failure("blocked", "Reconnect the repository before rotating its secret.");
     const path = yield* repositoryPath(current.repositoryName);
+    const name = routineConnectionSecretName(current.id);
+    const previous = yield* secrets
+      .get(name)
+      .pipe(
+        Effect.mapError(() => failure("persistence", "Could not read the current signing secret.")),
+      );
     const secret = yield* secretBytes();
+    // Store the new value locally first, then patch GitHub. If the patch fails,
+    // the previous value is restored so provider and server never disagree.
+    yield* secrets
+      .set(name, new TextEncoder().encode(secretText(secret)))
+      .pipe(Effect.mapError(() => failure("persistence", "Could not store the signing secret.")));
     yield* api(
       ["-X", "PATCH", `${path}/hooks/${current.hookId}`, "--input", "-"],
       encodeHookPatch({ config: hookConfig(current.callbackUrl, secretText(secret)) }),
       "Webhook secret rotation",
+    ).pipe(
+      Effect.catch((error) =>
+        (Option.isSome(previous) ? secrets.set(name, previous.value) : secrets.remove(name)).pipe(
+          Effect.catch((restoreError) =>
+            Effect.logWarning("routine webhook secret restore failed", {
+              connectionId: current.id,
+              detail: restoreError.message,
+            }),
+          ),
+          Effect.andThen(Effect.fail(error)),
+        ),
+      ),
     );
-    yield* secrets
-      .set(routineConnectionSecretName(current.id), secret)
-      .pipe(Effect.mapError(() => failure("persistence", "Could not store the signing secret.")));
     return yield* store.updateConnection(current.id, (connection) => ({
       ...connection,
       updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
