@@ -9,6 +9,7 @@ import {
   type RoutineDeliveryStatus,
   type RoutineDraft,
   type RoutineDraftConversationMessage,
+  type RoutineDraftConversationState,
   type RoutineDraftGenerationResult,
   type RoutineTrigger,
   type RuntimeMode,
@@ -141,8 +142,8 @@ export type RoutineDraftChatTurn = RoutineDraftConversationMessage & { readonly 
 
 /** Increment the chat revision only when a user-visible draft value changed. */
 export function routineDraftRevisionAfterEdit(
-  previous: RoutineDraft,
-  next: RoutineDraft,
+  previous: RoutineEditorDraft,
+  next: RoutineEditorDraft,
   revision: number,
 ): number {
   return isRoutineDraftDirty(previous, next) ? revision + 1 : revision;
@@ -151,13 +152,23 @@ export function routineDraftRevisionAfterEdit(
 /**
  * The server only sees an untouched default editor. Once a generation or a
  * user edit initialized the draft, send the authoritative editor state,
- * including mid-edit blank name or instruction fields.
+ * including mid-edit blank name or instruction fields. Draft generation
+ * produces schedules only, so a GitHub trigger is sent as no current draft.
  */
 export function routineDraftForGenerationInput(
-  current: RoutineDraft,
+  current: RoutineEditorDraft,
   initialized: boolean,
-): RoutineDraft | null {
-  return initialized ? current : null;
+): RoutineDraftConversationState | null {
+  if (!initialized || !isRoutineEditorScheduleTrigger(current.trigger)) return null;
+  return {
+    name: current.name,
+    instruction: current.instruction,
+    projectId: current.projectId,
+    modelSelection: current.modelSelection,
+    runtimeMode: current.runtimeMode,
+    workspace: current.workspace,
+    trigger: current.trigger,
+  };
 }
 
 /** Keep the bounded transcript sent to the draft model. */
@@ -184,19 +195,19 @@ export function routineDraftChatHistoryForRequest(
 export type RoutineDraftGenerationApplyResult =
   | {
       readonly status: "applied" | "clarification";
-      readonly draft: RoutineDraft;
+      readonly draft: RoutineEditorDraft;
       readonly revision: number;
     }
   | {
       readonly status: "stale";
-      readonly draft: RoutineDraft;
+      readonly draft: RoutineEditorDraft;
       readonly revision: number;
       readonly reviewDraft: RoutineDraft;
     };
 
 /** Merge only model-owned fields, keeping editor-owned permission settings. */
 export function mergeRoutineDraftGeneratedFields(
-  current: RoutineDraft,
+  current: RoutineEditorDraft,
   generated: RoutineDraft,
 ): RoutineDraft {
   return {
@@ -211,7 +222,7 @@ export function mergeRoutineDraftGeneratedFields(
  * Runtime mode and workspace belong to the editor and always come from it.
  */
 export function applyRoutineDraftGenerationResponse(
-  current: RoutineDraft,
+  current: RoutineEditorDraft,
   currentRevision: number,
   response: RoutineDraftGenerationResult,
 ): RoutineDraftGenerationApplyResult {

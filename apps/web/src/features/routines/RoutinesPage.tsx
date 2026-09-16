@@ -1683,7 +1683,7 @@ export function RoutinesPage() {
     setDraft(next);
   };
 
-  const updateDraftConfiguration = (configuration: RoutineDraft) => {
+  const updateDraftConfiguration = (configuration: RoutineEditorDraft) => {
     if (draft === null) return;
     updateDraft({ ...draft, configuration });
   };
