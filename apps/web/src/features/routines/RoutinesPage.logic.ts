@@ -3,6 +3,8 @@ import {
   ModelSelection,
   isProviderAvailable,
   isScheduleTrigger,
+  RoutineId,
+  RoutineRequestId,
   type GitHubEventTrigger,
   type Routine,
   type RoutineConnection,
@@ -19,7 +21,17 @@ import {
 } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
 
+import { randomUUID } from "../../lib/utils";
+
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
+
+export function newRoutineDraftId(): RoutineId {
+  return RoutineId.make(`routine-draft-${randomUUID()}`);
+}
+
+export function newRoutineRequestId(): RoutineRequestId {
+  return RoutineRequestId.make(`routine-request-${randomUUID()}`);
+}
 
 function remoteRefBranchName(ref: Pick<VcsRef, "name" | "remoteName" | "isRemote">): string {
   if (ref.isRemote && ref.remoteName && ref.name.startsWith(`${ref.remoteName}/`)) {

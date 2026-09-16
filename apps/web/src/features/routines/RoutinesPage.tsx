@@ -6,8 +6,7 @@ import {
   Routine,
   RoutineConnectionId,
   RoutineDraft,
-  RoutineId,
-  RoutineRequestId,
+  type RoutineId,
   isScheduleTrigger,
   type EnvironmentId,
   type GitHubEventTrigger,
@@ -72,6 +71,8 @@ import {
   isRoutineDraftDirty,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
+  newRoutineDraftId,
+  newRoutineRequestId,
   preferredWorktreeBaseBranch,
   routineDraftBaselineAfterAutomaticChange,
   routineDraftRevisionAfterEdit,
@@ -116,8 +117,6 @@ type EnvironmentRoutineLoad = {
 };
 
 const EMPTY_ROUTINES: readonly RoutineWithOwner[] = [];
-let draftSequence = 0;
-const nextDraftId = () => `routine-draft-${Date.now().toString(36)}-${++draftSequence}`;
 
 const statusLabel: Record<Routine["state"], string> = {
   enabled: "Active",
@@ -160,7 +159,7 @@ function defaultDraft(
       ? worktreeWorkspace(baseBranch)
       : { kind: "shared" as const, directory: project.workspaceRoot };
   return {
-    id: RoutineId.make(nextDraftId()),
+    id: newRoutineDraftId(),
     environmentId,
     expectedRevision: 0,
     configuration: {
@@ -904,7 +903,7 @@ function RoutineEditor({
       input: {
         id: routine.id,
         expectedRevision: routine.revision,
-        requestId: RoutineRequestId.make(nextDraftId()),
+        requestId: newRoutineRequestId(),
       },
     });
     setBusy(false);
