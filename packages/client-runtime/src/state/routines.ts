@@ -86,5 +86,64 @@ export function createRoutineEnvironmentAtoms<R, E>(
     },
   });
 
-  return { changes, list, get, history, preview, draft, save, change, test };
+  const connections = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:routines:connections",
+    tag: WS_METHODS.routinesConnectionsList,
+    staleTimeMs: 0,
+    refreshTrigger: ({ environmentId }) => changes({ environmentId, input: {} }),
+  });
+
+  const gitHubMetadata = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:routines:github-metadata",
+    tag: WS_METHODS.routinesGitHubMetadata,
+    staleTimeMs: 60_000,
+  });
+
+  const connectionConcurrency = {
+    mode: "serial",
+    key: ({ environmentId, input }: { environmentId: EnvironmentId; input: { id: string } }) =>
+      JSON.stringify(["connection", environmentId, input.id]),
+  } satisfies AtomCommandConcurrency<{ environmentId: EnvironmentId; input: { id: string } }>;
+
+  const createConnection = createEnvironmentRpcCommand(runtime, {
+    label: "environment-data:routines:connections:create",
+    tag: WS_METHODS.routinesConnectionsCreate,
+    concurrency: connectionConcurrency,
+  });
+
+  const verifyConnection = createEnvironmentRpcCommand(runtime, {
+    label: "environment-data:routines:connections:verify",
+    tag: WS_METHODS.routinesConnectionsVerify,
+    concurrency: connectionConcurrency,
+  });
+
+  const disableConnection = createEnvironmentRpcCommand(runtime, {
+    label: "environment-data:routines:connections:disable",
+    tag: WS_METHODS.routinesConnectionsDisable,
+    concurrency: connectionConcurrency,
+  });
+
+  const rotateConnectionSecret = createEnvironmentRpcCommand(runtime, {
+    label: "environment-data:routines:connections:rotate-secret",
+    tag: WS_METHODS.routinesConnectionsRotateSecret,
+    concurrency: connectionConcurrency,
+  });
+
+  return {
+    changes,
+    list,
+    get,
+    history,
+    preview,
+    draft,
+    save,
+    change,
+    test,
+    connections,
+    gitHubMetadata,
+    createConnection,
+    verifyConnection,
+    disableConnection,
+    rotateConnectionSecret,
+  };
 }

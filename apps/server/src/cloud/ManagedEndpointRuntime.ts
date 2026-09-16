@@ -60,6 +60,7 @@ export class CloudManagedEndpointRuntime extends Context.Service<
     readonly applyConfig: (
       config: RelayManagedEndpointRuntimeConfig | null,
     ) => Effect.Effect<CloudManagedEndpointRuntimeStatus>;
+    readonly getStatus: Effect.Effect<CloudManagedEndpointRuntimeStatus>;
   }
 >()("@kata-sh/code-cli/cloud/ManagedEndpointRuntime/CloudManagedEndpointRuntime") {}
 
@@ -117,6 +118,7 @@ export const make = Effect.gen(function* () {
   const relayClient = yield* RelayClient.RelayClient;
   const activeRef = yield* Ref.make<ActiveConnector | null>(null);
   const desiredConfigRef = yield* Ref.make<RelayManagedEndpointRuntimeConfig | null>(null);
+  const statusRef = yield* Ref.make<CloudManagedEndpointRuntimeStatus>({ status: "disabled" });
   const reconcileSemaphore = yield* Semaphore.make(1);
   const restartDelayRef = yield* Ref.make(0);
   let reconcileConfig: CloudManagedEndpointRuntime["Service"]["applyConfig"];
@@ -231,12 +233,17 @@ export const make = Effect.gen(function* () {
       ),
     );
 
-  reconcileConfig = Effect.fn("CloudManagedEndpointRuntime.reconcileConfig")(function* (config) {
+  const reconcile = Effect.fn("CloudManagedEndpointRuntime.reconcileConfig")(function* (
+    config: RelayManagedEndpointRuntimeConfig | null,
+  ) {
     if (!config || config.providerKind !== "cloudflare_tunnel") {
       yield* stopActive;
       return config
-        ? { status: "unsupported", providerKind: config.providerKind }
-        : { status: "disabled" };
+        ? ({
+            status: "unsupported",
+            providerKind: config.providerKind,
+          } satisfies CloudManagedEndpointRuntimeStatus)
+        : ({ status: "disabled" } satisfies CloudManagedEndpointRuntimeStatus);
     }
 
     const nextConfigKey = runtimeConfigKey(config);
@@ -344,6 +351,9 @@ export const make = Effect.gen(function* () {
     } satisfies CloudManagedEndpointRuntimeStatus;
   });
 
+  reconcileConfig = (config) =>
+    reconcile(config).pipe(Effect.tap((status) => Ref.set(statusRef, status)));
+
   const applyConfig = Effect.fn("CloudManagedEndpointRuntime.applyConfig")(
     (config: RelayManagedEndpointRuntimeConfig | null) =>
       reconcileSemaphore.withPermits(1)(
@@ -355,8 +365,36 @@ export const make = Effect.gen(function* () {
       ),
   );
 
+  /**
+   * Reports the live status without reconciling. A dead connector still held in
+   * `activeRef` (the supervisor has not cleaned it up yet) reads as failed, so
+   * callers never treat a stopped tunnel as running.
+   */
+  const getStatus = Effect.gen(function* () {
+    const active = yield* Ref.get(activeRef);
+    if (active === null) return yield* Ref.get(statusRef);
+    const isRunning = yield* active.child.isRunning.pipe(Effect.orElseSucceed(() => false));
+    if (isRunning) {
+      return {
+        status: "running",
+        providerKind: "cloudflare_tunnel",
+        pid: Number(active.child.pid),
+        ...(active.config.tunnelId ? { tunnelId: active.config.tunnelId } : {}),
+        ...(active.config.tunnelName ? { tunnelName: active.config.tunnelName } : {}),
+      } satisfies CloudManagedEndpointRuntimeStatus;
+    }
+    return {
+      status: "failed",
+      providerKind: active.config.providerKind,
+      reason: "The relay client is not running.",
+      ...(active.config.tunnelId ? { tunnelId: active.config.tunnelId } : {}),
+      ...(active.config.tunnelName ? { tunnelName: active.config.tunnelName } : {}),
+    } satisfies CloudManagedEndpointRuntimeStatus;
+  });
+
   const runtime = CloudManagedEndpointRuntime.of({
     applyConfig,
+    getStatus,
   });
 
   const initialConfig = yield* readRuntimeConfig.pipe(

@@ -11,6 +11,9 @@ The Routines page lists routines from every connected environment, lets a user c
 - `routines-test` starts one idempotent test run and exposes its conversation when the provider confirms it.
 - `routines-history` refreshes recent runs after a run changes state.
 - `routines-conflict` reports a stale revision instead of overwriting a newer edit.
+- `routines-github-setup` connects a GitHub repository through guided setup and shows the callback URL, ping status, and diagnostics.
+- `routines-github-run` records a signed GitHub delivery, admits one run, and shows `Open on GitHub` beside the run.
+- `routines-github-controls` pauses, rotates the secret, and disables a connection while diagnostics update.
 
 ## How to get to it (user POV)
 
@@ -38,6 +41,9 @@ Preconditions:
 - **History refresh.** Keep the editor open while the test completes. `Recent runs` updates without reopening the editor.
 - **Conflict.** Open the same routine in two paired clients, save from the first, then save the stale second draft. The second editor shows a conflict message and the first saved configuration remains intact.
 - **Pause and resume.** Click `Pause`, verify the card says `Paused`, then click `Resume` and verify it says `Active`.
+- **GitHub trigger.** In the editor choose the `GitHub event` button under `When to run`. The `Repository connection` select and a `Connect a repository` button appear. With a Kata Code Connect managed tunnel and `gh` authenticated as a repository admin, choose `Connect a repository`, type `owner/name`, and choose `Create webhook`. The status line reports the created webhook and then `GitHub ping received.`; the diagnostics panel shows `Verified`, the callback URL, and the hook id. Without a managed tunnel the status line names the missing public callback URL and no webhook is created.
+- **GitHub run.** Choose `Pull request opened`, keep the default base branch, and `Save`. Open a pull request in the repository (or send a signed delivery to the callback on an isolated host). `Recent runs` gains a row with `Open on GitHub` and, once confirmed, `Open conversation`. The diagnostics panel's accepted count increases and the delivery id appears under `Last delivery`; accepted pings also contribute to this count.
+- **GitHub controls.** Choose `Rotate secret`; the status line reports the rotation. Choose `Disable`; the connection reads `Disabled` and a further delivery is rejected (`Rejected` count increases). Pausing the routine keeps the connection but admits no run.
 - **Proof.** Save `screenshots/routines-library.png` with the cards and editor visible, `screenshots/routines-preview-history.png` with the timezone preview and completed run, and `snapshots/routines.aria.txt` with the accessibility snapshot. Record the route and actions in `evidence.json`.
 
 ## Gotchas
@@ -46,3 +52,5 @@ Preconditions:
 - A disconnected environment still appears in the library. Its cards remain readable, while Save, Test run, Pause, Resume, and Delete are disabled.
 - The preview is server-validated. Invalid IANA zones and malformed cron expressions show an error and cannot be saved.
 - A provider response may take time. Keep the editor open so the durable history subscription can show the terminal state.
+- GitHub setup needs three fixtures: a managed tunnel link on the environment, `gh` authenticated on the environment host, and admin access to the repository. Missing fixtures block the GitHub sub-features; report them as blocked, not failed.
+- Signed deliveries can be sent to the callback directly on an isolated host with `X-Hub-Signature-256` computed over the raw body using the secret stored under `<home>/userdata/secrets/routine-connection-<id>.bin`.

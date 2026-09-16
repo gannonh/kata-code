@@ -1,11 +1,15 @@
 import * as NodeCrypto from "node:crypto";
 import {
   CommandId,
+  EVENT_ROUTINE_NEXT_DUE_AT,
   EnvironmentId,
   EventId,
   MessageId,
   Routine,
   RoutineChangeInput,
+  RoutineConnection,
+  RoutineConnectionId,
+  RoutineDelivery,
   RoutineError,
   RoutineHistoryInput,
   RoutineList,
@@ -17,6 +21,7 @@ import {
   RoutineTestInput,
   ThreadId,
   TurnId,
+  isScheduleTrigger,
   previewRoutineSchedule,
 } from "@kata-sh/code-contracts";
 import * as Context from "effect/Context";
@@ -29,10 +34,48 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
+import {
+  formatEventContext,
+  triggerMatchesEvent,
+  type GitHubRoutineEventSummary,
+} from "./GitHubRoutineEvents.ts";
+
 const decodeRoutine = Schema.decodeUnknownSync(Schema.fromJsonString(Routine));
 const decodeRun = Schema.decodeUnknownSync(Schema.fromJsonString(RoutineRun));
 const encodeRoutine = Schema.encodeSync(Schema.fromJsonString(Routine));
 const encodeRun = Schema.encodeSync(Schema.fromJsonString(RoutineRun));
+const decodeConnection = Schema.decodeUnknownSync(Schema.fromJsonString(RoutineConnection));
+const encodeConnection = Schema.encodeSync(Schema.fromJsonString(RoutineConnection));
+const encodeDelivery = Schema.encodeSync(Schema.fromJsonString(RoutineDelivery));
+/** Signed-content digests are only suppressed inside this window. */
+const DELIVERY_DIGEST_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+/** Rejected deliveries arrive before signature verification, so bound what is stored. */
+export const MAX_DELIVERY_HEADER_LENGTH = 128;
+const boundedDeliveryHeader = (value: string) => value.slice(0, MAX_DELIVERY_HEADER_LENGTH);
+export interface RoutineEventAdmissionInput {
+  readonly connectionId: RoutineConnectionId;
+  readonly deliveryId: string;
+  /** Hex digest of the raw signed body. */
+  readonly digest: string;
+  readonly eventName: string;
+  /** Repository id declared by the payload; checked against the connection. */
+  readonly repositoryId: number | null;
+  /** Null when the event or action is not one routines can run on. */
+  readonly summary: GitHubRoutineEventSummary | null;
+  readonly now: number;
+}
+export type RoutineEventRejectionReason = "disabled" | "wrong-repository";
+export interface RoutineEventRecorded {
+  readonly status: "accepted" | "ignored" | "duplicate";
+  readonly runs: ReadonlyArray<RoutineRun>;
+}
+export interface RoutineEventRejected {
+  readonly status: "rejected";
+  readonly reason: RoutineEventRejectionReason;
+  readonly detail: string;
+  readonly runs: ReadonlyArray<RoutineRun>;
+}
+export type RoutineEventAdmission = RoutineEventRecorded | RoutineEventRejected;
 export type RoutineClaim = {
   readonly run: RoutineRun;
   readonly owner: string;
@@ -81,9 +124,11 @@ export const makeRoutineStore = Effect.gen(function* () {
     });
   const writeRoutine = (
     routine: Routine,
-  ) => sql`INSERT INTO routines (id, environment_id, revision, state, next_due_at, record)
-    VALUES (${routine.id}, ${routine.environmentId}, ${routine.revision}, ${routine.state}, ${routine.nextDueAt}, ${encodeRoutine(routine)})
-    ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, state=excluded.state, next_due_at=excluded.next_due_at, record=excluded.record`;
+  ) => sql`INSERT INTO routines (id, environment_id, revision, state, next_due_at, trigger_kind, record)
+    VALUES (${routine.id}, ${routine.environmentId}, ${routine.revision}, ${routine.state}, ${routine.nextDueAt}, ${triggerKind(routine)}, ${encodeRoutine(routine)})
+    ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, state=excluded.state, next_due_at=excluded.next_due_at, trigger_kind=excluded.trigger_kind, record=excluded.record`;
+  const triggerKind = (routine: Routine) =>
+    isScheduleTrigger(routine.configuration.trigger) ? "schedule" : "github";
   const recordChange = (
     environmentId: EnvironmentId,
     kind: RoutineSubscriptionEvent["kind"] = "changed",
@@ -92,12 +137,49 @@ export const makeRoutineStore = Effect.gen(function* () {
     sql`UPDATE routine_runs SET record=${encodeRun(run)}, stage=${run.stage}, active=${active ? 1 : 0} WHERE id=${run.id}`.pipe(
       Effect.andThen(recordChange(run.environmentId)),
     );
-  const nextDue = (configuration: Routine["configuration"], now: number) =>
-    Effect.try({
+  const nextDue = (configuration: Routine["configuration"], now: number) => {
+    const trigger = configuration.trigger;
+    if (!isScheduleTrigger(trigger)) return Effect.succeed(EVENT_ROUTINE_NEXT_DUE_AT);
+    return Effect.try({
       try: () =>
-        previewRoutineSchedule(configuration.trigger, DateTime.toDateUtc(DateTime.makeUnsafe(now)))
-          .dates[0]!,
+        previewRoutineSchedule(trigger, DateTime.toDateUtc(DateTime.makeUnsafe(now))).dates[0]!,
       catch: persistenceError,
+    });
+  };
+  const readConnection = (id: string) =>
+    Effect.gen(function* () {
+      const rows = yield* sql<{
+        record: string;
+      }>`SELECT record FROM routine_connections WHERE id = ${id}`;
+      if (!rows[0]) return yield* failure("not-found", "Connection no longer exists.");
+      return yield* Effect.try({
+        try: () => decodeConnection(rows[0]!.record),
+        catch: persistenceError,
+      });
+    });
+  const writeConnection = (
+    connection: RoutineConnection,
+  ) => sql`INSERT INTO routine_connections (id, environment_id, status, record)
+    VALUES (${connection.id}, ${connection.environmentId}, ${connection.status}, ${encodeConnection(connection)})
+    ON CONFLICT(id) DO UPDATE SET status=excluded.status, record=excluded.record`;
+  /** A GitHub trigger must name a live connection of this environment for the same repository. */
+  const checkTrigger = (environmentId: EnvironmentId, configuration: Routine["configuration"]) =>
+    Effect.gen(function* () {
+      const trigger = configuration.trigger;
+      if (isScheduleTrigger(trigger)) return;
+      const rows = yield* sql<{
+        record: string;
+      }>`SELECT record FROM routine_connections WHERE id = ${trigger.connectionId}`;
+      const connection = rows[0] ? decodeConnection(rows[0].record) : undefined;
+      if (!connection || connection.environmentId !== environmentId)
+        return yield* failure("validation", "Connect the GitHub repository before saving.");
+      if (connection.status === "disabled")
+        return yield* failure("validation", "This GitHub connection is disabled.");
+      if (connection.repositoryId !== trigger.repositoryId)
+        return yield* failure(
+          "validation",
+          "The selected repository does not match the connection.",
+        );
     });
   const checkRevision = (routine: Routine, revision: number) =>
     routine.revision === revision
@@ -131,6 +213,7 @@ export const makeRoutineStore = Effect.gen(function* () {
   const save = (environmentId: EnvironmentId, input: typeof RoutineSaveInput.Type, now: number) =>
     transaction(
       Effect.gen(function* () {
+        yield* checkTrigger(environmentId, input.configuration);
         const nextDueAt = yield* nextDue(input.configuration, now);
         const rows = yield* sql<{
           record: string;
@@ -210,12 +293,18 @@ export const makeRoutineStore = Effect.gen(function* () {
     );
   const insertRun = (
     routine: Routine,
-    occurrenceKey: string,
-    source: RoutineRun["source"],
-    now: number,
-    skipReason?: string,
+    input: {
+      readonly occurrenceKey: string;
+      readonly source: RoutineRun["source"];
+      readonly now: number;
+      readonly skipReason?: string | undefined;
+      readonly event?: Pick<RoutineRun, "sourceUrl" | "eventContext"> | undefined;
+    },
   ) =>
     Effect.gen(function* () {
+      const { occurrenceKey, now, source } = input;
+      const skipReason = input.skipReason;
+      const event = input.event;
       const existing = yield* sql<{
         record: string;
       }>`SELECT record FROM routine_runs WHERE routine_id=${routine.id} AND occurrence_key=${occurrenceKey}`;
@@ -235,6 +324,8 @@ export const makeRoutineStore = Effect.gen(function* () {
         configuration: routine.configuration,
         occurrenceKey,
         source,
+        ...(event?.sourceUrl ? { sourceUrl: event.sourceUrl } : {}),
+        ...(event?.eventContext ? { eventContext: event.eventContext } : {}),
         threadId: ThreadId.make(`routine-${id}`),
         messageId: MessageId.make(`routine-message-${id}`),
         commandId: CommandId.make(`routine-turn-${id}`),
@@ -278,7 +369,11 @@ export const makeRoutineStore = Effect.gen(function* () {
         yield* checkRevision(routine, input.expectedRevision);
         if (routine.state !== "enabled")
           return yield* failure("blocked", "Resume the routine before testing it.");
-        return yield* insertRun(routine, `test:${input.requestId}`, "test", now);
+        return yield* insertRun(routine, {
+          occurrenceKey: `test:${input.requestId}`,
+          source: "test",
+          now,
+        });
       }),
     );
   const history = (environmentId: EnvironmentId, input: typeof RoutineHistoryInput.Type) =>
@@ -342,26 +437,191 @@ export const makeRoutineStore = Effect.gen(function* () {
         const nowIso = isoAt(now);
         const due = yield* sql<{
           record: string;
-        }>`SELECT record FROM routines WHERE state='enabled' AND next_due_at <= ${nowIso}`;
+        }>`SELECT record FROM routines WHERE state='enabled' AND trigger_kind='schedule' AND next_due_at <= ${nowIso}`;
         for (const row of due) {
           const routine = decodeRoutine(row.record);
           const downtime =
             leader.observed_at > 0 && workerStartedAt > Date.parse(routine.nextDueAt);
-          yield* insertRun(
-            routine,
-            `schedule:${routine.revision}:${routine.nextDueAt}`,
-            downtime ? "downtime" : "schedule",
+          yield* insertRun(routine, {
+            occurrenceKey: `schedule:${routine.revision}:${routine.nextDueAt}`,
+            source: downtime ? "downtime" : "schedule",
             now,
-            downtime
+            skipReason: downtime
               ? `Server unavailable between ${routine.nextDueAt} and ${nowIso}; elapsed schedules were skipped.`
               : undefined,
-          );
+          });
           yield* writeRoutine({
             ...routine,
             nextDueAt: yield* nextDue(routine.configuration, now),
           });
           yield* recordChange(routine.environmentId);
         }
+      }),
+    );
+  const listConnections = (environmentId: EnvironmentId) =>
+    sql<{
+      record: string;
+    }>`SELECT record FROM routine_connections WHERE environment_id=${environmentId} ORDER BY id`.pipe(
+      Effect.flatMap((rows) =>
+        Effect.try({
+          try: () => rows.map((row) => decodeConnection(row.record)),
+          catch: persistenceError,
+        }),
+      ),
+      Effect.mapError(persistenceError),
+    );
+  const getConnection = (environmentId: EnvironmentId, id: string) =>
+    readConnection(id).pipe(
+      Effect.filterOrFail(
+        (connection) => connection.environmentId === environmentId,
+        () => failure("not-found", "Connection no longer exists."),
+      ),
+      Effect.mapError(persistenceError),
+    );
+  /** Callback lookup by id alone; the caller verifies the signature before trusting anything else. */
+  const findConnection = (id: string) =>
+    sql<{ record: string }>`SELECT record FROM routine_connections WHERE id = ${id}`.pipe(
+      Effect.flatMap((rows) =>
+        rows[0]
+          ? Effect.try({ try: () => decodeConnection(rows[0]!.record), catch: persistenceError })
+          : Effect.succeed<RoutineConnection | null>(null),
+      ),
+      Effect.mapError(persistenceError),
+    );
+  const saveConnection = (connection: RoutineConnection) =>
+    transaction(
+      sql`INSERT INTO routine_connections (id, environment_id, status, record)
+        VALUES (${connection.id}, ${connection.environmentId}, ${connection.status}, ${encodeConnection(connection)})`.pipe(
+        Effect.andThen(recordChange(connection.environmentId)),
+      ),
+    );
+  const updateConnection = (
+    id: string,
+    patch: (connection: RoutineConnection) => RoutineConnection,
+  ) =>
+    transaction(
+      Effect.gen(function* () {
+        const next = patch(yield* readConnection(id));
+        yield* writeConnection(next);
+        yield* recordChange(next.environmentId);
+        return next;
+      }),
+    );
+  const recordRejectedDelivery = (
+    connectionId: string,
+    input: { readonly deliveryId: string; readonly event: string; readonly detail: string },
+    now: number,
+  ) =>
+    updateConnection(connectionId, (connection) => ({
+      ...connection,
+      rejectedCount: connection.rejectedCount + 1,
+      lastDelivery: {
+        deliveryId: boundedDeliveryHeader(input.deliveryId),
+        event: boundedDeliveryHeader(input.event),
+        status: "rejected",
+        detail: input.detail,
+        runId: null,
+        receivedAt: isoAt(now),
+      },
+      updatedAt: isoAt(now),
+    })).pipe(Effect.asVoid);
+  /**
+   * Owns the whole admission decision table for a known connection: disabled
+   * connections and payloads for another repository are rejected, unsupported
+   * events and unmatched repositories are ignored. The signed delivery and
+   * every run it admits are recorded in one transaction, so a 2xx to the
+   * provider always means the intent is durable. Runs reuse the
+   * scheduled-routine admission path, including its active-slot short circuit.
+   */
+  const admitEvent = (
+    input: RoutineEventAdmissionInput,
+  ): Effect.Effect<RoutineEventAdmission, RoutineError> =>
+    transaction(
+      Effect.gen(function* () {
+        const connection = yield* readConnection(input.connectionId);
+        // Expire the window before checking replay identity, so an old digest
+        // cannot suppress every later delivery and prevent its own pruning.
+        yield* sql`DELETE FROM routine_deliveries WHERE connection_id=${connection.id}
+          AND received_at < ${input.now - DELIVERY_DIGEST_WINDOW_MS}`;
+        const duplicate = yield* sql<{
+          delivery_id: string;
+        }>`SELECT delivery_id FROM routine_deliveries WHERE connection_id=${connection.id}
+          AND (delivery_id=${input.deliveryId} OR digest=${input.digest})`;
+        if (duplicate[0]) return { status: "duplicate", runs: [] } satisfies RoutineEventRecorded;
+        const runs: RoutineRun[] = [];
+        let rejection: {
+          readonly reason: RoutineEventRejectionReason;
+          readonly detail: string;
+        } | null = null;
+        let detail: string | null = null;
+        const ping = input.eventName === "ping";
+        if (connection.status === "disabled") {
+          rejection = { reason: "disabled", detail: "Connection is disabled." };
+        } else if (input.repositoryId !== connection.repositoryId) {
+          rejection = {
+            reason: "wrong-repository",
+            detail: "Delivery names a different repository.",
+          };
+        } else if (ping) {
+          detail = "GitHub ping received.";
+        } else if (input.summary === null) {
+          detail = `Unsupported event ${input.eventName}.`;
+        } else {
+          const summary = input.summary;
+          const context = formatEventContext(summary);
+          const candidates = yield* sql<{
+            record: string;
+          }>`SELECT record FROM routines WHERE environment_id=${connection.environmentId}
+            AND state='enabled' AND trigger_kind='github' ORDER BY id`;
+          for (const row of candidates) {
+            const routine = decodeRoutine(row.record);
+            const trigger = routine.configuration.trigger;
+            if (isScheduleTrigger(trigger) || trigger.connectionId !== connection.id) continue;
+            if (!triggerMatchesEvent(trigger, summary)) continue;
+            runs.push(
+              yield* insertRun(routine, {
+                occurrenceKey: `github:${input.deliveryId}`,
+                source: "github",
+                now: input.now,
+                event: { sourceUrl: summary.url || undefined, eventContext: context },
+              }),
+            );
+          }
+          if (runs.length === 0) detail = "No enabled routine matched this event.";
+        }
+        const status = rejection ? "rejected" : ping || runs.length > 0 ? "accepted" : "ignored";
+        const delivery: RoutineDelivery = {
+          deliveryId: input.deliveryId,
+          event: input.eventName,
+          status,
+          detail: rejection?.detail ?? detail,
+          runId: runs[0]?.id ?? null,
+          receivedAt: isoAt(input.now),
+        };
+        yield* sql`INSERT INTO routine_deliveries (connection_id, delivery_id, digest, status, run_id, received_at, record)
+          VALUES (${connection.id}, ${delivery.deliveryId}, ${input.digest}, ${status}, ${delivery.runId}, ${input.now}, ${encodeDelivery(delivery)})`;
+        yield* writeConnection({
+          ...connection,
+          status: ping && !rejection ? "verified" : connection.status,
+          acceptedCount: connection.acceptedCount + (status === "accepted" ? 1 : 0),
+          ignoredCount: connection.ignoredCount + (status === "ignored" ? 1 : 0),
+          rejectedCount: connection.rejectedCount + (rejection ? 1 : 0),
+          lastDelivery: delivery,
+          updatedAt: isoAt(input.now),
+        });
+        yield* recordChange(connection.environmentId);
+        if (rejection !== null) {
+          return {
+            status: "rejected",
+            reason: rejection.reason,
+            detail: rejection.detail,
+            runs: [],
+          } satisfies RoutineEventRejected;
+        }
+        return {
+          status: ping || runs.length > 0 ? "accepted" : "ignored",
+          runs,
+        } satisfies RoutineEventRecorded;
       }),
     );
   const claim = (owner: string, now: number) =>
@@ -1072,6 +1332,13 @@ export const makeRoutineStore = Effect.gen(function* () {
     recoverConsumed,
     findInitial,
     submissionClaim,
+    listConnections,
+    getConnection,
+    findConnection,
+    saveConnection,
+    updateConnection,
+    recordRejectedDelivery,
+    admitEvent,
   };
 });
 export class RoutineStore extends Context.Service<

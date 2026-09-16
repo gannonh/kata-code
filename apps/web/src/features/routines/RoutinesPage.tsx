@@ -1,12 +1,18 @@
 import {
+  GITHUB_ROUTINE_EVENT_LABELS,
   ModelSelection,
   ProviderInstanceId,
   type ProviderOptionSelection,
   Routine,
+  RoutineConnectionId,
   RoutineDraft,
   RoutineId,
   RoutineRequestId,
+  isScheduleTrigger,
   type EnvironmentId,
+  type GitHubEventTrigger,
+  type GitHubRoutineEvent,
+  type RoutineConnection,
   type RoutineRun,
   type RuntimeMode,
   type ServerProvider,
@@ -30,6 +36,7 @@ import {
   SaveIcon,
   Settings2Icon,
   Trash2Icon,
+  WebhookIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
@@ -54,10 +61,14 @@ import { requestConfirmDialog } from "../../confirmDialog";
 import {
   canSaveRoutineDraft,
   confirmDialogAccepted,
+  defaultGitHubTriggerDraft,
   DELETE_ROUTINE_MESSAGE,
   DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
   firstEnabledProviderModel,
+  isCompleteGitHubTrigger,
+  isRoutineEditorDraftComplete,
+  isRoutineEditorScheduleTrigger,
   isRoutineDraftDirty,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
@@ -71,6 +82,17 @@ import {
   ROUTINE_PERMISSION_MODE_LABELS,
   ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS,
   routinesLibraryEmptyKind,
+  defaultGitHubTrigger,
+  formatRoutineTrigger,
+  GITHUB_REDELIVERY_NOTE,
+  gitHubHookSettingsUrl,
+  ROUTINE_CONNECTION_STATUS_LABELS,
+  ROUTINE_DELIVERY_STATUS_LABELS,
+  routineTriggerKind,
+  selectableConnections,
+  withApplicableTriggerFilters,
+  type RoutineEditorDraft,
+  type RoutineEditorGitHubTrigger,
 } from "./RoutinesPage.logic";
 import { RoutineChat } from "./RoutineChat";
 
@@ -85,7 +107,7 @@ type DraftState = {
   readonly id: RoutineId;
   readonly environmentId: EnvironmentId;
   readonly expectedRevision: number;
-  readonly configuration: RoutineDraft;
+  readonly configuration: RoutineEditorDraft;
 };
 
 type EnvironmentRoutineLoad = {
@@ -156,19 +178,6 @@ function defaultDraft(
       trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
     },
   };
-}
-
-function formatSchedule(routine: Routine): string {
-  const trigger = routine.configuration.trigger;
-  const triggerText =
-    trigger.kind === "cron"
-      ? trigger.expression
-      : trigger.kind === "weekly"
-        ? `Weekly on ${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][trigger.weekday]} at ${trigger.time}`
-        : trigger.kind === "weekdays"
-          ? `Weekdays at ${trigger.time}`
-          : `Daily at ${trigger.time}`;
-  return `${triggerText} · ${trigger.timezone}`;
 }
 
 function formatDateInTimezone(value: string, timezone: string): string {
@@ -264,7 +273,11 @@ function RoutineCard({
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-background/75 text-muted-foreground ring-1 ring-border/50">
-          <Clock3Icon className="size-4" />
+          {isScheduleTrigger(routine.configuration.trigger) ? (
+            <Clock3Icon className="size-4" />
+          ) : (
+            <WebhookIcon className="size-4" />
+          )}
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center justify-between gap-2">
@@ -278,7 +291,7 @@ function RoutineCard({
             ) : null}
           </span>
           <span className="mt-1 block truncate text-xs text-muted-foreground">
-            {formatSchedule(routine)}
+            {formatRoutineTrigger(routine.configuration.trigger)}
           </span>
           <span className="mt-1 block truncate text-xs text-muted-foreground/70">
             {routine.ownerLabel} · {projectLabel}
@@ -303,6 +316,342 @@ function FieldLabel({
     <label htmlFor={htmlFor} className="text-xs font-medium text-muted-foreground">
       {children}
     </label>
+  );
+}
+
+/** A key set to `undefined` clears that filter; an absent key leaves it alone. */
+type GitHubTriggerPatch = {
+  readonly event?: GitHubEventTrigger["event"];
+  readonly branch?: string | undefined;
+  readonly includeDrafts?: boolean;
+  readonly issueLabelId?: number | undefined;
+};
+
+function GitHubTriggerFields({
+  environmentId,
+  trigger,
+  connections,
+  selectedConnection,
+  offline,
+  busy,
+  onTriggerChange,
+  onConnectionCreated,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly trigger: RoutineEditorGitHubTrigger;
+  readonly connections: readonly RoutineConnection[];
+  readonly selectedConnection: RoutineConnection | undefined;
+  readonly offline: boolean;
+  readonly busy: boolean;
+  readonly onTriggerChange: (patch: GitHubTriggerPatch) => void;
+  readonly onConnectionCreated: (connection: RoutineConnection) => void;
+}) {
+  const createConnection = useAtomCommand(routineEnvironment.createConnection, {
+    reportFailure: false,
+  });
+  const verifyConnection = useAtomCommand(routineEnvironment.verifyConnection, {
+    reportFailure: false,
+  });
+  const disableConnection = useAtomCommand(routineEnvironment.disableConnection, {
+    reportFailure: false,
+  });
+  const rotateSecret = useAtomCommand(routineEnvironment.rotateConnectionSecret, {
+    reportFailure: false,
+  });
+  const [repository, setRepository] = useState("");
+  const [setupMessage, setSetupMessage] = useState<string | null>(null);
+  const [setupBusy, setSetupBusy] = useState(false);
+  const [showSetup, setShowSetup] = useState(connections.length === 0);
+  const metadata = useEnvironmentQuery(
+    routineEnvironment.gitHubMetadata({
+      environmentId,
+      input: selectedConnection ? { repository: selectedConnection.repositoryName } : {},
+    }),
+  );
+  const repositoryNames = metadata.data?.repositories.map((entry) => entry.nameWithOwner) ?? [];
+  const branches = metadata.data?.repository?.branches ?? [];
+  const labels = metadata.data?.repository?.labels ?? [];
+  const disabled = offline || busy || setupBusy;
+
+  const runSetup = async () => {
+    const name = repository.trim();
+    if (!name || disabled) return;
+    setSetupBusy(true);
+    setSetupMessage("Creating the webhook through GitHub…");
+    const id = RoutineConnectionId.make(`connection-${Date.now().toString(36)}`);
+    const created = await createConnection({
+      environmentId,
+      input: { id, repository: name },
+    });
+    if (created._tag === "Failure") {
+      setSetupBusy(false);
+      setSetupMessage(errorMessage(created.cause));
+      return;
+    }
+    onConnectionCreated(created.value);
+    setSetupMessage(`Webhook created. Waiting for GitHub to ping ${created.value.callbackUrl}…`);
+    const verified = await verifyConnection({ environmentId, input: { id } });
+    setSetupBusy(false);
+    if (verified._tag === "Failure") {
+      setSetupMessage(errorMessage(verified.cause));
+      return;
+    }
+    setSetupMessage(
+      verified.value.status === "verified"
+        ? "GitHub ping received. The connection is ready."
+        : "GitHub has not pinged the callback yet. Check the tunnel and the repository's webhook settings.",
+    );
+    setShowSetup(false);
+  };
+
+  const runConnectionAction = async (action: "verify" | "disable" | "rotate") => {
+    if (!selectedConnection || disabled) return;
+    setSetupBusy(true);
+    setSetupMessage(null);
+    const input = { environmentId, input: { id: selectedConnection.id } };
+    const result =
+      action === "verify"
+        ? await verifyConnection(input)
+        : action === "disable"
+          ? await disableConnection(input)
+          : await rotateSecret(input);
+    setSetupBusy(false);
+    setSetupMessage(
+      result._tag === "Failure"
+        ? errorMessage(result.cause)
+        : action === "verify"
+          ? result.value.status === "verified"
+            ? "GitHub ping received."
+            : "No GitHub ping arrived yet."
+          : action === "disable"
+            ? "Connection disabled. New deliveries are rejected."
+            : "Signing secret rotated. The old secret no longer verifies.",
+    );
+  };
+
+  const hookSettingsUrl = selectedConnection ? gitHubHookSettingsUrl(selectedConnection) : null;
+  const lastDelivery = selectedConnection?.lastDelivery ?? null;
+
+  return (
+    <div className="grid gap-2" data-testid="routine-github-trigger">
+      <div className="grid gap-1.5">
+        <FieldLabel htmlFor="routine-connection">Repository connection</FieldLabel>
+        <select
+          id="routine-connection"
+          className={ROUTINE_CONTROL_CLASS}
+          value={selectedConnection?.id ?? ""}
+          disabled={disabled}
+          onChange={(event) => {
+            const next = connections.find((candidate) => candidate.id === event.target.value);
+            if (next) onTriggerChange(defaultGitHubTrigger(next));
+          }}
+        >
+          {connections.length === 0 ? <option value="">No connected repository</option> : null}
+          {connections.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>
+              {candidate.repositoryName} · {ROUTINE_CONNECTION_STATUS_LABELS[candidate.status]}
+            </option>
+          ))}
+        </select>
+        <Button
+          size="sm"
+          variant="outline"
+          className="justify-self-start"
+          onClick={() => setShowSetup((value) => !value)}
+          disabled={disabled}
+        >
+          <PlusIcon className="size-3.5" /> Connect a repository
+        </Button>
+      </div>
+      {showSetup ? (
+        <div className="grid gap-2 rounded-lg border border-border/50 bg-background/60 p-3">
+          <FieldLabel htmlFor="routine-repository">GitHub repository (owner/name)</FieldLabel>
+          <Input
+            id="routine-repository"
+            list="routine-repository-options"
+            value={repository}
+            onValueChange={setRepository}
+            placeholder="acme/widgets"
+            disabled={disabled}
+          />
+          <datalist id="routine-repository-options">
+            {repositoryNames.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+          <p className="text-xs text-muted-foreground">
+            Kata creates the repository webhook with <code>gh api</code> and waits for GitHub's
+            ping. You need admin access to the repository and a Kata Code Connect managed tunnel.
+            The signing secret is generated on this environment and never shown.
+          </p>
+          <Button
+            size="sm"
+            className="justify-self-start"
+            onClick={() => void runSetup()}
+            disabled={disabled || repository.trim().length === 0}
+          >
+            <WebhookIcon className="size-3.5" /> {setupBusy ? "Working…" : "Create webhook"}
+          </Button>
+        </div>
+      ) : null}
+      {setupMessage ? (
+        <p className="text-xs text-muted-foreground" role="status">
+          {setupMessage}
+        </p>
+      ) : null}
+      {selectedConnection ? (
+        <div
+          className="grid gap-1 rounded-lg border border-border/50 bg-background/60 p-3 text-xs"
+          data-testid="routine-connection-diagnostics"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium">
+              <a
+                className="text-primary hover:underline"
+                href={selectedConnection.repositoryUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {selectedConnection.repositoryName}
+              </a>
+            </span>
+            <Badge variant="outline" size="sm">
+              {ROUTINE_CONNECTION_STATUS_LABELS[selectedConnection.status]}
+            </Badge>
+          </div>
+          <span className="break-all text-muted-foreground">
+            Callback: {selectedConnection.callbackUrl}
+          </span>
+          <span className="text-muted-foreground">
+            Hook id: {selectedConnection.hookId ?? "none"} · Accepted{" "}
+            {selectedConnection.acceptedCount} · Ignored {selectedConnection.ignoredCount} ·
+            Rejected {selectedConnection.rejectedCount}
+          </span>
+          <span className="text-muted-foreground">
+            Last delivery:{" "}
+            {lastDelivery
+              ? `${ROUTINE_DELIVERY_STATUS_LABELS[lastDelivery.status]} · ${lastDelivery.event} · ${new Date(lastDelivery.receivedAt).toLocaleString()}${lastDelivery.detail ? ` · ${lastDelivery.detail}` : ""}`
+              : "none yet"}
+          </span>
+          <span className="text-muted-foreground">
+            {GITHUB_REDELIVERY_NOTE}{" "}
+            {hookSettingsUrl ? (
+              <a
+                className="text-primary hover:underline"
+                href={hookSettingsUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open delivery history
+              </a>
+            ) : null}
+          </span>
+          <div className="mt-1 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void runConnectionAction("verify")}
+              disabled={disabled || selectedConnection.status === "disabled"}
+            >
+              <RotateCcwIcon className="size-3.5" /> Check ping
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void runConnectionAction("rotate")}
+              disabled={disabled || selectedConnection.status === "disabled"}
+            >
+              Rotate secret
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void runConnectionAction("disable")}
+              disabled={disabled || selectedConnection.status === "disabled"}
+            >
+              <Trash2Icon className="size-3.5 text-destructive" /> Disable
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <div className="grid gap-1.5">
+        <FieldLabel htmlFor="routine-github-event">Event</FieldLabel>
+        <select
+          id="routine-github-event"
+          className={ROUTINE_CONTROL_CLASS}
+          value={trigger.event}
+          disabled={disabled}
+          onChange={(event) => onTriggerChange({ event: event.target.value as GitHubRoutineEvent })}
+        >
+          {(Object.entries(GITHUB_ROUTINE_EVENT_LABELS) as [GitHubRoutineEvent, string][]).map(
+            ([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ),
+          )}
+        </select>
+      </div>
+      {trigger.event !== "issue_opened" ? (
+        <div className="grid gap-1.5">
+          <FieldLabel htmlFor="routine-github-branch">
+            {trigger.event === "workflow_failed" ? "Head branch" : "Base branch"} (blank for any)
+          </FieldLabel>
+          <Input
+            id="routine-github-branch"
+            list="routine-branch-options"
+            value={trigger.branch ?? ""}
+            onValueChange={(value) =>
+              onTriggerChange({ branch: value.trim().length === 0 ? undefined : value })
+            }
+            placeholder={selectedConnection?.defaultBranch ?? "main"}
+            disabled={disabled}
+          />
+          <datalist id="routine-branch-options">
+            {branches.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+        </div>
+      ) : null}
+      {trigger.event === "pr_opened" || trigger.event === "pr_updated" ? (
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={trigger.includeDrafts}
+            disabled={disabled}
+            onChange={(event) => onTriggerChange({ includeDrafts: event.target.checked })}
+          />
+          Include draft pull requests
+        </label>
+      ) : null}
+      {trigger.event === "issue_opened" ? (
+        <div className="grid gap-1.5">
+          <FieldLabel htmlFor="routine-github-label">Issue label (any when unset)</FieldLabel>
+          <select
+            id="routine-github-label"
+            className={ROUTINE_CONTROL_CLASS}
+            value={trigger.issueLabelId === undefined ? "" : String(trigger.issueLabelId)}
+            disabled={disabled}
+            onChange={(event) => {
+              const value = event.target.value;
+              onTriggerChange({ issueLabelId: value === "" ? undefined : Number(value) });
+            }}
+          >
+            <option value="">Any label</option>
+            {labels.map((label) => (
+              <option key={label.id} value={String(label.id)}>
+                {label.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+      <p className="text-xs text-muted-foreground">
+        Filters use GitHub's stable ids, so renamed repositories and labels keep matching. Event
+        text is passed to the routine as untrusted context under the saved instruction.
+      </p>
+    </div>
   );
 }
 
@@ -333,8 +682,8 @@ function RoutineEditor({
   readonly onOwnerChange: (environmentId: EnvironmentId) => void;
   readonly onSaved: (routine: Routine) => void;
   readonly onCancel: () => void;
-  readonly baseline: RoutineDraft;
-  readonly onBaselineChange: (baseline: RoutineDraft) => void;
+  readonly baseline: RoutineEditorDraft;
+  readonly onBaselineChange: (baseline: RoutineEditorDraft) => void;
 }) {
   const save = useAtomCommand(routineEnvironment.save, { reportFailure: false });
   const change = useAtomCommand(routineEnvironment.change, { reportFailure: false });
@@ -371,20 +720,71 @@ function RoutineEditor({
     setHistoryBefore(null);
   }, [historyBefore, olderHistory.data]);
   const preview = useEnvironmentQuery(
-    routineEnvironment.preview({
-      environmentId: draft.environmentId,
-      input: { trigger: draft.configuration.trigger },
-    }),
+    isRoutineEditorScheduleTrigger(draft.configuration.trigger)
+      ? routineEnvironment.preview({
+          environmentId: draft.environmentId,
+          input: { trigger: draft.configuration.trigger },
+        })
+      : null,
+  );
+  const connections = useEnvironmentQuery(
+    routineEnvironment.connections({ environmentId: draft.environmentId, input: {} }),
+  );
+  const [scheduleTrigger, setScheduleTrigger] = useState<ScheduleTrigger>(() =>
+    isRoutineEditorScheduleTrigger(draft.configuration.trigger)
+      ? draft.configuration.trigger
+      : { kind: "daily", time: "09:00", timezone: "UTC" },
   );
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [testRun, setTestRun] = useState<RoutineRun | null>(null);
 
   const configuration = draft.configuration;
-  const setConfiguration = (patch: Partial<RoutineDraft>) =>
+  const setConfiguration = (patch: Partial<RoutineEditorDraft>) =>
     onDraftChange({ ...draft, configuration: { ...configuration, ...patch } });
-  const setTrigger = (patch: Partial<ScheduleTrigger>) =>
+  const setTrigger = (patch: Partial<ScheduleTrigger>) => {
+    if (!isRoutineEditorScheduleTrigger(configuration.trigger)) return;
     setConfiguration({ trigger: { ...configuration.trigger, ...patch } as ScheduleTrigger });
+  };
+  const setGitHubTrigger = (patch: GitHubTriggerPatch) => {
+    if (isRoutineEditorScheduleTrigger(configuration.trigger)) return;
+    setConfiguration({
+      trigger: withApplicableTriggerFilters({
+        ...configuration.trigger,
+        ...patch,
+      }),
+    });
+  };
+  const triggerKind = routineTriggerKind(configuration.trigger);
+  const scheduleFields: ScheduleTrigger = isRoutineEditorScheduleTrigger(configuration.trigger)
+    ? configuration.trigger
+    : scheduleTrigger;
+  const savedConnectionId =
+    routine && !isScheduleTrigger(routine.configuration.trigger)
+      ? routine.configuration.trigger.connectionId
+      : null;
+  const availableConnections = selectableConnections(connections.data ?? [], savedConnectionId);
+  const selectedGitHubTrigger = isCompleteGitHubTrigger(configuration.trigger)
+    ? configuration.trigger
+    : undefined;
+  const selectedConnection = selectedGitHubTrigger
+    ? (connections.data ?? []).find(
+        (candidate) => candidate.id === selectedGitHubTrigger.connectionId,
+      )
+    : undefined;
+  const switchTriggerKind = (kind: "schedule" | "github") => {
+    if (kind === triggerKind) return;
+    if (kind === "schedule") {
+      setConfiguration({ trigger: scheduleTrigger });
+      return;
+    }
+    if (isRoutineEditorScheduleTrigger(configuration.trigger))
+      setScheduleTrigger(configuration.trigger);
+    const first = availableConnections[0];
+    setConfiguration({
+      trigger: first ? defaultGitHubTrigger(first) : defaultGitHubTriggerDraft(),
+    });
+  };
   const project = projects.find((candidate) => candidate.id === configuration.projectId);
   const selectableProviders = enabledProviders(providers);
   const refs = useEnvironmentQuery(
@@ -426,19 +826,23 @@ function RoutineEditor({
       }),
     });
   };
-  const canSave = canSaveRoutineDraft({
-    name: configuration.name,
-    instruction: configuration.instruction,
-    hasProject: project !== undefined,
-    offline,
-    busy,
-    provider,
-  });
+  const hasCompleteTrigger = isRoutineEditorDraftComplete(configuration);
+  const canSave =
+    canSaveRoutineDraft({
+      name: configuration.name,
+      instruction: configuration.instruction,
+      hasProject: project !== undefined,
+      offline,
+      busy,
+      provider,
+    }) &&
+    hasCompleteTrigger &&
+    (triggerKind === "schedule" || selectedConnection !== undefined);
   const isSaved = routine !== null;
   const historyRuns = [...(history.data?.runs ?? []), ...extraRuns];
 
   const submitSave = async () => {
-    if (!canSave) return;
+    if (!canSave || !isRoutineEditorDraftComplete(configuration)) return;
     setBusy(true);
     setMessage(null);
     const result = await save({
@@ -761,81 +1165,129 @@ function RoutineEditor({
             <div className="flex items-center gap-2 text-sm font-medium">
               <CalendarClockIcon className="size-4 text-muted-foreground" /> When to run
             </div>
-            <div className={ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS}>
-              {(["daily", "weekdays", "weekly", "cron"] as const).map((kind) => (
-                <Button
-                  key={kind}
-                  size="sm"
-                  className="min-w-0 shrink"
-                  variant={configuration.trigger.kind === kind ? "default" : "outline"}
-                  onClick={() => {
-                    if (kind === "cron")
-                      setConfiguration({
-                        trigger: { kind, expression: "0 9 * * 1-5", timezone: "UTC" },
-                      });
-                    else if (kind === "weekly")
-                      setConfiguration({
-                        trigger: { kind, weekday: 1, time: "09:00", timezone: "UTC" },
-                      });
-                    else setConfiguration({ trigger: { kind, time: "09:00", timezone: "UTC" } });
-                  }}
-                >
-                  {kind[0]!.toUpperCase() + kind.slice(1)}
-                </Button>
-              ))}
+            <div
+              className={ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS}
+              role="group"
+              aria-label="Trigger kind"
+            >
+              <Button
+                size="sm"
+                className="min-w-0 shrink"
+                variant={triggerKind === "schedule" ? "default" : "outline"}
+                aria-pressed={triggerKind === "schedule"}
+                onClick={() => switchTriggerKind("schedule")}
+              >
+                <Clock3Icon className="size-3.5" /> Schedule
+              </Button>
+              <Button
+                size="sm"
+                className="min-w-0 shrink"
+                variant={triggerKind === "github" ? "default" : "outline"}
+                aria-pressed={triggerKind === "github"}
+                onClick={() => switchTriggerKind("github")}
+              >
+                <WebhookIcon className="size-3.5" /> GitHub event
+              </Button>
             </div>
-            {configuration.trigger.kind === "cron" ? (
-              <Input
-                aria-label="Cron expression"
-                value={configuration.trigger.expression}
-                onValueChange={(value) => setTrigger({ expression: value })}
-                placeholder="0 9 * * 1-5"
+            {triggerKind === "github" && !isRoutineEditorScheduleTrigger(configuration.trigger) ? (
+              <GitHubTriggerFields
+                environmentId={draft.environmentId}
+                trigger={configuration.trigger}
+                connections={availableConnections}
+                selectedConnection={selectedConnection}
+                offline={offline}
+                busy={busy}
+                onTriggerChange={setGitHubTrigger}
+                onConnectionCreated={(connection) =>
+                  setConfiguration({ trigger: defaultGitHubTrigger(connection) })
+                }
               />
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                <Input
-                  aria-label="Schedule time"
-                  type="time"
-                  value={configuration.trigger.time}
-                  onValueChange={(value) => setTrigger({ time: value })}
-                />
-                {configuration.trigger.kind === "weekly" ? (
-                  <select
-                    aria-label="Weekday"
-                    className={ROUTINE_CONTROL_CLASS}
-                    value={String(configuration.trigger.weekday)}
-                    onChange={(event) => setTrigger({ weekday: Number(event.target.value) })}
-                  >
-                    <option value="1">Monday</option>
-                    <option value="2">Tuesday</option>
-                    <option value="3">Wednesday</option>
-                    <option value="4">Thursday</option>
-                    <option value="5">Friday</option>
-                    <option value="6">Saturday</option>
-                    <option value="0">Sunday</option>
-                  </select>
+            ) : null}
+            {triggerKind === "schedule" && isRoutineEditorScheduleTrigger(configuration.trigger) ? (
+              <>
+                <div className={ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS}>
+                  {(["daily", "weekdays", "weekly", "cron"] as const).map((kind) => (
+                    <Button
+                      key={kind}
+                      size="sm"
+                      className="min-w-0 shrink"
+                      variant={scheduleFields.kind === kind ? "default" : "outline"}
+                      onClick={() => {
+                        if (kind === "cron")
+                          setConfiguration({
+                            trigger: { kind, expression: "0 9 * * 1-5", timezone: "UTC" },
+                          });
+                        else if (kind === "weekly")
+                          setConfiguration({
+                            trigger: { kind, weekday: 1, time: "09:00", timezone: "UTC" },
+                          });
+                        else
+                          setConfiguration({ trigger: { kind, time: "09:00", timezone: "UTC" } });
+                      }}
+                    >
+                      {kind[0]!.toUpperCase() + kind.slice(1)}
+                    </Button>
+                  ))}
+                </div>
+                {scheduleFields.kind === "cron" ? (
+                  <Input
+                    aria-label="Cron expression"
+                    value={scheduleFields.expression}
+                    onValueChange={(value) => setTrigger({ expression: value })}
+                    placeholder="0 9 * * 1-5"
+                  />
                 ) : (
-                  <span />
+                  <div className="grid grid-cols-2 gap-2">
+                    <Input
+                      aria-label="Schedule time"
+                      type="time"
+                      value={scheduleFields.time}
+                      onValueChange={(value) => setTrigger({ time: value })}
+                    />
+                    {scheduleFields.kind === "weekly" ? (
+                      <select
+                        aria-label="Weekday"
+                        className={ROUTINE_CONTROL_CLASS}
+                        value={String(scheduleFields.weekday)}
+                        onChange={(event) => setTrigger({ weekday: Number(event.target.value) })}
+                      >
+                        <option value="1">Monday</option>
+                        <option value="2">Tuesday</option>
+                        <option value="3">Wednesday</option>
+                        <option value="4">Thursday</option>
+                        <option value="5">Friday</option>
+                        <option value="6">Saturday</option>
+                        <option value="0">Sunday</option>
+                      </select>
+                    ) : (
+                      <span />
+                    )}
+                  </div>
                 )}
-              </div>
-            )}
-            <Input
-              aria-label="IANA timezone"
-              value={configuration.trigger.timezone}
-              onValueChange={(value) => setTrigger({ timezone: value })}
-              placeholder="America/Los_Angeles"
-            />
-            {preview.data ? (
-              <div className="grid gap-1 text-xs text-muted-foreground">
-                <span>Next runs</span>
-                {preview.data.dates.map((date) => (
-                  <span key={date}>
-                    {formatDateInTimezone(date, configuration.trigger.timezone)}
-                  </span>
-                ))}
-              </div>
-            ) : preview.error ? (
-              <p className="text-xs text-destructive">{preview.error}</p>
+                <Input
+                  aria-label="IANA timezone"
+                  value={scheduleFields.timezone}
+                  onValueChange={(value) => setTrigger({ timezone: value })}
+                  placeholder="America/Los_Angeles"
+                />
+                {preview.data ? (
+                  <div className="grid gap-1 text-xs text-muted-foreground">
+                    <span>Next runs</span>
+                    {preview.data.dates.map((date) => (
+                      <span key={date}>
+                        {formatDateInTimezone(
+                          date,
+                          isRoutineEditorScheduleTrigger(configuration.trigger)
+                            ? configuration.trigger.timezone
+                            : "UTC",
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                ) : preview.error ? (
+                  <p className="text-xs text-destructive">{preview.error}</p>
+                ) : null}
+              </>
             ) : null}
           </div>
           <div className="grid gap-1.5">
@@ -953,6 +1405,16 @@ function RoutineEditor({
                   <span className="text-muted-foreground">
                     {new Date(run.createdAt).toLocaleString()}
                   </span>
+                  {run.sourceUrl ? (
+                    <a
+                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                      href={run.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <WebhookIcon className="size-3" /> Open on GitHub
+                    </a>
+                  ) : null}
                   {run.conversation.kind === "confirmed" ? (
                     <Link
                       className="inline-flex items-center gap-1 text-primary hover:underline"
@@ -1018,7 +1480,7 @@ export function RoutinesPage() {
   const [showMenu, setShowMenu] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [editorRoutine, setEditorRoutine] = useState<RoutineWithOwner | null>(null);
-  const [baseline, setBaseline] = useState<RoutineDraft | null>(null);
+  const [baseline, setBaseline] = useState<RoutineEditorDraft | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatRevision, setChatRevision] = useState(0);
   const [generationModelSelection, setGenerationModelSelection] = useState<ModelSelection | null>(
@@ -1217,7 +1679,7 @@ export function RoutinesPage() {
     setDraft(next);
   };
 
-  const updateDraftConfiguration = (configuration: RoutineDraft) => {
+  const updateDraftConfiguration = (configuration: RoutineEditorDraft) => {
     if (draft === null) return;
     updateDraft({ ...draft, configuration });
   };

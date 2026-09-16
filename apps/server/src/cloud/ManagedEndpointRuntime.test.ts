@@ -515,4 +515,45 @@ describe("CloudManagedEndpointRuntime", () => {
       expect(spawn).not.toHaveBeenCalled();
     }),
   );
+
+  it.effect("reports the current status without applying config or restarting", () =>
+    Effect.gen(function* () {
+      const spawned: Array<number> = [];
+      let running = true;
+      const spawner = ChildProcessSpawner.make(() =>
+        Effect.gen(function* () {
+          const pid = 900 + spawned.length;
+          spawned.push(pid);
+          const handle = makeHandle({
+            pid,
+            isRunning: () => running,
+            onKill: () => {},
+          });
+          yield* Effect.addFinalizer(() => handle.kill().pipe(Effect.ignore));
+          return handle;
+        }),
+      );
+      const runtime = yield* buildCloudManagedEndpointRuntime(spawner);
+      const config = {
+        providerKind: "cloudflare_tunnel" as const,
+        connectorToken: "token",
+        tunnelId: "tunnel-1",
+      };
+
+      const initialStatus = yield* runtime.getStatus;
+      expect(initialStatus).toEqual({ status: "disabled" });
+      const started = yield* runtime.applyConfig(config);
+      const runningStatus = yield* runtime.getStatus;
+      expect(runningStatus).toEqual(started);
+
+      running = false;
+      const stoppedStatus = yield* runtime.getStatus;
+      expect(stoppedStatus).toMatchObject({
+        status: "failed",
+        providerKind: "cloudflare_tunnel",
+        tunnelId: "tunnel-1",
+      });
+      expect(spawned).toEqual([900]);
+    }),
+  );
 });

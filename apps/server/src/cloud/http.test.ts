@@ -210,6 +210,7 @@ describe("reconcileDesiredCloudLink", () => {
         ManagedEndpointRuntime.CloudManagedEndpointRuntime,
         ManagedEndpointRuntime.CloudManagedEndpointRuntime.of({
           applyConfig: unusedSecretStoreOperation,
+          getStatus: unusedSecretStoreOperation(),
         } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntime["Service"]),
       ),
       Effect.provideService(
@@ -308,6 +309,9 @@ describe("releaseManagedTunnelOnShutdown", () => {
                   status: "disabled",
                 } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntimeStatus;
               }),
+            getStatus: Effect.succeed({
+              status: "disabled",
+            } satisfies ManagedEndpointRuntime.CloudManagedEndpointRuntimeStatus),
           }),
         ),
         Effect.provideService(

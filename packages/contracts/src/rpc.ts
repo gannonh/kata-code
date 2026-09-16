@@ -263,10 +263,16 @@ import { VcsError } from "./vcs.ts";
 import {
   Routine,
   RoutineChangeInput,
+  RoutineConnection,
+  RoutineConnectionCreateInput,
+  RoutineConnectionInput,
+  RoutineConnectionList,
   RoutineDraftGenerationInput,
   RoutineDraftGenerationResult,
   RoutineError,
   RoutineGetInput,
+  RoutineGitHubMetadata,
+  RoutineGitHubMetadataInput,
   RoutineHistory,
   RoutineHistoryInput,
   RoutineList,
@@ -289,6 +295,12 @@ export const WS_METHODS = {
   routinesPreview: "routines.preview",
   routinesSubscribe: "routines.subscribe",
   routinesDraft: "routines.draft",
+  routinesConnectionsList: "routines.connections.list",
+  routinesConnectionsCreate: "routines.connections.create",
+  routinesConnectionsVerify: "routines.connections.verify",
+  routinesConnectionsDisable: "routines.connections.disable",
+  routinesConnectionsRotateSecret: "routines.connections.rotateSecret",
+  routinesGitHubMetadata: "routines.github.metadata",
 
   // Project registry methods
   projectsList: "projects.list",
@@ -506,6 +518,42 @@ const WsRoutinesSubscribeRpc = Rpc.make(WS_METHODS.routinesSubscribe, {
 const WsRoutinesDraftRpc = Rpc.make(WS_METHODS.routinesDraft, {
   payload: RoutineDraftGenerationInput,
   success: RoutineDraftGenerationResult,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesConnectionsListRpc = Rpc.make(WS_METHODS.routinesConnectionsList, {
+  payload: Schema.Struct({}),
+  success: RoutineConnectionList,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesConnectionsCreateRpc = Rpc.make(WS_METHODS.routinesConnectionsCreate, {
+  payload: RoutineConnectionCreateInput,
+  success: RoutineConnection,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesConnectionsVerifyRpc = Rpc.make(WS_METHODS.routinesConnectionsVerify, {
+  payload: RoutineConnectionInput,
+  success: RoutineConnection,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesConnectionsDisableRpc = Rpc.make(WS_METHODS.routinesConnectionsDisable, {
+  payload: RoutineConnectionInput,
+  success: RoutineConnection,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesConnectionsRotateSecretRpc = Rpc.make(WS_METHODS.routinesConnectionsRotateSecret, {
+  payload: RoutineConnectionInput,
+  success: RoutineConnection,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesGitHubMetadataRpc = Rpc.make(WS_METHODS.routinesGitHubMetadata, {
+  payload: RoutineGitHubMetadataInput,
+  success: RoutineGitHubMetadata,
   error: RoutineRpcError,
 });
 
@@ -1409,6 +1457,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsRoutinesPreviewRpc,
   WsRoutinesSubscribeRpc,
   WsRoutinesDraftRpc,
+  WsRoutinesConnectionsListRpc,
+  WsRoutinesConnectionsCreateRpc,
+  WsRoutinesConnectionsVerifyRpc,
+  WsRoutinesConnectionsDisableRpc,
+  WsRoutinesConnectionsRotateSecretRpc,
+  WsRoutinesGitHubMetadataRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

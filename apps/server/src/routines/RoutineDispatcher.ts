@@ -34,6 +34,12 @@ export class RoutineDispatcher extends Context.Service<RoutineDispatcher, Routin
   "@kata-sh/code-cli/routines/RoutineDispatcher",
 ) {}
 
+/** The saved instruction stays first; provider event context follows as untrusted input. */
+const routinePromptText = (run: RoutineRun): string =>
+  run.eventContext
+    ? `${run.configuration.instruction}\n\n${run.eventContext}`
+    : run.configuration.instruction;
+
 const routineCreateCommandId = (run: RoutineRun) =>
   CommandId.make(`routine:${run.id}:thread-create`);
 
@@ -332,7 +338,7 @@ const makeRoutineDispatcher = Effect.gen(function* () {
       message: {
         messageId: claim.run.messageId,
         role: "user",
-        text: claim.run.configuration.instruction,
+        text: routinePromptText(claim.run),
         attachments: [],
       },
       modelSelection: claim.run.configuration.modelSelection,

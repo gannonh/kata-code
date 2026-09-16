@@ -150,6 +150,7 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as RoutineConnections from "./routines/RoutineConnections.ts";
 import * as RoutineStore from "./routines/RoutineStore.ts";
 import { makeRoutineDraftGeneration } from "./routines/RoutineDraftGeneration.ts";
 import { makeTextGenerationFromRegistry } from "./textGeneration/TextGeneration.ts";
@@ -664,6 +665,20 @@ const makeWsRpcLayer = (
               new RoutineError({
                 code: "blocked",
                 message: "Scheduled routines are unavailable in this server runtime.",
+              }),
+            ),
+          onSome: run,
+        });
+      const routineConnections = yield* Effect.serviceOption(RoutineConnections.RoutineConnections);
+      const withRoutineConnections = <A, E>(
+        run: (connections: RoutineConnections.RoutineConnections["Service"]) => Effect.Effect<A, E>,
+      ): Effect.Effect<A, E | RoutineError> =>
+        Option.match(routineConnections, {
+          onNone: () =>
+            Effect.fail(
+              new RoutineError({
+                code: "blocked",
+                message: "GitHub connections are unavailable in this server runtime.",
               }),
             ),
           onSome: run,
@@ -1771,6 +1786,72 @@ const makeWsRpcLayer = (
                 Effect.flatMap((environmentId) => store.subscribe(environmentId)),
                 Effect.map(({ latest, changes }) => Stream.concat(Stream.make(latest), changes)),
               ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsList]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsList,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => connections.list(environmentId)),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsCreate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsCreate,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) =>
+                  connections.create({ environmentId, id: input.id, repository: input.repository }),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsVerify]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsVerify,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) =>
+                  connections.verify({ environmentId, id: input.id }),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsDisable]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsDisable,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) =>
+                  connections.disable({ environmentId, id: input.id }),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsRotateSecret]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsRotateSecret,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) =>
+                  connections.rotateSecret({ environmentId, id: input.id }),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesGitHubMetadata]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesGitHubMetadata,
+            withRoutineConnections((connections) =>
+              connections.metadata({ repository: input.repository }),
             ),
             { "rpc.aggregate": "routines" },
           ),

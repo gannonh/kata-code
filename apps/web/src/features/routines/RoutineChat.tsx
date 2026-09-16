@@ -27,6 +27,7 @@ import {
   routineDraftChatHistoryAfterTurn,
   routineDraftChatHistoryForRequest,
   type RoutineDraftChatTurn,
+  type RoutineEditorDraft,
 } from "./RoutinesPage.logic";
 
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelectionSchema);
@@ -34,7 +35,7 @@ const decodeModelSelection = Schema.decodeUnknownSync(ModelSelectionSchema);
 type RoutineChatDraft = {
   readonly id: RoutineId;
   readonly environmentId: EnvironmentId;
-  readonly configuration: RoutineDraft;
+  readonly configuration: RoutineEditorDraft;
 };
 
 type GenerationModel = {
@@ -95,7 +96,7 @@ export function RoutineChat({
   readonly providers: readonly ServerProvider[];
   readonly generationModelSelection: ModelSelection | null;
   readonly onGenerationModelChange: (selection: ModelSelection) => void;
-  readonly onDraftChange: (configuration: RoutineDraft) => void;
+  readonly onDraftChange: (configuration: RoutineEditorDraft) => void;
   readonly onCancel: () => void;
 }) {
   const [message, setMessage] = useState("");

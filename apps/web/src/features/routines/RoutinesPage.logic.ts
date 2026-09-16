@@ -1,12 +1,20 @@
 import {
+  GITHUB_ROUTINE_EVENT_LABELS,
   ModelSelection,
   isProviderAvailable,
+  isScheduleTrigger,
+  type GitHubEventTrigger,
   type Routine,
+  type RoutineConnection,
+  type RoutineDeliveryStatus,
   type RoutineDraft,
   type RoutineDraftConversationMessage,
+  type RoutineDraftConversationState,
   type RoutineDraftGenerationResult,
+  type RoutineTrigger,
   type RuntimeMode,
   type ServerProvider,
+  type ScheduleTrigger,
   type VcsRef,
 } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
@@ -106,7 +114,24 @@ export const DELETE_ROUTINE_MESSAGE =
 export const ROUTINE_CANCEL_HINT =
   "Discards unsaved changes. A canceled draft is not saved as a routine.";
 
-export function isRoutineDraftDirty(current: RoutineDraft, baseline: RoutineDraft): boolean {
+/** Editor-only state while GitHub setup has not produced a real connection. */
+export type GitHubTriggerDraft = {
+  readonly kind: "github";
+  readonly event: GitHubEventTrigger["event"];
+  readonly branch?: GitHubEventTrigger["branch"];
+  readonly includeDrafts: boolean;
+  readonly issueLabelId?: GitHubEventTrigger["issueLabelId"];
+};
+export type RoutineEditorGitHubTrigger = GitHubTriggerDraft | GitHubEventTrigger;
+export type RoutineEditorTrigger = ScheduleTrigger | RoutineEditorGitHubTrigger;
+export type RoutineEditorDraft = Omit<RoutineDraft, "trigger"> & {
+  readonly trigger: RoutineEditorTrigger;
+};
+
+export function isRoutineDraftDirty(
+  current: RoutineEditorDraft,
+  baseline: RoutineEditorDraft,
+): boolean {
   return JSON.stringify(current) !== JSON.stringify(baseline);
 }
 
@@ -117,8 +142,8 @@ export type RoutineDraftChatTurn = RoutineDraftConversationMessage & { readonly 
 
 /** Increment the chat revision only when a user-visible draft value changed. */
 export function routineDraftRevisionAfterEdit(
-  previous: RoutineDraft,
-  next: RoutineDraft,
+  previous: RoutineEditorDraft,
+  next: RoutineEditorDraft,
   revision: number,
 ): number {
   return isRoutineDraftDirty(previous, next) ? revision + 1 : revision;
@@ -127,13 +152,23 @@ export function routineDraftRevisionAfterEdit(
 /**
  * The server only sees an untouched default editor. Once a generation or a
  * user edit initialized the draft, send the authoritative editor state,
- * including mid-edit blank name or instruction fields.
+ * including mid-edit blank name or instruction fields. Draft generation
+ * produces schedules only, so a GitHub trigger is sent as no current draft.
  */
 export function routineDraftForGenerationInput(
-  current: RoutineDraft,
+  current: RoutineEditorDraft,
   initialized: boolean,
-): RoutineDraft | null {
-  return initialized ? current : null;
+): RoutineDraftConversationState | null {
+  if (!initialized || !isRoutineEditorScheduleTrigger(current.trigger)) return null;
+  return {
+    name: current.name,
+    instruction: current.instruction,
+    projectId: current.projectId,
+    modelSelection: current.modelSelection,
+    runtimeMode: current.runtimeMode,
+    workspace: current.workspace,
+    trigger: current.trigger,
+  };
 }
 
 /** Keep the bounded transcript sent to the draft model. */
@@ -160,19 +195,19 @@ export function routineDraftChatHistoryForRequest(
 export type RoutineDraftGenerationApplyResult =
   | {
       readonly status: "applied" | "clarification";
-      readonly draft: RoutineDraft;
+      readonly draft: RoutineEditorDraft;
       readonly revision: number;
     }
   | {
       readonly status: "stale";
-      readonly draft: RoutineDraft;
+      readonly draft: RoutineEditorDraft;
       readonly revision: number;
       readonly reviewDraft: RoutineDraft;
     };
 
 /** Merge only model-owned fields, keeping editor-owned permission settings. */
 export function mergeRoutineDraftGeneratedFields(
-  current: RoutineDraft,
+  current: RoutineEditorDraft,
   generated: RoutineDraft,
 ): RoutineDraft {
   return {
@@ -187,7 +222,7 @@ export function mergeRoutineDraftGeneratedFields(
  * Runtime mode and workspace belong to the editor and always come from it.
  */
 export function applyRoutineDraftGenerationResponse(
-  current: RoutineDraft,
+  current: RoutineEditorDraft,
   currentRevision: number,
   response: RoutineDraftGenerationResult,
 ): RoutineDraftGenerationApplyResult {
@@ -215,10 +250,10 @@ export function confirmDialogAccepted(result: boolean | undefined): boolean {
 
 /** Automatic init (default-branch fill) is not a user edit. Keep real edits dirty. */
 export function routineDraftBaselineAfterAutomaticChange(
-  current: RoutineDraft,
-  baseline: RoutineDraft,
-  next: RoutineDraft,
-): RoutineDraft {
+  current: RoutineEditorDraft,
+  baseline: RoutineEditorDraft,
+  next: RoutineEditorDraft,
+): RoutineEditorDraft {
   return isRoutineDraftDirty(current, baseline) ? baseline : next;
 }
 
@@ -234,3 +269,110 @@ export function libraryRoutinesAfterChange<
 export function keepDeletedRoutineInEditor(state: Routine["state"]): boolean {
   return state === "deleted";
 }
+
+export type RoutineTriggerKind = "schedule" | "github";
+
+export function isRoutineEditorScheduleTrigger(
+  trigger: RoutineEditorTrigger,
+): trigger is ScheduleTrigger {
+  return trigger.kind !== "github";
+}
+
+export function isCompleteGitHubTrigger(
+  trigger: RoutineEditorTrigger,
+): trigger is GitHubEventTrigger {
+  return trigger.kind === "github" && "connectionId" in trigger && "repositoryId" in trigger;
+}
+
+export function isRoutineEditorDraftComplete(draft: RoutineEditorDraft): draft is RoutineDraft {
+  return isRoutineEditorScheduleTrigger(draft.trigger) || isCompleteGitHubTrigger(draft.trigger);
+}
+
+export function routineTriggerKind(trigger: RoutineEditorTrigger): RoutineTriggerKind {
+  return isRoutineEditorScheduleTrigger(trigger) ? "schedule" : "github";
+}
+
+/**
+ * Branch filters apply to pull requests and workflows; label filters apply to
+ * issues. Dropping the filter an event cannot use keeps a hidden value from
+ * silently blocking every delivery, and a key cleared to `undefined` is
+ * removed so it cannot come back from the previously saved value.
+ */
+export function withApplicableTriggerFilters(
+  trigger: RoutineEditorGitHubTrigger,
+): RoutineEditorGitHubTrigger {
+  const omitted = trigger.event === "issue_opened" ? "branch" : "issueLabelId";
+  return Object.fromEntries(
+    Object.entries(trigger).filter(([key, value]) => key !== omitted && value !== undefined),
+  ) as RoutineEditorGitHubTrigger;
+}
+
+export function formatRoutineTrigger(trigger: RoutineTrigger): string {
+  if (!isScheduleTrigger(trigger)) {
+    const branch = trigger.branch ? ` on ${trigger.branch}` : "";
+    return `GitHub · ${GITHUB_ROUTINE_EVENT_LABELS[trigger.event].split(" (")[0]}${branch}`;
+  }
+  const triggerText =
+    trigger.kind === "cron"
+      ? trigger.expression
+      : trigger.kind === "weekly"
+        ? `Weekly on ${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][trigger.weekday]} at ${trigger.time}`
+        : trigger.kind === "weekdays"
+          ? `Weekdays at ${trigger.time}`
+          : `Daily at ${trigger.time}`;
+  return `${triggerText} · ${trigger.timezone}`;
+}
+
+export function defaultGitHubTrigger(connection: RoutineConnection): GitHubEventTrigger {
+  return {
+    kind: "github",
+    connectionId: connection.id,
+    repositoryId: connection.repositoryId,
+    event: "pr_opened",
+    branch: connection.defaultBranch,
+    includeDrafts: false,
+  };
+}
+
+export function defaultGitHubTriggerDraft(): GitHubTriggerDraft {
+  return {
+    kind: "github",
+    event: "pr_opened",
+    includeDrafts: false,
+  };
+}
+
+/** Connections a new trigger may target; disabled ones stay listed only when already saved. */
+export function selectableConnections(
+  connections: readonly RoutineConnection[],
+  savedConnectionId: string | null,
+): readonly RoutineConnection[] {
+  return connections.filter(
+    (connection) => connection.status !== "disabled" || connection.id === savedConnectionId,
+  );
+}
+
+export function gitHubHookSettingsUrl(connection: RoutineConnection): string | null {
+  return connection.hookId === null
+    ? null
+    : `${connection.repositoryUrl}/settings/hooks/${connection.hookId}`;
+}
+
+export const ROUTINE_CONNECTION_STATUS_LABELS: Record<
+  RoutineConnection["status"] | "unavailable",
+  string
+> = {
+  pending: "Waiting for GitHub ping",
+  verified: "Verified",
+  disabled: "Disabled",
+  unavailable: "Unavailable",
+};
+
+export const ROUTINE_DELIVERY_STATUS_LABELS: Record<RoutineDeliveryStatus, string> = {
+  accepted: "Accepted",
+  ignored: "Ignored",
+  rejected: "Rejected",
+};
+
+export const GITHUB_REDELIVERY_NOTE =
+  "GitHub does not resend a delivery that failed on its own. Redeliver it from the repository's webhook settings.";

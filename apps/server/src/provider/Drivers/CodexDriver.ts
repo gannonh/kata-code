@@ -55,6 +55,11 @@ import type { ProviderDriver, ProviderInstance } from "../ProviderDriver.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
+  codexApiKeyFromEnvironment,
+  managedCodexAuthHome,
+  writeCodexApiKeyAuth,
+} from "../providerAuthMode.ts";
+import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
@@ -134,8 +139,23 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const modelManifest = yield* ModelManifest.ModelManifest;
+      const serverConfig = yield* ServerConfig;
       const processEnv = mergeProviderInstanceEnvironment(environment);
-      const homeLayout = yield* resolveCodexHomeLayout(config);
+      const codexApiKey = codexApiKeyFromEnvironment(processEnv);
+      // A user-configured shadow home owns the layout. Only an unclaimed one
+      // takes the managed API-key overlay, so the condition is stated once.
+      const apiKeyOverlay =
+        codexApiKey !== undefined && config.shadowHomePath.trim().length === 0
+          ? {
+              apiKey: codexApiKey,
+              homePath: managedCodexAuthHome(serverConfig.baseDir, instanceId),
+            }
+          : undefined;
+      const configWithAuth: CodexSettings =
+        apiKeyOverlay !== undefined
+          ? { ...config, shadowHomePath: apiKeyOverlay.homePath }
+          : config;
+      const homeLayout = yield* resolveCodexHomeLayout(configWithAuth);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
       const stampIdentity = withInstanceIdentity({
         instanceId,
@@ -155,6 +175,19 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             }),
         ),
       );
+      if (apiKeyOverlay !== undefined) {
+        yield* writeCodexApiKeyAuth(apiKeyOverlay).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderDriverError({
+                driver: DRIVER_KIND,
+                instanceId,
+                detail: "Could not write the Codex API-key auth file.",
+                cause,
+              }),
+          ),
+        );
+      }
       const effectiveConfig = {
         ...config,
         enabled,
