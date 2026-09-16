@@ -142,13 +142,18 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       const serverConfig = yield* ServerConfig;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       const codexApiKey = codexApiKeyFromEnvironment(processEnv);
-      const managedAuthHomePath =
-        codexApiKey === undefined
-          ? undefined
-          : managedCodexAuthHome(serverConfig.baseDir, instanceId);
+      // A user-configured shadow home owns the layout. Only an unclaimed one
+      // takes the managed API-key overlay, so the condition is stated once.
+      const apiKeyOverlay =
+        codexApiKey !== undefined && config.shadowHomePath.trim().length === 0
+          ? {
+              apiKey: codexApiKey,
+              homePath: managedCodexAuthHome(serverConfig.baseDir, instanceId),
+            }
+          : undefined;
       const configWithAuth: CodexSettings =
-        managedAuthHomePath !== undefined && config.shadowHomePath.trim().length === 0
-          ? { ...config, shadowHomePath: managedAuthHomePath }
+        apiKeyOverlay !== undefined
+          ? { ...config, shadowHomePath: apiKeyOverlay.homePath }
           : config;
       const homeLayout = yield* resolveCodexHomeLayout(configWithAuth);
       const continuationIdentity = codexContinuationIdentity(homeLayout);
@@ -170,15 +175,8 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             }),
         ),
       );
-      if (
-        codexApiKey !== undefined &&
-        managedAuthHomePath !== undefined &&
-        homeLayout.effectiveHomePath === pathService.resolve(managedAuthHomePath)
-      ) {
-        yield* writeCodexApiKeyAuth({
-          homePath: homeLayout.effectiveHomePath,
-          apiKey: codexApiKey,
-        }).pipe(
+      if (apiKeyOverlay !== undefined) {
+        yield* writeCodexApiKeyAuth(apiKeyOverlay).pipe(
           Effect.mapError(
             (cause) =>
               new ProviderDriverError({

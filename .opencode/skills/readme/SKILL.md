@@ -27,6 +27,7 @@ Read what exists before asking anything: `README.md`, manifest (`package.json`, 
 ### 2. Ask only what you can't infer
 
 Batch remaining gaps into one round of questions, at most:
+
 - One sentence on what the tool does (if the code doesn't make it obvious)
 - A real command + output demonstrating it (or offer to run the tool to capture one)
 - Whether it runs shell commands/hooks, writes outside the project, or makes network calls
@@ -41,15 +42,15 @@ For rewrites: keep accurate content, fix violations below, preserve anything the
 
 ### 4. Self-review before finishing
 
-| Violation | Fix |
-|---|---|
-| Opens with a question, pain point, or "Tired of X?" | Replace with a plain statement of what the tool is |
-| Problem/solution pitch structure | State what the tool does; skip the pitch |
-| Adjectives without numbers ("fast", "simple", "powerful") | Replace with mechanism or measurement, or delete |
-| Value repeated across sections | Keep the first factual mention, delete rest |
-| Touches/hooks/network behavior undocumented | Document next to install, including uninstall |
-| Same command documented in 3+ places | One usage section |
-| Origin story or philosophy above examples | Move to collapsed details or delete |
-| Idealized example output | Use real captured output |
+| Violation                                                 | Fix                                                |
+| --------------------------------------------------------- | -------------------------------------------------- |
+| Opens with a question, pain point, or "Tired of X?"       | Replace with a plain statement of what the tool is |
+| Problem/solution pitch structure                          | State what the tool does; skip the pitch           |
+| Adjectives without numbers ("fast", "simple", "powerful") | Replace with mechanism or measurement, or delete   |
+| Value repeated across sections                            | Keep the first factual mention, delete rest        |
+| Touches/hooks/network behavior undocumented               | Document next to install, including uninstall      |
+| Same command documented in 3+ places                      | One usage section                                  |
+| Origin story or philosophy above examples                 | Move to collapsed details or delete                |
+| Idealized example output                                  | Use real captured output                           |
 
 Report which violations you found and fixed, so the user can veto intentional choices.

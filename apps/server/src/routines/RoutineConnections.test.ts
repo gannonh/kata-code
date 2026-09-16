@@ -250,6 +250,7 @@ it.layer(layer)("RoutineConnections", (it) => {
         deliveryId: "ping-1",
         digest: "ping-1-digest",
         eventName: "ping",
+        repositoryId: 42,
         summary: null,
         now: 5_000,
       });

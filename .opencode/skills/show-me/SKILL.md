@@ -109,8 +109,8 @@ For a state or control-flow change:
 
 ```ts
 function expandSkill(command: string): string {
-  const skillName = command.slice(1)
-  return `use the ${skillName} skill`
+  const skillName = command.slice(1);
+  return `use the ${skillName} skill`;
 }
 ```
 

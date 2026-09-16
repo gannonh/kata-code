@@ -43,6 +43,7 @@ Read the referenced code and determine:
 3. **UNCERTAIN** - Not sure; ask the user
 
 **Likely TRUE POSITIVE:**
+
 - Code obviously violates stated behavior
 - Missing null checks on potentially undefined values
 - Type mismatches or incorrect function signatures
@@ -50,6 +51,7 @@ Read the referenced code and determine:
 - Missing error handling for documented failure cases
 
 **Likely FALSE POSITIVE:**
+
 - Bot doesn't understand the framework/library patterns
 - Code is intentionally structured that way (with comments explaining why)
 - Bot is flagging style preferences, not bugs
@@ -65,11 +67,13 @@ Read the referenced code and the reviewer's comment. Human reviewers are general
 3. **ALREADY ADDRESSED** - The concern has already been fixed or is no longer relevant
 
 **Likely ACTIONABLE:**
+
 - Reviewer points out a bug or logic error
 - Reviewer requests a specific code change
 - Reviewer identifies missing edge cases or error handling
 
 **Likely DISCUSSION -- ask the user:**
+
 - Reviewer suggests an architectural change you're unsure about
 - Comment involves a tradeoff (performance vs readability, etc.)
 - The feedback is subjective without team consensus
@@ -77,6 +81,7 @@ Read the referenced code and the reviewer's comment. Human reviewers are general
 #### When UNCERTAIN -- ask the user
 
 For both bot and human comments:
+
 - The fix would require architectural changes
 - You're genuinely unsure if the behavior is intentional
 - Multiple valid interpretations exist
@@ -202,17 +207,20 @@ All findings addressed. Watch completed.
 ## Important Notes
 
 ### Response Policy
+
 - **Every comment gets a response** - No silent ignores
 - For bots: responses help train them and prevent re-raised false positives
 - For humans: replies keep reviewers informed and unblock approvals
 
 ### User Interaction
+
 - Ask the user when uncertain about a finding
 - Don't guess on architectural or business logic questions
 - It's better to ask than to make a wrong fix or wrong dismissal
 - Human reviewers often have context you don't - defer to the author when unsure
 
 ### Best Practices
+
 - Verify findings before fixing - bots have false positives, humans rarely do
 - Keep fixes minimal and focused - don't refactor unrelated code
 - Ensure type-check and lint pass before committing

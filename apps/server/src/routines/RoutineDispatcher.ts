@@ -35,7 +35,7 @@ export class RoutineDispatcher extends Context.Service<RoutineDispatcher, Routin
 ) {}
 
 /** The saved instruction stays first; provider event context follows as untrusted input. */
-export const routinePromptText = (run: RoutineRun): string =>
+const routinePromptText = (run: RoutineRun): string =>
   run.eventContext
     ? `${run.configuration.instruction}\n\n${run.eventContext}`
     : run.configuration.instruction;

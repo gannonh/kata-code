@@ -50,7 +50,7 @@ const encodeDelivery = Schema.encodeSync(Schema.fromJsonString(RoutineDelivery))
 /** Signed-content digests are only suppressed inside this window. */
 const DELIVERY_DIGEST_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** Rejected deliveries arrive before signature verification, so bound what is stored. */
-const MAX_DELIVERY_HEADER_LENGTH = 128;
+export const MAX_DELIVERY_HEADER_LENGTH = 128;
 const boundedDeliveryHeader = (value: string) => value.slice(0, MAX_DELIVERY_HEADER_LENGTH);
 export interface RoutineEventAdmissionInput {
   readonly connectionId: RoutineConnectionId;
@@ -58,14 +58,24 @@ export interface RoutineEventAdmissionInput {
   /** Hex digest of the raw signed body. */
   readonly digest: string;
   readonly eventName: string;
+  /** Repository id declared by the payload; checked against the connection. */
+  readonly repositoryId: number | null;
   /** Null when the event or action is not one routines can run on. */
   readonly summary: GitHubRoutineEventSummary | null;
   readonly now: number;
 }
-export interface RoutineEventAdmission {
+export type RoutineEventRejectionReason = "disabled" | "wrong-repository";
+export interface RoutineEventRecorded {
   readonly status: "accepted" | "ignored" | "duplicate";
   readonly runs: ReadonlyArray<RoutineRun>;
 }
+export interface RoutineEventRejected {
+  readonly status: "rejected";
+  readonly reason: RoutineEventRejectionReason;
+  readonly detail: string;
+  readonly runs: ReadonlyArray<RoutineRun>;
+}
+export type RoutineEventAdmission = RoutineEventRecorded | RoutineEventRejected;
 export type RoutineClaim = {
   readonly run: RoutineRun;
   readonly owner: string;
@@ -283,13 +293,18 @@ export const makeRoutineStore = Effect.gen(function* () {
     );
   const insertRun = (
     routine: Routine,
-    occurrenceKey: string,
-    source: RoutineRun["source"],
-    now: number,
-    skipReason?: string,
-    event?: Pick<RoutineRun, "sourceUrl" | "eventContext">,
+    input: {
+      readonly occurrenceKey: string;
+      readonly source: RoutineRun["source"];
+      readonly now: number;
+      readonly skipReason?: string | undefined;
+      readonly event?: Pick<RoutineRun, "sourceUrl" | "eventContext"> | undefined;
+    },
   ) =>
     Effect.gen(function* () {
+      const { occurrenceKey, now, source } = input;
+      const skipReason = input.skipReason;
+      const event = input.event;
       const existing = yield* sql<{
         record: string;
       }>`SELECT record FROM routine_runs WHERE routine_id=${routine.id} AND occurrence_key=${occurrenceKey}`;
@@ -354,7 +369,11 @@ export const makeRoutineStore = Effect.gen(function* () {
         yield* checkRevision(routine, input.expectedRevision);
         if (routine.state !== "enabled")
           return yield* failure("blocked", "Resume the routine before testing it.");
-        return yield* insertRun(routine, `test:${input.requestId}`, "test", now);
+        return yield* insertRun(routine, {
+          occurrenceKey: `test:${input.requestId}`,
+          source: "test",
+          now,
+        });
       }),
     );
   const history = (environmentId: EnvironmentId, input: typeof RoutineHistoryInput.Type) =>
@@ -423,15 +442,14 @@ export const makeRoutineStore = Effect.gen(function* () {
           const routine = decodeRoutine(row.record);
           const downtime =
             leader.observed_at > 0 && workerStartedAt > Date.parse(routine.nextDueAt);
-          yield* insertRun(
-            routine,
-            `schedule:${routine.revision}:${routine.nextDueAt}`,
-            downtime ? "downtime" : "schedule",
+          yield* insertRun(routine, {
+            occurrenceKey: `schedule:${routine.revision}:${routine.nextDueAt}`,
+            source: downtime ? "downtime" : "schedule",
             now,
-            downtime
+            skipReason: downtime
               ? `Server unavailable between ${routine.nextDueAt} and ${nowIso}; elapsed schedules were skipped.`
               : undefined,
-          );
+          });
           yield* writeRoutine({
             ...routine,
             nextDueAt: yield* nextDue(routine.configuration, now),
@@ -508,8 +526,11 @@ export const makeRoutineStore = Effect.gen(function* () {
       updatedAt: isoAt(now),
     })).pipe(Effect.asVoid);
   /**
-   * Records a signed delivery and every run it admits in one transaction, so a
-   * 2xx to the provider always means the intent is durable. Runs reuse the
+   * Owns the whole admission decision table for a known connection: disabled
+   * connections and payloads for another repository are rejected, unsupported
+   * events and unmatched repositories are ignored. The signed delivery and
+   * every run it admits are recorded in one transaction, so a 2xx to the
+   * provider always means the intent is durable. Runs reuse the
    * scheduled-routine admission path, including its active-slot short circuit.
    */
   const admitEvent = (
@@ -526,18 +547,25 @@ export const makeRoutineStore = Effect.gen(function* () {
           delivery_id: string;
         }>`SELECT delivery_id FROM routine_deliveries WHERE connection_id=${connection.id}
           AND (delivery_id=${input.deliveryId} OR digest=${input.digest})`;
-        if (duplicate[0]) return { status: "duplicate", runs: [] } satisfies RoutineEventAdmission;
+        if (duplicate[0]) return { status: "duplicate", runs: [] } satisfies RoutineEventRecorded;
         const runs: RoutineRun[] = [];
+        let rejection: {
+          readonly reason: RoutineEventRejectionReason;
+          readonly detail: string;
+        } | null = null;
         let detail: string | null = null;
-        const ping = input.eventName === "ping" && connection.status !== "disabled";
+        const ping = input.eventName === "ping";
         if (connection.status === "disabled") {
-          detail = "Connection is disabled.";
+          rejection = { reason: "disabled", detail: "Connection is disabled." };
+        } else if (input.repositoryId !== connection.repositoryId) {
+          rejection = {
+            reason: "wrong-repository",
+            detail: "Delivery names a different repository.",
+          };
         } else if (ping) {
           detail = "GitHub ping received.";
         } else if (input.summary === null) {
           detail = `Unsupported event ${input.eventName}.`;
-        } else if (input.summary.repositoryId !== connection.repositoryId) {
-          detail = "Delivery names a different repository.";
         } else {
           const summary = input.summary;
           const context = formatEventContext(summary);
@@ -551,27 +579,22 @@ export const makeRoutineStore = Effect.gen(function* () {
             if (isScheduleTrigger(trigger) || trigger.connectionId !== connection.id) continue;
             if (!triggerMatchesEvent(trigger, summary)) continue;
             runs.push(
-              yield* insertRun(
-                routine,
-                `github:${input.deliveryId}`,
-                "github",
-                input.now,
-                undefined,
-                {
-                  sourceUrl: summary.url || undefined,
-                  eventContext: context,
-                },
-              ),
+              yield* insertRun(routine, {
+                occurrenceKey: `github:${input.deliveryId}`,
+                source: "github",
+                now: input.now,
+                event: { sourceUrl: summary.url || undefined, eventContext: context },
+              }),
             );
           }
           if (runs.length === 0) detail = "No enabled routine matched this event.";
         }
-        const status = ping || runs.length > 0 ? "accepted" : "ignored";
+        const status = rejection ? "rejected" : ping || runs.length > 0 ? "accepted" : "ignored";
         const delivery: RoutineDelivery = {
           deliveryId: input.deliveryId,
           event: input.eventName,
           status,
-          detail,
+          detail: rejection?.detail ?? detail,
           runId: runs[0]?.id ?? null,
           receivedAt: isoAt(input.now),
         };
@@ -579,14 +602,26 @@ export const makeRoutineStore = Effect.gen(function* () {
           VALUES (${connection.id}, ${delivery.deliveryId}, ${input.digest}, ${status}, ${delivery.runId}, ${input.now}, ${encodeDelivery(delivery)})`;
         yield* writeConnection({
           ...connection,
-          status: ping ? "verified" : connection.status,
+          status: ping && !rejection ? "verified" : connection.status,
           acceptedCount: connection.acceptedCount + (status === "accepted" ? 1 : 0),
           ignoredCount: connection.ignoredCount + (status === "ignored" ? 1 : 0),
+          rejectedCount: connection.rejectedCount + (rejection ? 1 : 0),
           lastDelivery: delivery,
           updatedAt: isoAt(input.now),
         });
         yield* recordChange(connection.environmentId);
-        return { status, runs } satisfies RoutineEventAdmission;
+        if (rejection !== null) {
+          return {
+            status: "rejected",
+            reason: rejection.reason,
+            detail: rejection.detail,
+            runs: [],
+          } satisfies RoutineEventRejected;
+        }
+        return {
+          status: ping || runs.length > 0 ? "accepted" : "ignored",
+          runs,
+        } satisfies RoutineEventRecorded;
       }),
     );
   const claim = (owner: string, now: number) =>

@@ -119,7 +119,7 @@ export function parseRepositoryName(value: string): { owner: string; name: strin
   return match ? { owner: match[1]!, name: match[2]! } : null;
 }
 
-export const makeRoutineConnections = Effect.gen(function* () {
+const makeRoutineConnections = Effect.gen(function* () {
   const store = yield* RoutineStore;
   const github = yield* GitHubCli.GitHubCli;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -208,7 +208,6 @@ export const makeRoutineConnections = Effect.gen(function* () {
           ),
         );
       const createdHookId = yield* Ref.make<number | null>(null);
-      const saved = yield* Ref.make(false);
       return yield* Effect.gen(function* () {
         yield* github
           .assertAuthenticated({ cwd })
@@ -260,16 +259,19 @@ export const makeRoutineConnections = Effect.gen(function* () {
           updatedAt: now,
         };
         yield* store.saveConnection(connection);
-        yield* Ref.set(saved, true);
         return connection;
       }).pipe(
         // A failed setup releases the reserved name so the id can be retried
         // instead of failing forever on a conflict with itself, and removes the
-        // provider hook when one was already created. A committed connection
-        // keeps both even when the caller is interrupted afterwards.
+        // provider hook when one was already created. The store is the durable
+        // record of whether the connection committed, so a failure between the
+        // write and this handler still keeps both.
         Effect.onError(() =>
           Effect.gen(function* () {
-            if (yield* Ref.get(saved)) return;
+            const persisted = yield* store
+              .findConnection(id)
+              .pipe(Effect.orElseSucceed(() => null));
+            if (persisted !== null) return;
             yield* secrets.remove(routineConnectionSecretName(id)).pipe(
               Effect.catch((error) =>
                 Effect.logWarning("routine connection secret cleanup failed", {
@@ -334,6 +336,9 @@ export const makeRoutineConnections = Effect.gen(function* () {
       const updated = yield* store.updateConnection(current.id, (connection) => ({
         ...connection,
         status: "disabled",
+        // The provider hook is deleted below; keeping its id would offer a
+        // delivery-history link to a hook that no longer exists.
+        hookId: null,
         updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
       }));
       if (current.hookId !== null) {
@@ -409,14 +414,17 @@ export const makeRoutineConnections = Effect.gen(function* () {
       }));
       if (input.repository === undefined) return { repositories, repository: null };
       const path = yield* repositoryPath(input.repository);
-      const repository = yield* api([path]).pipe(
-        Effect.flatMap((output) => decodeJson(RepositoryJson, output.stdout)),
-      );
-      const branches = yield* api([`${path}/branches?per_page=100`]).pipe(
-        Effect.flatMap((output) => decodeJson(BranchesJson, output.stdout)),
-      );
-      const labels = yield* api([`${path}/labels?per_page=100`]).pipe(
-        Effect.flatMap((output) => decodeJson(LabelsJson, output.stdout)),
+      const [repository, branches, labels] = yield* Effect.all(
+        [
+          api([path]).pipe(Effect.flatMap((output) => decodeJson(RepositoryJson, output.stdout))),
+          api([`${path}/branches?per_page=100`]).pipe(
+            Effect.flatMap((output) => decodeJson(BranchesJson, output.stdout)),
+          ),
+          api([`${path}/labels?per_page=100`]).pipe(
+            Effect.flatMap((output) => decodeJson(LabelsJson, output.stdout)),
+          ),
+        ],
+        { concurrency: "unbounded" },
       );
       return {
         repositories,

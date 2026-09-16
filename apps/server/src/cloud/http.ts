@@ -611,8 +611,18 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       schema: RelayEnvironmentLinkResponse,
     });
     yield* setCliDesiredCloudLink(true, mode);
+    const applied = yield* applyCloudRelayConfig(dependencies, {
+      relayUrl,
+      relayIssuer: link.relayIssuer,
+      cloudUserId: link.cloudUserId,
+      environmentCredential: link.environmentCredential,
+      cloudMintPublicKey: link.cloudMintPublicKey,
+      endpointRuntime: link.endpointRuntime,
+    });
     // The relay owns the public hostname. Keep it so callbacks such as routine
-    // webhooks can name a reachable URL without asking the relay again.
+    // webhooks can name a reachable URL without asking the relay again. It is
+    // stored only after the runtime accepted its configuration, so a failed
+    // start never advertises an endpoint that is not active.
     if (link.endpoint.providerKind === "cloudflare_tunnel") {
       yield* dependencies.secrets.set(
         CLOUD_MANAGED_ENDPOINT_URL,
@@ -621,14 +631,7 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
     } else {
       yield* dependencies.secrets.remove(CLOUD_MANAGED_ENDPOINT_URL);
     }
-    return yield* applyCloudRelayConfig(dependencies, {
-      relayUrl,
-      relayIssuer: link.relayIssuer,
-      cloudUserId: link.cloudUserId,
-      environmentCredential: link.environmentCredential,
-      cloudMintPublicKey: link.cloudMintPublicKey,
-      endpointRuntime: link.endpointRuntime,
-    });
+    return applied;
   },
   Effect.catchIf(
     ServerSecretStore.isSecretStoreError,

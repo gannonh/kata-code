@@ -319,9 +319,13 @@ function FieldLabel({
   );
 }
 
-type GitHubTriggerPatch = Partial<
-  Pick<GitHubEventTrigger, "event" | "branch" | "includeDrafts" | "issueLabelId">
->;
+/** A key set to `undefined` clears that filter; an absent key leaves it alone. */
+type GitHubTriggerPatch = {
+  readonly event?: GitHubEventTrigger["event"];
+  readonly branch?: string | undefined;
+  readonly includeDrafts?: boolean;
+  readonly issueLabelId?: number | undefined;
+};
 
 function GitHubTriggerFields({
   environmentId,
@@ -597,7 +601,9 @@ function GitHubTriggerFields({
             id="routine-github-branch"
             list="routine-branch-options"
             value={trigger.branch ?? ""}
-            onValueChange={(value) => onTriggerChange({ branch: value })}
+            onValueChange={(value) =>
+              onTriggerChange({ branch: value.trim().length === 0 ? undefined : value })
+            }
             placeholder={selectedConnection?.defaultBranch ?? "main"}
             disabled={disabled}
           />
@@ -629,10 +635,7 @@ function GitHubTriggerFields({
             disabled={disabled}
             onChange={(event) => {
               const value = event.target.value;
-              const next = { ...trigger };
-              if (value === "") delete next.issueLabelId;
-              else next.issueLabelId = Number(value);
-              onTriggerChange(next);
+              onTriggerChange({ issueLabelId: value === "" ? undefined : Number(value) });
             }}
           >
             <option value="">Any label</option>
@@ -745,17 +748,10 @@ function RoutineEditor({
   };
   const setGitHubTrigger = (patch: GitHubTriggerPatch) => {
     if (isRoutineEditorScheduleTrigger(configuration.trigger)) return;
-    const normalizedPatch =
-      patch.branch !== undefined && patch.branch.trim().length === 0
-        ? (() => {
-            const { branch: _branch, ...rest } = patch;
-            return rest;
-          })()
-        : patch;
     setConfiguration({
       trigger: withApplicableTriggerFilters({
         ...configuration.trigger,
-        ...normalizedPatch,
+        ...patch,
       }),
     });
   };

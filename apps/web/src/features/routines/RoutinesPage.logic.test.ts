@@ -493,6 +493,24 @@ describe("GitHub event triggers", () => {
         issueLabelId: 5,
       }),
     ).toEqual({ kind: "github", event: "pr_opened", branch: "main", includeDrafts: false });
+    // A filter cleared to `undefined` is removed instead of reverting to the
+    // value it had before the edit.
+    expect(
+      withApplicableTriggerFilters({
+        kind: "github",
+        event: "pr_opened",
+        branch: undefined,
+        includeDrafts: false,
+      }),
+    ).toEqual({ kind: "github", event: "pr_opened", includeDrafts: false });
+    expect(
+      withApplicableTriggerFilters({
+        kind: "github",
+        event: "issue_opened",
+        includeDrafts: false,
+        issueLabelId: undefined,
+      }),
+    ).toEqual({ kind: "github", event: "issue_opened", includeDrafts: false });
   });
 
   it("keeps an unconnected GitHub choice outside the saved trigger contract", () => {

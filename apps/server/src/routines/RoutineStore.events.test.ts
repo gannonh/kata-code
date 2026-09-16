@@ -56,6 +56,7 @@ const prOpened = (number: number, deliveryId: string) => ({
   deliveryId,
   digest: `digest-${deliveryId}`,
   eventName: "pull_request",
+  repositoryId: 42,
   summary: summarizeGitHubEvent("pull_request", {
     action: "opened",
     repository: { id: 42, full_name: "acme/widgets" },
@@ -276,6 +277,7 @@ it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
         deliveryId: "delivery-unsupported",
         digest: "digest-unsupported",
         eventName: "push",
+        repositoryId: 42,
         summary: null,
         now: 2_500,
       });
@@ -305,6 +307,57 @@ it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
       assert.equal(saved.rejectedCount, 1);
       assert.equal(saved.lastDelivery?.status, "rejected");
       const history = yield* store.history(environmentId, { id: routine.id });
+      assert.deepEqual(history.runs, []);
+    }),
+  );
+
+  it.effect("rejects deliveries for another repository or a disabled connection", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const id = RoutineConnectionId.make("connection-reject");
+      yield* store.saveConnection({ ...connection, id });
+      yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-event-reject"),
+          expectedRevision: 0,
+          configuration: {
+            ...configuration,
+            trigger: { ...configuration.trigger, connectionId: id },
+          },
+        },
+        1_000,
+      );
+      const wrongRepository = yield* store.admitEvent({
+        connectionId: id,
+        ...prOpened(1, "delivery-wrong-repository"),
+        repositoryId: 99,
+        now: 2_000,
+      });
+      assert.equal(wrongRepository.status, "rejected");
+      assert.equal(wrongRepository.runs.length, 0);
+      if (wrongRepository.status === "rejected") {
+        assert.equal(wrongRepository.reason, "wrong-repository");
+        assert.equal(wrongRepository.detail, "Delivery names a different repository.");
+      }
+      yield* store.updateConnection(id, (current) => ({ ...current, status: "disabled" }));
+      const disabled = yield* store.admitEvent({
+        connectionId: id,
+        ...prOpened(2, "delivery-disabled"),
+        now: 3_000,
+      });
+      assert.equal(disabled.status, "rejected");
+      if (disabled.status === "rejected") {
+        assert.equal(disabled.reason, "disabled");
+        assert.equal(disabled.detail, "Connection is disabled.");
+      }
+      const saved = yield* store.getConnection(environmentId, id);
+      assert.equal(saved.rejectedCount, 2);
+      assert.equal(saved.acceptedCount, 0);
+      assert.equal(saved.lastDelivery?.status, "rejected");
+      const history = yield* store.history(environmentId, {
+        id: RoutineId.make("routine-event-reject"),
+      });
       assert.deepEqual(history.runs, []);
     }),
   );

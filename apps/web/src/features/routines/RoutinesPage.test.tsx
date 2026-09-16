@@ -412,4 +412,86 @@ describe("RoutinesPage GitHub trigger setup", () => {
       includeDrafts: false,
     });
   });
+
+  it("clears a saved branch and label filter when the field is emptied", async () => {
+    testState.connectionsData.push(connectionFor("connection-clear"));
+    testState.metadataData.repository = {
+      id: 42,
+      nameWithOwner: "acme/widgets",
+      defaultBranch: "main",
+      branches: ["main"],
+      labels: [{ id: 5, name: "bug" }],
+    };
+    testState.command.mockImplementation(async (value: unknown) => {
+      const input = value as { input?: { configuration?: unknown } };
+      if (input.input?.configuration !== undefined) {
+        return { _tag: "Failure", cause: new Error("stop after inspecting the save payload") };
+      }
+      return { _tag: "Success", value: connectionFor("connection-clear") };
+    });
+    renderer = await openNewRoutineEditor();
+
+    await act(async () => {
+      renderer!.root.findByProps({ id: "routine-name" }).props.onValueChange("Clear filters");
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-instruction" })
+        .props.onChange({ target: { value: "Handle the event" } });
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "GitHub event").props.onClick?.();
+    });
+    // Guided setup fills the connection default branch; emptying it clears the filter.
+    await act(async () => {
+      renderer!.root.findByProps({ id: "routine-github-branch" }).props.onValueChange("");
+    });
+    const saveTrigger = () => {
+      const saveCall = testState.command.mock.calls.find(
+        ([value]) =>
+          (value as { input?: { configuration?: unknown } }).input?.configuration !== undefined,
+      );
+      return (saveCall?.[0] as { input: { configuration: { trigger: Record<string, unknown> } } })
+        .input.configuration.trigger;
+    };
+    await act(async () => {
+      buttonWithText(renderer!, "Save").props.onClick?.();
+      await Promise.resolve();
+    });
+    expect(saveTrigger()).toEqual({
+      kind: "github",
+      connectionId: "connection-clear",
+      repositoryId: 42,
+      event: "pr_opened",
+      includeDrafts: false,
+    });
+
+    testState.command.mockClear();
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-github-event" })
+        .props.onChange({ target: { value: "issue_opened" } });
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-github-label" })
+        .props.onChange({ target: { value: "5" } });
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-github-label" })
+        .props.onChange({ target: { value: "" } });
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Save").props.onClick?.();
+      await Promise.resolve();
+    });
+    expect(saveTrigger()).toEqual({
+      kind: "github",
+      connectionId: "connection-clear",
+      repositoryId: 42,
+      event: "issue_opened",
+      includeDrafts: false,
+    });
+  });
 });

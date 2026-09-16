@@ -9,11 +9,10 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { payloadRepositoryId, summarizeGitHubEvent } from "./GitHubRoutineEvents.ts";
 import { RoutineScheduler } from "./RoutineScheduler.ts";
-import { RoutineStore } from "./RoutineStore.ts";
+import { MAX_DELIVERY_HEADER_LENGTH, RoutineStore } from "./RoutineStore.ts";
 
-export const ROUTINE_WEBHOOK_ROUTE_PREFIX = "/api/routines/webhooks";
+const ROUTINE_WEBHOOK_ROUTE_PREFIX = "/api/routines/webhooks";
 export const ROUTINE_WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
-const MAX_DELIVERY_HEADER_LENGTH = 128;
 
 /**
  * Deliveries must be recorded even while the server is still starting, because
@@ -47,11 +46,14 @@ const decodePayload = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Un
 const reply = (status: number, detail: string) =>
   HttpServerResponse.jsonUnsafe({ ok: status < 300, detail }, { status });
 
-/** Reads at most the cap; returns null once the body exceeds it. */
+type BoundedBody = { readonly body: Uint8Array } | { readonly oversized: true };
+
+/** Reads at most the cap and reports an oversized body without consuming past it. */
 const readBoundedBody = (request: HttpServerRequest.HttpServerRequest) =>
   Effect.gen(function* () {
     const declared = Number(request.headers["content-length"] ?? "0");
-    if (Number.isFinite(declared) && declared > ROUTINE_WEBHOOK_MAX_BODY_BYTES) return null;
+    if (Number.isFinite(declared) && declared > ROUTINE_WEBHOOK_MAX_BODY_BYTES)
+      return { oversized: true } as const satisfies BoundedBody;
     let received = 0;
     const chunks = yield* Stream.runCollect(
       request.stream.pipe(
@@ -61,8 +63,11 @@ const readBoundedBody = (request: HttpServerRequest.HttpServerRequest) =>
         }),
       ),
     );
-    if (received > ROUTINE_WEBHOOK_MAX_BODY_BYTES) return null;
-    return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+    if (received > ROUTINE_WEBHOOK_MAX_BODY_BYTES)
+      return { oversized: true } as const satisfies BoundedBody;
+    return {
+      body: Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))),
+    } as const satisfies BoundedBody;
   });
 
 /**
@@ -95,9 +100,15 @@ export const routineWebhookRouteLayer = HttpRouter.add(
       MAX_DELIVERY_HEADER_LENGTH,
     );
     const signature = request.headers["x-hub-signature-256"] ?? "";
-    const connection = yield* store
-      .findConnection(connectionId)
-      .pipe(Effect.orElseSucceed(() => null));
+    const connectionResult = yield* store.findConnection(connectionId).pipe(Effect.result);
+    if (connectionResult._tag === "Failure") {
+      yield* Effect.logWarning("routine webhook connection lookup failed", {
+        connectionId,
+        cause: connectionResult.failure.message,
+      });
+      return reply(503, "Routines are unavailable on this environment.");
+    }
+    const connection = connectionResult.success;
     if (connection === null) return reply(404, "Unknown connection.");
     const rejected = (status: number, detail: string) =>
       store
@@ -117,20 +128,33 @@ export const routineWebhookRouteLayer = HttpRouter.add(
     if (deliveryId.length === 0 || eventName.length === 0 || signature.length === 0) {
       return yield* rejected(400, "Missing GitHub delivery headers.");
     }
-    if (connection.status === "disabled") {
-      return yield* rejected(403, "Connection is disabled.");
-    }
-    const secret = yield* secrets
+    const secretResult = yield* secrets
       .get(routineConnectionSecretName(connection.id))
-      .pipe(Effect.orElseSucceed(() => Option.none<Uint8Array>()));
-    if (Option.isNone(secret)) {
+      .pipe(Effect.result);
+    if (secretResult._tag === "Failure") {
+      yield* Effect.logWarning("routine webhook signing secret could not be read", {
+        connectionId,
+        cause: secretResult.failure.message,
+      });
+      return reply(503, "Signature verification is unavailable; ask GitHub to redeliver.");
+    }
+    if (Option.isNone(secretResult.success)) {
       return yield* rejected(403, "Connection has no signing secret.");
     }
-    const body = yield* readBoundedBody(request).pipe(Effect.orElseSucceed(() => null));
-    if (body === null) {
+    const bodyResult = yield* readBoundedBody(request).pipe(Effect.result);
+    if (bodyResult._tag === "Failure") {
+      yield* Effect.logWarning("routine webhook body could not be read", {
+        connectionId,
+        deliveryId,
+        cause: bodyResult.failure,
+      });
+      return reply(503, "Delivery could not be read; ask GitHub to redeliver.");
+    }
+    if ("oversized" in bodyResult.success) {
       return yield* rejected(413, "Body exceeds the webhook size limit.");
     }
-    if (!signatureMatches(secret.value, body, signature)) {
+    const body = bodyResult.success.body;
+    if (!signatureMatches(secretResult.success.value, body, signature)) {
       return yield* rejected(401, "Signature verification failed.");
     }
     const decoded = decodePayload(body.toString("utf8"));
@@ -138,14 +162,17 @@ export const routineWebhookRouteLayer = HttpRouter.add(
       return yield* rejected(400, "Body is not valid JSON.");
     }
     const payload = decoded.value;
-    const repositoryId = payloadRepositoryId(payload);
-    if (repositoryId !== connection.repositoryId) {
-      return yield* rejected(403, "Delivery names a different repository.");
-    }
     const digest = NodeCrypto.createHash("sha256").update(body).digest("hex");
-    const summary = summarizeGitHubEvent(eventName, payload);
     const admission = yield* store
-      .admitEvent({ connectionId: connection.id, deliveryId, digest, eventName, summary, now })
+      .admitEvent({
+        connectionId: connection.id,
+        deliveryId,
+        digest,
+        eventName,
+        repositoryId: payloadRepositoryId(payload),
+        summary: summarizeGitHubEvent(eventName, payload),
+        now,
+      })
       .pipe(Effect.result);
     if (admission._tag === "Failure") {
       yield* Effect.logWarning("routine webhook delivery could not be recorded", {
@@ -155,7 +182,18 @@ export const routineWebhookRouteLayer = HttpRouter.add(
       });
       return yield* rejected(503, "Delivery could not be recorded; ask GitHub to redeliver.");
     }
-    const { status, runs } = admission.success;
+    const recorded = admission.success;
+    if (recorded.status === "rejected") {
+      yield* Effect.logInfo("routine webhook rejected", {
+        connectionId,
+        deliveryId,
+        status: 403,
+        reason: recorded.reason,
+        detail: recorded.detail,
+      });
+      return reply(403, recorded.detail);
+    }
+    const { status, runs } = recorded;
     yield* Effect.logInfo("routine webhook delivery recorded", {
       connectionId,
       deliveryId,

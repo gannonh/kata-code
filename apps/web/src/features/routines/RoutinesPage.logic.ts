@@ -295,14 +295,15 @@ export function routineTriggerKind(trigger: RoutineEditorTrigger): RoutineTrigge
 /**
  * Branch filters apply to pull requests and workflows; label filters apply to
  * issues. Dropping the filter an event cannot use keeps a hidden value from
- * silently blocking every delivery.
+ * silently blocking every delivery, and a key cleared to `undefined` is
+ * removed so it cannot come back from the previously saved value.
  */
 export function withApplicableTriggerFilters(
   trigger: RoutineEditorGitHubTrigger,
 ): RoutineEditorGitHubTrigger {
   const omitted = trigger.event === "issue_opened" ? "branch" : "issueLabelId";
   return Object.fromEntries(
-    Object.entries(trigger).filter(([key]) => key !== omitted),
+    Object.entries(trigger).filter(([key, value]) => key !== omitted && value !== undefined),
   ) as RoutineEditorGitHubTrigger;
 }
 
