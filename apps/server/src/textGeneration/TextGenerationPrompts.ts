@@ -392,6 +392,7 @@ export function buildRoutineDraftPrompt(input: RoutineDraftPromptInput) {
     "- instruction is the prompt that will run later; keep it explicit and actionable.",
     "- projectId must be one of the available project IDs below. If the user names a project absent from that list, return draft:null and ask them to choose an existing project; never substitute the target project.",
     "- modelSelection is the model that will execute the saved routine. Keep the current routine model unless the user explicitly asks to change it; the generation model is separate.",
+    "- Copy modelSelection.instanceId and modelSelection.model verbatim from the available routine execution models list; never paraphrase, translate, or reformat them.",
     `- For a new draft, use the first available routine execution model (${input.availableModels[0]?.instanceId ?? "none"}:${input.availableModels[0]?.model ?? "none"}) unless the user explicitly requests another execution model. Do not change it merely to match the generation model.`,
     "- trigger must describe a schedule only: daily, weekdays, weekly, or a valid five-field cron expression with an IANA timezone.",
     "- Do not create event triggers, GitHub triggers, webhooks, or one-off runs. For these requests return draft:null and explain that only schedules are supported.",
