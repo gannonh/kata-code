@@ -59,8 +59,7 @@ describe("connectCliAuth", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
     vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "oauthapp_123");
 
-    const connectUrl =
-      "https://app.kata.sh/connect#state=state-1&challenge=challenge-1&port=34338";
+    const connectUrl = "https://app.kata.sh/connect#state=state-1&challenge=challenge-1&port=34338";
     const redirectUrl = connectCliSignInRedirectUrl(
       { state: "state-1", challenge: "challenge-1", loopbackPort: 34338 },
       connectUrl,
@@ -73,8 +72,7 @@ describe("connectCliAuth", () => {
   it("falls back to the current URL when the authorize URL cannot be built", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
 
-    const connectUrl =
-      "https://app.kata.sh/connect#state=state-1&challenge=challenge-1&port=34338";
+    const connectUrl = "https://app.kata.sh/connect#state=state-1&challenge=challenge-1&port=34338";
     expect(
       connectCliSignInRedirectUrl(
         { state: "state-1", challenge: "challenge-1", loopbackPort: 34338 },

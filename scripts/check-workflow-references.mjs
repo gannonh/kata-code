@@ -34,7 +34,7 @@ const moduleExtensions = [".js", ".cjs", ".mjs", ".json", ".node"];
 const moduleIndexFiles = moduleExtensions.map((extension) => `index${extension}`);
 const scriptPathPattern =
   /^\.?\/?[A-Za-z0-9_@.-]+(?:\/[A-Za-z0-9_@.-]+)*\.(?:ts|tsx|mts|cts|mjs|cjs|js|sh|bash|py|ps1)$/;
-const unresolvedValuePattern = /[$*?\[\]{}~'"=]/;
+const unresolvedValuePattern = /[$*?[\]{}~'"=]/;
 
 function isUnresolved(value) {
   return unresolvedValuePattern.test(value);

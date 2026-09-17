@@ -36,7 +36,10 @@ import {
   type ThreadId,
 } from "@kata-sh/code-contracts";
 import * as FileSystem from "effect/FileSystem";
-import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@kata-sh/code-shared/nodeRuntime";
+import {
+  resolveNodeExecutable,
+  nodeRuntimeUnavailableMessage,
+} from "@kata-sh/code-shared/nodeRuntime";
 import * as Path from "effect/Path";
 import { ensureAgentDevice } from "./DeviceToolchain.ts";
 import * as ServerConfig from "../config.ts";

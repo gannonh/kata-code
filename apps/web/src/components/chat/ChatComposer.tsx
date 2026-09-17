@@ -232,7 +232,10 @@ import {
 } from "~/lib/composerContextRecords";
 import { requestConfirmDialog } from "~/confirmDialog";
 import { encodeComposerContextFragment } from "@kata-sh/code-shared/composerContextClipboard";
-import type { ComposerContextClipboardFragment, ComposerContextRecord } from "@kata-sh/code-contracts";
+import type {
+  ComposerContextClipboardFragment,
+  ComposerContextRecord,
+} from "@kata-sh/code-contracts";
 import { resolveAssetUrl } from "~/assets/assetUrls";
 import { assetEnvironment } from "~/state/assets";
 import { readPreparedConnection } from "~/state/session";

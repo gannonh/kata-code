@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  DEFAULT_MOBILE_THEME_ID,
-  MOBILE_THEME_IDS,
-  themeColorWithAlpha,
-} from "./mobileTheme";
+import { DEFAULT_MOBILE_THEME_ID, MOBILE_THEME_IDS, themeColorWithAlpha } from "./mobileTheme";
 import { getMobileThemeRuntimeVariables } from "./mobileThemeVariables";
 
 describe("mobile theme runtime variables", () => {

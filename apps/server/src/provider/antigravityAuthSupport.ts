@@ -6,7 +6,10 @@ import * as NodePath from "node:path";
 
 import type { AntigravityAuthMethod, ProviderInstanceId } from "@kata-sh/code-contracts";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
-import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@kata-sh/code-shared/nodeRuntime";
+import {
+  resolveNodeExecutable,
+  nodeRuntimeUnavailableMessage,
+} from "@kata-sh/code-shared/nodeRuntime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";

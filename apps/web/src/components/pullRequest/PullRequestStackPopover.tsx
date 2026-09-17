@@ -1,5 +1,9 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
-import type { EnvironmentId, PullRequestRef, PullRequestStackMembership } from "@kata-sh/code-contracts";
+import type {
+  EnvironmentId,
+  PullRequestRef,
+  PullRequestStackMembership,
+} from "@kata-sh/code-contracts";
 import { useState } from "react";
 import { usePullRequestStack } from "~/state/usePullRequestStack";
 import { Menu, MenuTrigger, MenuPopup, MenuGroup, MenuGroupLabel, MenuItem } from "../ui/menu";

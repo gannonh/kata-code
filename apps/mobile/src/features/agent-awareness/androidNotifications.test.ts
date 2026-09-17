@@ -60,10 +60,8 @@ describe("Android native notification capability", () => {
     "falls back to app settings for older binaries or missing system activities (%j)",
     async (openLiveUpdateSettings) => {
       if (openLiveUpdateSettings) mocks.native!.openLiveUpdateSettings = openLiveUpdateSettings;
-      const {
-        openAndroidLiveUpdateSettings,
-        __setAndroidNotificationsNativeLoaderForTest,
-      } = await import("./androidNotifications");
+      const { openAndroidLiveUpdateSettings, __setAndroidNotificationsNativeLoaderForTest } =
+        await import("./androidNotifications");
       __setAndroidNotificationsNativeLoaderForTest(mocks.requireModule);
       await openAndroidLiveUpdateSettings();
       expect(mocks.openSettings).toHaveBeenCalledOnce();

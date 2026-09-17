@@ -1,5 +1,9 @@
 import { withAgentDeviceEnvironment } from "../../mcp/McpProviderSession.ts";
-import { AntigravitySettings, ProviderDriverKind, ProviderSetupError } from "@kata-sh/code-contracts";
+import {
+  AntigravitySettings,
+  ProviderDriverKind,
+  ProviderSetupError,
+} from "@kata-sh/code-contracts";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import {
   NodeRuntimeUnavailableError,

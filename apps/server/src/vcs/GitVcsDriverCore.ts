@@ -26,7 +26,10 @@ import {
   type ReviewDiffPreviewSource,
   type VcsRef,
 } from "@kata-sh/code-contracts";
-import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from "@kata-sh/code-shared/git";
+import {
+  dedupeRemoteBranchesWithLocalMatches,
+  normalizeGitRemoteUrl,
+} from "@kata-sh/code-shared/git";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { compactTraceAttributes } from "@kata-sh/code-shared/observability";
 import { decodeJsonResult } from "@kata-sh/code-shared/schemaJson";

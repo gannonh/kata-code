@@ -76,14 +76,14 @@ If the requested target is outside this list, ask whether to proceed with a best
 
 Load and use the best available skill or CLI for the target. Install missing tooling when it is needed for required E2E or screenshot evidence and installation is safe in the environment. Do not install or spend unbounded time debugging tooling solely for optional video; use the skip-and-flag contract instead.
 
-| Target | Preferred tools | Evidence to capture |
-| --- | --- | --- |
-| Web app | `agent-browser` for automation, screenshots, and `record start/stop`; Playwright when the repo already uses it or traces are useful; `chrome-cdp` only for an already-open Chrome page with user approval | Passing E2E log, required screenshots, optional video, DOM/accessibility snapshots, console/network notes |
-| CLI app | Repo E2E/system test, shell commands, `script`, generated output files; VHS for deterministic terminal GIF/MP4/WebM when visual proof helps | Passing E2E log, terminal transcript, exit codes, output files, JSON, optional recording |
-| TUI app | Repo E2E/system test; VHS for scripted terminal capture; an installed computer-use CLI for real interaction and screenshots | Passing E2E log, required screenshots, transcript/config/output files, optional video/GIF |
-| API | Public-boundary E2E/system test, `curl`, HTTP client, repo scripts, logs | Passing E2E log, request/response JSON, status codes, logs, saved payloads |
-| SDK | Public-boundary E2E/system test and minimal runnable example using the built package | Passing E2E log, source snippet, command output, generated files, logs |
-| Native app, including Electron-type | Existing app E2E harness; `agent-browser` through Electron CDP when available; `agent-cu` or an installed computer-use skill for accessibility-driven desktop interaction and screenshots | Passing E2E log, required window screenshots, accessibility snapshots/logs, optional video |
+| Target                              | Preferred tools                                                                                                                                                                                           | Evidence to capture                                                                                       |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Web app                             | `agent-browser` for automation, screenshots, and `record start/stop`; Playwright when the repo already uses it or traces are useful; `chrome-cdp` only for an already-open Chrome page with user approval | Passing E2E log, required screenshots, optional video, DOM/accessibility snapshots, console/network notes |
+| CLI app                             | Repo E2E/system test, shell commands, `script`, generated output files; VHS for deterministic terminal GIF/MP4/WebM when visual proof helps                                                               | Passing E2E log, terminal transcript, exit codes, output files, JSON, optional recording                  |
+| TUI app                             | Repo E2E/system test; VHS for scripted terminal capture; an installed computer-use CLI for real interaction and screenshots                                                                               | Passing E2E log, required screenshots, transcript/config/output files, optional video/GIF                 |
+| API                                 | Public-boundary E2E/system test, `curl`, HTTP client, repo scripts, logs                                                                                                                                  | Passing E2E log, request/response JSON, status codes, logs, saved payloads                                |
+| SDK                                 | Public-boundary E2E/system test and minimal runnable example using the built package                                                                                                                      | Passing E2E log, source snippet, command output, generated files, logs                                    |
+| Native app, including Electron-type | Existing app E2E harness; `agent-browser` through Electron CDP when available; `agent-cu` or an installed computer-use skill for accessibility-driven desktop interaction and screenshots                 | Passing E2E log, required window screenshots, accessibility snapshots/logs, optional video                |
 
 Useful capability checks:
 
@@ -162,16 +162,33 @@ A minimal `evidence.json` should include:
   "timestamp": "ISO-8601",
   "git_commit": "short sha",
   "artifacts": [
-    {"type": "screenshot", "checkpoint": "starting|key|final", "path": "uat-evidence/.../screenshots/start.png", "description": "what it proves"}
+    {
+      "type": "screenshot",
+      "checkpoint": "starting|key|final",
+      "path": "uat-evidence/.../screenshots/start.png",
+      "description": "what it proves"
+    }
   ],
   "commands": [
-    {"name": "feature-e2e", "kind": "e2e|contract|supporting", "argv": ["command", "arg"], "command": "\"command\" \"arg\"", "exit_code": 0, "output_path": "uat-evidence/.../logs/example.log"}
+    {
+      "name": "feature-e2e",
+      "kind": "e2e|contract|supporting",
+      "argv": ["command", "arg"],
+      "command": "\"command\" \"arg\"",
+      "exit_code": 0,
+      "output_path": "uat-evidence/.../logs/example.log"
+    }
   ],
   "notes": [
     "Video: Skipped — <reason>; attempted: <tool or bounded fallback>; suggested tooling: <what would unblock it>"
   ],
   "slices": [
-    {"id": "stable-slice-id", "name": "slice name", "result": "Pass|Fail|Blocked|Not tested", "evidence": ["uat-evidence/.../screenshots/final.png"]}
+    {
+      "id": "stable-slice-id",
+      "name": "slice name",
+      "result": "Pass|Fail|Blocked|Not tested",
+      "evidence": ["uat-evidence/.../screenshots/final.png"]
+    }
   ]
 }
 ```
@@ -267,20 +284,25 @@ Target: <web|cli|tui|api|sdk|native|electron|mixed>
 Evidence mode: <user-facing|technical-enablement>
 
 Required Evidence Status:
+
 - E2E/contract: Pass | Blocked - <command and log path>
 - Screenshots: Pass | Blocked | Not applicable - <paths or reason>
 - Video: Captured | Skipped | Not applicable - <path or standardized skip reason>
 
 Slice-by-slice result:
+
 - Pass/Fail: <slice> - <one-line evidence summary>
 
 Evidence:
+
 - <artifact path> - <what it proves>
 
 Adversarial Review:
+
 - Pass/Fail: <criterion> - <artifact-backed reason>
 
 Manual Run Instructions:
+
 1. <human step or command>
    Expected: <visible result or output>
 

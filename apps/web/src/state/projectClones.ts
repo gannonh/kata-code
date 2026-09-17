@@ -1,6 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
 import { parseScopedProjectKey, scopedProjectKey } from "@kata-sh/code-client-runtime/environment";
-import type { EnvironmentId, ProjectCloneSnapshot, ScopedProjectRef } from "@kata-sh/code-contracts";
+import type {
+  EnvironmentId,
+  ProjectCloneSnapshot,
+  ScopedProjectRef,
+} from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 

@@ -46,9 +46,7 @@ function syncMacosWindowButtons(window: Electron.BrowserWindow): void {
       : 1.2 ** window.webContents.getZoomLevel();
   window.setWindowButtonPosition({
     x: 16,
-    y: Math.round(
-      (MACOS_WORKSPACE_TOPBAR_HEIGHT * zoomFactor) / 2 - MACOS_WINDOW_BUTTON_RADIUS,
-    ),
+    y: Math.round((MACOS_WORKSPACE_TOPBAR_HEIGHT * zoomFactor) / 2 - MACOS_WINDOW_BUTTON_RADIUS),
   });
 }
 

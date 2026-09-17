@@ -80,7 +80,9 @@ const tailscaleServePortFlag = Flag.integer("tailscale-serve-port").pipe(
 const EnvServerConfig = Config.all({
   logLevel: Config.logLevel("KATACODE_LOG_LEVEL").pipe(Config.withDefault("Info")),
   traceMinLevel: Config.logLevel("KATACODE_TRACE_MIN_LEVEL").pipe(Config.withDefault("Info")),
-  traceTimingEnabled: Config.boolean("KATACODE_TRACE_TIMING_ENABLED").pipe(Config.withDefault(true)),
+  traceTimingEnabled: Config.boolean("KATACODE_TRACE_TIMING_ENABLED").pipe(
+    Config.withDefault(true),
+  ),
   traceFile: Config.string("KATACODE_TRACE_FILE").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -99,7 +101,9 @@ const EnvServerConfig = Config.all({
   otlpExportIntervalMs: Config.int("KATACODE_OTLP_EXPORT_INTERVAL_MS").pipe(
     Config.withDefault(10_000),
   ),
-  otlpServiceName: Config.string("KATACODE_OTLP_SERVICE_NAME").pipe(Config.withDefault("t3-server")),
+  otlpServiceName: Config.string("KATACODE_OTLP_SERVICE_NAME").pipe(
+    Config.withDefault("t3-server"),
+  ),
   otlpHeaders: Config.schema(OtlpHeadersFromString, "KATACODE_OTLP_HEADERS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),

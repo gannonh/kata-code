@@ -2,7 +2,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeFSP from "node:fs/promises";
-import { AssetAccessError, AssetPreviewTypeValidationError, ThreadId } from "@kata-sh/code-contracts";
+import {
+  AssetAccessError,
+  AssetPreviewTypeValidationError,
+  ThreadId,
+} from "@kata-sh/code-contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@kata-sh/code-shared/projectFavicon";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";

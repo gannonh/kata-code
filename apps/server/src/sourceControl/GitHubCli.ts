@@ -463,7 +463,6 @@ function decodeIncludedJson<S extends Schema.Top>(
   );
 }
 
-
 function normalizeRepositoryCloneUrls(
   raw: Schema.Schema.Type<typeof RawGitHubRepositoryCloneUrlsSchema>,
 ): GitHubRepositoryCloneUrls {

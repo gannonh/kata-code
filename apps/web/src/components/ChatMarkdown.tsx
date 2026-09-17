@@ -50,7 +50,10 @@ import {
   markdownImageSourceFragment,
 } from "@kata-sh/code-client-runtime/markdown-images";
 import { inlineCodeFilePathCandidate } from "@kata-sh/code-client-runtime/markdown-links";
-import { mediaFileReference, mediaUrlReference } from "@kata-sh/code-client-runtime/media-reference";
+import {
+  mediaFileReference,
+  mediaUrlReference,
+} from "@kata-sh/code-client-runtime/media-reference";
 import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@kata-sh/code-shared/filePreview";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";

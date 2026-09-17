@@ -13,7 +13,9 @@ describe.skipIf(HostProcessPlatform.defaultValue() !== "linux")("installer termi
   it.each([false, true])(
     "preserves download and install behavior (HTTP failure: %s)",
     async (fail) => {
-      const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "katacode-install-progress-"));
+      const root = await NodeFSP.mkdtemp(
+        NodePath.join(NodeOS.tmpdir(), "katacode-install-progress-"),
+      );
       const version = "1.2.3";
       const stem = `katacode-${version}-linux-${HostProcessArchitecture.defaultValue()}`;
       const archiveName = `${stem}.tar.gz`;

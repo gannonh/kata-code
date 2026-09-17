@@ -141,13 +141,14 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
     const current = yield* fs.readFileString(shimPath).pipe(Effect.option);
     const quoted = Option.isSome(current) ? /^"([^"]+)"/m.exec(current.value)?.[1] : undefined;
     if (quoted === undefined || !ownsTarget(quoted)) return Option.none<string>();
-    yield* fs
-      .writeFileString(shimPath, `@echo off\r\n"${input.targetEntryPath}" %*`)
-      .pipe(
-        Effect.mapError(
-          () => new CliUpdateError({ reason: `Could not rewrite the katacode launcher at ${shimPath}.` }),
-        ),
-      );
+    yield* fs.writeFileString(shimPath, `@echo off\r\n"${input.targetEntryPath}" %*`).pipe(
+      Effect.mapError(
+        () =>
+          new CliUpdateError({
+            reason: `Could not rewrite the katacode launcher at ${shimPath}.`,
+          }),
+      ),
+    );
     return Option.some(shimPath);
   }
 
@@ -160,7 +161,9 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
     Effect.andThen(fs.rename(tempLink, input.launchedAs)),
     Effect.mapError(
       () =>
-        new CliUpdateError({ reason: `Could not repoint the katacode launcher at ${input.launchedAs}.` }),
+        new CliUpdateError({
+          reason: `Could not repoint the katacode launcher at ${input.launchedAs}.`,
+        }),
     ),
   );
   return Option.some(input.launchedAs);
