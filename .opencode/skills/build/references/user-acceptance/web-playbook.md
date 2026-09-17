@@ -61,6 +61,7 @@ Write normal user steps first:
 
 ```markdown
 Manual Run Instructions:
+
 1. Start the app with `<command>`.
    Expected: the app opens at `<url>`.
 2. Go to `<screen>`.
