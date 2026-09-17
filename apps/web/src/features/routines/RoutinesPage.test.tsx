@@ -1,3 +1,5 @@
+import { RoutineError } from "@kata-sh/code-contracts";
+import * as Cause from "effect/Cause";
 import { act, type ReactElement, type ReactNode } from "react";
 import { create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
@@ -37,6 +39,7 @@ const testState = vi.hoisted(() => ({
       ],
     },
   ],
+  listData: [] as Array<Record<string, unknown>>,
   listDataByEnvironment: {} as Record<string, readonly unknown[]>,
   connectionsData: [] as Array<Record<string, unknown>>,
   metadataData: {
@@ -97,42 +100,39 @@ vi.mock("../../state/routines", () => ({
 vi.mock("../../state/use-atom-command", () => ({
   useAtomCommand: () => testState.command,
 }));
-vi.mock("../../state/query", () => {
-  const emptyRoutineList: readonly unknown[] = [];
-  return {
-    useEnvironmentQuery: (query: unknown) => {
-      const listQuery = query as { tag?: symbol; environmentId?: string } | null;
-      if (listQuery?.tag === testState.queries.list) {
-        return {
-          data: testState.listDataByEnvironment[listQuery.environmentId ?? ""] ?? emptyRoutineList,
-          error: null,
-          isPending: false,
-          isSuccess: true,
-          refresh: vi.fn(),
-        };
-      }
-      if (query === testState.queries.connections) {
-        return {
-          data: testState.connectionsData,
-          error: null,
-          isPending: false,
-          isSuccess: true,
-          refresh: vi.fn(),
-        };
-      }
-      if (query === testState.queries.metadata) {
-        return {
-          data: testState.metadataData,
-          error: null,
-          isPending: false,
-          isSuccess: true,
-          refresh: vi.fn(),
-        };
-      }
-      return { data: null, error: null, isPending: false, isSuccess: false, refresh: vi.fn() };
-    },
-  };
-});
+vi.mock("../../state/query", () => ({
+  useEnvironmentQuery: (query: unknown) => {
+    const listQuery = query as { tag?: symbol; environmentId?: string } | null;
+    if (listQuery?.tag === testState.queries.list) {
+      return {
+        data: testState.listDataByEnvironment[listQuery.environmentId ?? ""] ?? testState.listData,
+        error: null,
+        isPending: false,
+        isSuccess: true,
+        refresh: vi.fn(),
+      };
+    }
+    if (query === testState.queries.connections) {
+      return {
+        data: testState.connectionsData,
+        error: null,
+        isPending: false,
+        isSuccess: true,
+        refresh: vi.fn(),
+      };
+    }
+    if (query === testState.queries.metadata) {
+      return {
+        data: testState.metadataData,
+        error: null,
+        isPending: false,
+        isSuccess: true,
+        refresh: vi.fn(),
+      };
+    }
+    return { data: null, error: null, isPending: false, isSuccess: false, refresh: vi.fn() };
+  },
+}));
 vi.mock("../../components/ui/menu", () => ({
   Menu: ({ children }: { children: ReactNode }) => children,
   MenuItem: ({ children, onClick }: { children: ReactNode; onClick?: () => void }) => (
@@ -189,18 +189,57 @@ function connectionFor(id: string): Record<string, unknown> {
   };
 }
 
-async function openNewRoutineEditor(): Promise<ReactTestRenderer> {
+function savedRoutineFor(id: string): Record<string, unknown> {
+  return {
+    id,
+    environmentId: "environment-1",
+    revision: 4,
+    state: "enabled",
+    nextDueAt: "2026-09-17T09:00:00.000Z",
+    createdAt: "2026-09-15T00:00:00.000Z",
+    updatedAt: "2026-09-15T00:00:00.000Z",
+    configuration: {
+      name: "Daily project brief",
+      instruction: "Summarize the latest changes.",
+      projectId: "project-1",
+      modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+      runtimeMode: "approval-required",
+      workspace: { kind: "shared", directory: "/tmp/widgets" },
+      trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
+    },
+  };
+}
+
+async function renderRoutinesPage(): Promise<ReactTestRenderer> {
   let renderer: ReactTestRenderer;
   await act(async () => {
     renderer = create(<RoutinesPage />);
   });
-  const current = renderer!;
+  return renderer!;
+}
+
+async function openRoutineFrom(
+  open: (renderer: ReactTestRenderer) => void,
+): Promise<ReactTestRenderer> {
+  const renderer = await renderRoutinesPage();
   await act(async () => {
-    menuItemWithText(current, "Set up manually").props.onClick?.();
+    open(renderer);
     await Promise.resolve();
     await Promise.resolve();
   });
-  return current;
+  return renderer;
+}
+
+async function openNewRoutineEditor(): Promise<ReactTestRenderer> {
+  return openRoutineFrom((renderer) =>
+    menuItemWithText(renderer, "Set up manually").props.onClick?.(),
+  );
+}
+
+async function openSavedRoutineEditor(): Promise<ReactTestRenderer> {
+  return openRoutineFrom((renderer) =>
+    buttonWithText(renderer, "Daily project brief").props.onClick?.(),
+  );
 }
 
 describe("RoutinesPage GitHub trigger setup", () => {
@@ -209,6 +248,7 @@ describe("RoutinesPage GitHub trigger setup", () => {
   beforeEach(() => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     testState.command.mockReset();
+    testState.listData.length = 0;
     testState.connectionsData.length = 0;
     testState.metadataData.repository = null;
   });
@@ -500,6 +540,86 @@ describe("RoutinesPage GitHub trigger setup", () => {
       event: "issue_opened",
       includeDrafts: false,
     });
+  });
+});
+
+describe("RoutinesPage save failures", () => {
+  const CONFLICT_MESSAGE = "This routine changed. Reload the saved version before saving again.";
+  const GENERIC_MESSAGE = "The routine request failed. Try again.";
+  let renderer: ReactTestRenderer | undefined;
+
+  const submitSave = async () => {
+    await act(async () => {
+      buttonWithText(renderer!, "Save").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    testState.command.mockReset();
+    testState.listData.length = 0;
+    testState.connectionsData.length = 0;
+  });
+
+  afterEach(async () => {
+    await act(async () => renderer?.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the stale-revision conflict message when the save is rejected", async () => {
+    testState.listData.push(savedRoutineFor("routine-conflict"));
+    testState.command.mockImplementation(async () => ({
+      _tag: "Failure",
+      cause: Cause.fail(new RoutineError({ code: "conflict", message: CONFLICT_MESSAGE })),
+    }));
+    renderer = await openSavedRoutineEditor();
+
+    await submitSave();
+
+    const text = nodeText(renderer!.root);
+    expect(text).toContain(CONFLICT_MESSAGE);
+    expect(text).not.toContain(GENERIC_MESSAGE);
+    expect(renderer!.root.findByProps({ id: "routine-name" }).props.value).toBe(
+      "Daily project brief",
+    );
+  });
+
+  it("keeps the message of an unrelated save failure", async () => {
+    testState.listData.push(savedRoutineFor("routine-validation"));
+    testState.command.mockImplementation(async () => ({
+      _tag: "Failure",
+      cause: Cause.fail(
+        new RoutineError({
+          code: "validation",
+          message: "Connect the GitHub repository before saving.",
+        }),
+      ),
+    }));
+    renderer = await openSavedRoutineEditor();
+
+    await submitSave();
+
+    const text = nodeText(renderer!.root);
+    expect(text).toContain("Connect the GitHub repository before saving.");
+    expect(text).not.toContain(CONFLICT_MESSAGE);
+  });
+
+  it("falls back to the generic message when no failure carries a message", async () => {
+    testState.listData.push(savedRoutineFor("routine-defect"));
+    testState.command.mockImplementation(async () => ({
+      _tag: "Failure",
+      cause: Cause.die(new Error("boom")),
+    }));
+    renderer = await openSavedRoutineEditor();
+
+    await submitSave();
+
+    const text = nodeText(renderer!.root);
+    expect(text).toContain(GENERIC_MESSAGE);
+    expect(text).not.toContain(CONFLICT_MESSAGE);
   });
 });
 
