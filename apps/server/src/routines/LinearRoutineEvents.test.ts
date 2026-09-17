@@ -64,6 +64,16 @@ describe("Linear routine event mapping", () => {
     });
   });
 
+  it("ignores a malformed previous label list instead of treating every label as added", () => {
+    const result = summarizeLinearEvent(
+      payload(
+        { action: "update", updatedFrom: { labelIds: "not-an-array" } },
+        { labelIds: ["label-bug"] },
+      ),
+    );
+    expect(result.kind).toBe("ignored");
+  });
+
   it("names the actor from the payload actor object when present", () => {
     const { actorId: _actorId, ...withoutActorId } = payload();
     const summary = summaryOf({

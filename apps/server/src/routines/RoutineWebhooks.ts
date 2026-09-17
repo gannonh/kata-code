@@ -327,8 +327,12 @@ export const linearWebhookRouteLayer = HttpRouter.add(
     if (payloadType !== null && payloadType !== eventName) {
       return yield* rejected(400, "Header and payload event type disagree.");
     }
-    const headerTimestamp = Number(request.headers["linear-timestamp"] ?? "");
-    if (Number.isFinite(headerTimestamp) && headerTimestamp !== payloadTimestamp) {
+    const headerTimestamp = request.headers["linear-timestamp"];
+    if (
+      headerTimestamp !== undefined &&
+      Number.isFinite(Number(headerTimestamp)) &&
+      Number(headerTimestamp) !== payloadTimestamp
+    ) {
       return yield* rejected(400, "Header and payload timestamps disagree.");
     }
     const digest = NodeCrypto.createHash("sha256").update(body).digest("hex");

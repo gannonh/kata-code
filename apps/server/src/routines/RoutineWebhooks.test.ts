@@ -457,6 +457,16 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
         const retry = yield* linearIssue({ deliveryId: "linear-delivery-1" });
         assert.equal(retry.status, 200);
         assert.equal(retry.json.status, "duplicate");
+        // A missing Linear-Timestamp header is not a mismatch; the signed body
+        // timestamp is authoritative. The delivery is outside the connection's
+        // team scope, so it is ignored rather than rejected.
+        const withoutHeader = yield* linearIssue({
+          deliveryId: "linear-delivery-no-header",
+          timestamp: null,
+          data: { id: "issue-no-header", identifier: "KAT-303", teamId: "team-2" },
+        });
+        assert.equal(withoutHeader.status, 200);
+        assert.equal(withoutHeader.json.status, "ignored");
         const replay = yield* linearIssue({ deliveryId: "linear-delivery-replay" });
         assert.equal(replay.json.status, "duplicate");
         assert.equal((yield* store.history(environmentId, { id: routine.id })).runs.length, 1);

@@ -222,7 +222,9 @@ function addedLabels(
   labelIds: ReadonlyArray<string>,
 ): ReadonlyArray<string> {
   const added = new Set<string>();
-  if ("labelIds" in updatedFrom) {
+  // Only a real previous array is transition evidence; a malformed value must
+  // not make every current label look newly added.
+  if (Array.isArray(updatedFrom.labelIds)) {
     const previous = new Set(stringIds(updatedFrom.labelIds));
     for (const id of labelIds) if (!previous.has(id)) added.add(id);
   }

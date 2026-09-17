@@ -417,6 +417,11 @@ const makeRoutineConnections = Effect.gen(function* () {
     const current = yield* owned(input.environmentId, id);
     if (current.provider !== "linear")
       return yield* failure("validation", "Only Linear connections attach a signing secret.");
+    if (current.status === "disabled")
+      return yield* failure(
+        "blocked",
+        "This Linear connection is disabled. Create a new connection instead.",
+      );
     const value = input.signingSecret.trim();
     if (value.length === 0)
       return yield* failure(
@@ -661,7 +666,7 @@ const makeRoutineConnections = Effect.gen(function* () {
         yield* stampMetadataAccess("revoked");
         return yield* failure(
           "blocked",
-          "Linear metadata access was revoked. Add a new API key for this workspace.",
+          "Linear metadata access was revoked. Disable this connection and create a new one with a working API key.",
         );
       }
       return yield* failure("blocked", result.failure.message);

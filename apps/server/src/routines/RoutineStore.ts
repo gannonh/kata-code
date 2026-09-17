@@ -602,7 +602,8 @@ export const makeRoutineStore = Effect.gen(function* () {
           readonly detail: string;
         } | null = null;
         let detail: string | null = null;
-        const ping = input.eventName === "ping";
+        // Only GitHub defines a ping handshake; a Linear delivery cannot claim it.
+        const ping = input.eventName === "ping" && connection.provider === "github";
         const wrongResource =
           connection.provider === "github"
             ? input.providerResourceId !== connection.repositoryId

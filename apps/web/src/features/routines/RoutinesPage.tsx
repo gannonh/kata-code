@@ -1086,8 +1086,8 @@ function LinearTriggerFields({
           ) : null}
           {connection.metadataAccess === "revoked" ? (
             <span className="text-destructive">
-              Metadata access revoked. Attach a new API key for this workspace to restore the team,
-              project, status, and label pickers.
+              Metadata access revoked. Disable this connection and create a new one with a working
+              API key to restore the team, project, status, and label pickers.
             </span>
           ) : null}
         </div>
@@ -2048,7 +2048,8 @@ function RoutineEditor({
                       target="_blank"
                       rel="noreferrer"
                     >
-                      <WebhookIcon className="size-3" /> Open on GitHub
+                      <WebhookIcon className="size-3" />{" "}
+                      {run.source === "linear" ? "Open in Linear" : "Open on GitHub"}
                     </a>
                   ) : null}
                   {run.conversation.kind === "confirmed" ? (
