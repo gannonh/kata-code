@@ -6,8 +6,7 @@ import {
   Routine,
   RoutineConnectionId,
   RoutineDraft,
-  RoutineId,
-  RoutineRequestId,
+  type RoutineId,
   isScheduleTrigger,
   type EnvironmentId,
   type GitHubEventTrigger,
@@ -74,6 +73,8 @@ import {
   isRoutineDraftDirty,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
+  newRoutineDraftId,
+  newRoutineRequestId,
   preferredWorktreeBaseBranch,
   routineDraftBaselineAfterAutomaticChange,
   routineDraftRevisionAfterEdit,
@@ -102,8 +103,6 @@ const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
 
 type RoutineWithOwner = Routine & {
   readonly ownerLabel: string;
-  /** The environment whose library query returned this row, which may differ from the routine payload after a state copy. */
-  readonly servedBy: EnvironmentId;
   readonly connectionPhase: string;
 };
 
@@ -120,8 +119,6 @@ type EnvironmentRoutineLoad = {
 };
 
 const EMPTY_ROUTINES: readonly RoutineWithOwner[] = [];
-let draftSequence = 0;
-const nextDraftId = () => `routine-draft-${Date.now().toString(36)}-${++draftSequence}`;
 
 const statusLabel: Record<Routine["state"], string> = {
   enabled: "Active",
@@ -164,7 +161,7 @@ function defaultDraft(
       ? worktreeWorkspace(baseBranch)
       : { kind: "shared" as const, directory: project.workspaceRoot };
   return {
-    id: RoutineId.make(nextDraftId()),
+    id: newRoutineDraftId(),
     environmentId,
     expectedRevision: 0,
     configuration: {
@@ -229,8 +226,8 @@ function RoutineEnvironmentRows({
         status: "ready",
         routines: query.data.map((routine) => ({
           ...routine,
+          environmentId,
           ownerLabel,
-          servedBy: environmentId,
           connectionPhase,
         })),
       });
@@ -910,7 +907,7 @@ function RoutineEditor({
       input: {
         id: routine.id,
         expectedRevision: routine.revision,
-        requestId: RoutineRequestId.make(nextDraftId()),
+        requestId: newRoutineRequestId(),
       },
     });
     setBusy(false);
@@ -1514,7 +1511,7 @@ export function RoutinesPage() {
       : null);
   const selectedEnvironment = environments.find(
     (environment) =>
-      environment.environmentId === (selectedRoutine?.servedBy ?? draft?.environmentId),
+      environment.environmentId === (draft?.environmentId ?? selectedRoutine?.environmentId),
   );
   const selectedProviders = useAtomValue(
     serverEnvironment.providersValueAtom(
@@ -1712,7 +1709,6 @@ export function RoutinesPage() {
         (editorRoutine?.id === routine.id ? editorRoutine : undefined);
       const replacement: RoutineWithOwner = {
         ...routine,
-        servedBy: owner?.servedBy ?? routine.environmentId,
         ownerLabel: owner?.ownerLabel ?? "Environment",
         connectionPhase: owner?.connectionPhase ?? "connected",
       };
@@ -1724,7 +1720,6 @@ export function RoutinesPage() {
     });
     setEditorRoutine((previous) => ({
       ...routine,
-      servedBy: previous?.id === routine.id ? previous.servedBy : routine.environmentId,
       ownerLabel: previous?.id === routine.id ? previous.ownerLabel : "Environment",
       connectionPhase: previous?.id === routine.id ? previous.connectionPhase : "connected",
     }));

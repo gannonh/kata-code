@@ -39,8 +39,8 @@ const testState = vi.hoisted(() => ({
       ],
     },
   ],
-  listByEnvironment: {} as Record<string, ReadonlyArray<Record<string, unknown>>>,
-  emptyRoutineList: [] as ReadonlyArray<Record<string, unknown>>,
+  listData: [] as Array<Record<string, unknown>>,
+  listDataByEnvironment: {} as Record<string, readonly unknown[]>,
   connectionsData: [] as Array<Record<string, unknown>>,
   metadataData: {
     repositories: [] as Array<{ nameWithOwner: string; defaultBranch: string }>,
@@ -53,6 +53,7 @@ const testState = vi.hoisted(() => ({
     },
   },
   queries: {
+    list: Symbol("list"),
     connections: Symbol("connections"),
     preview: Symbol("preview"),
     metadata: Symbol("metadata"),
@@ -79,9 +80,9 @@ vi.mock("../../state/vcs", () => ({
 }));
 vi.mock("../../state/routines", () => ({
   routineEnvironment: {
-    list: (target: { environmentId: string }) => ({
-      kind: "list",
-      environmentId: target.environmentId,
+    list: (input: { environmentId: string }) => ({
+      tag: testState.queries.list,
+      environmentId: input.environmentId,
     }),
     connections: () => testState.queries.connections,
     preview: () => testState.queries.preview,
@@ -101,15 +102,10 @@ vi.mock("../../state/use-atom-command", () => ({
 }));
 vi.mock("../../state/query", () => ({
   useEnvironmentQuery: (query: unknown) => {
-    if (
-      typeof query === "object" &&
-      query !== null &&
-      (query as { kind?: unknown }).kind === "list"
-    ) {
+    const listQuery = query as { tag?: symbol; environmentId?: string } | null;
+    if (listQuery?.tag === testState.queries.list) {
       return {
-        data:
-          testState.listByEnvironment[(query as { environmentId: string }).environmentId] ??
-          testState.emptyRoutineList,
+        data: testState.listDataByEnvironment[listQuery.environmentId ?? ""] ?? testState.listData,
         error: null,
         isPending: false,
         isSuccess: true,
@@ -246,67 +242,15 @@ async function openSavedRoutineEditor(): Promise<ReactTestRenderer> {
   );
 }
 
-function routineFixture(input: {
-  id: string;
-  environmentId: string;
-  name: string;
-  state?: "enabled" | "paused";
-}): Record<string, unknown> {
-  return {
-    id: input.id,
-    environmentId: input.environmentId,
-    revision: 1,
-    configuration: {
-      name: input.name,
-      instruction: "Reply with exactly: routine-ok",
-      projectId: "project-1",
-      modelSelection: { instanceId: "codex", model: "gpt-5.4" },
-      runtimeMode: "approval-required",
-      workspace: { kind: "shared", directory: "/tmp/widgets" },
-      trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
-    },
-    state: input.state ?? "enabled",
-    nextDueAt: "2026-09-17T09:00:00.000Z",
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z",
-  };
-}
-
-function withEnvironmentPhases(secondPhase: string): void {
-  testState.environments = [
-    { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
-    { environmentId: "environment-2", label: "Remote", connection: { phase: secondPhase } },
-  ];
-}
-
-function withSingleEnvironment(): void {
-  testState.environments = [
-    { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
-  ];
-}
-
-async function openRoutineEditor(name: string): Promise<ReactTestRenderer> {
-  let renderer: ReactTestRenderer;
-  await act(async () => {
-    renderer = create(<RoutinesPage />);
-  });
-  const current = renderer!;
-  await act(async () => {
-    buttonWithText(current, name).props.onClick?.();
-  });
-  return current;
-}
-
 describe("RoutinesPage GitHub trigger setup", () => {
   let renderer: ReactTestRenderer | undefined;
 
   beforeEach(() => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     testState.command.mockReset();
+    testState.listData.length = 0;
     testState.connectionsData.length = 0;
     testState.metadataData.repository = null;
-    testState.listByEnvironment = {};
-    withSingleEnvironment();
   });
 
   afterEach(async () => {
@@ -599,6 +543,268 @@ describe("RoutinesPage GitHub trigger setup", () => {
   });
 });
 
+describe("RoutinesPage save failures", () => {
+  const CONFLICT_MESSAGE = "This routine changed. Reload the saved version before saving again.";
+  const GENERIC_MESSAGE = "The routine request failed. Try again.";
+  let renderer: ReactTestRenderer | undefined;
+
+  const submitSave = async () => {
+    await act(async () => {
+      buttonWithText(renderer!, "Save").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  };
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    testState.command.mockReset();
+    testState.listData.length = 0;
+    testState.connectionsData.length = 0;
+  });
+
+  afterEach(async () => {
+    await act(async () => renderer?.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it("shows the stale-revision conflict message when the save is rejected", async () => {
+    testState.listData.push(savedRoutineFor("routine-conflict"));
+    testState.command.mockImplementation(async () => ({
+      _tag: "Failure",
+      cause: Cause.fail(new RoutineError({ code: "conflict", message: CONFLICT_MESSAGE })),
+    }));
+    renderer = await openSavedRoutineEditor();
+
+    await submitSave();
+
+    const text = nodeText(renderer!.root);
+    expect(text).toContain(CONFLICT_MESSAGE);
+    expect(text).not.toContain(GENERIC_MESSAGE);
+    expect(renderer!.root.findByProps({ id: "routine-name" }).props.value).toBe(
+      "Daily project brief",
+    );
+  });
+
+  it("keeps the message of an unrelated save failure", async () => {
+    testState.listData.push(savedRoutineFor("routine-validation"));
+    testState.command.mockImplementation(async () => ({
+      _tag: "Failure",
+      cause: Cause.fail(
+        new RoutineError({
+          code: "validation",
+          message: "Connect the GitHub repository before saving.",
+        }),
+      ),
+    }));
+    renderer = await openSavedRoutineEditor();
+
+    await submitSave();
+
+    const text = nodeText(renderer!.root);
+    expect(text).toContain("Connect the GitHub repository before saving.");
+    expect(text).not.toContain(CONFLICT_MESSAGE);
+  });
+
+  it("falls back to the generic message when no failure carries a message", async () => {
+    testState.listData.push(savedRoutineFor("routine-defect"));
+    testState.command.mockImplementation(async () => ({
+      _tag: "Failure",
+      cause: Cause.die(new Error("boom")),
+    }));
+    renderer = await openSavedRoutineEditor();
+
+    await submitSave();
+
+    const text = nodeText(renderer!.root);
+    expect(text).toContain(GENERIC_MESSAGE);
+    expect(text).not.toContain(CONFLICT_MESSAGE);
+  });
+});
+
+describe("RoutinesPage routine environment ownership", () => {
+  let renderer: ReactTestRenderer | undefined;
+
+  const sharedRoutineConfiguration = {
+    name: "Daily brief",
+    instruction: "Summarize what changed.",
+    projectId: "project-1",
+    modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+    runtimeMode: "approval-required",
+    workspace: { kind: "shared", directory: "/tmp/widgets" },
+    trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
+  };
+
+  function copiedRoutine(recordEnvironmentId: string, revision: number) {
+    return {
+      id: "routine-shared",
+      environmentId: recordEnvironmentId,
+      revision,
+      configuration: sharedRoutineConfiguration,
+      state: "enabled",
+      nextDueAt: "2026-01-02T09:00:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+  }
+
+  function routineCardsNamed(current: ReactTestRenderer, name: string): ReactTestInstance[] {
+    return current.root.findAll(
+      (node) =>
+        node.type === "button" &&
+        node.props["aria-pressed"] !== undefined &&
+        nodeText(node).includes(name),
+    );
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    testState.command.mockReset();
+    testState.command.mockImplementation(async () => ({
+      _tag: "Success",
+      value: { conversation: { kind: "unconfirmed" } },
+    }));
+    testState.environments = [
+      { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
+      { environmentId: "environment-2", label: "Copied", connection: { phase: "connected" } },
+    ];
+    testState.listDataByEnvironment = {
+      "environment-1": [copiedRoutine("environment-1", 3)],
+      "environment-2": [copiedRoutine("environment-1", 7)],
+    };
+  });
+
+  afterEach(async () => {
+    await act(async () => renderer?.unmount());
+    vi.unstubAllGlobals();
+    testState.environments = [
+      { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
+    ];
+    testState.listDataByEnvironment = {};
+  });
+
+  it("sends a test run for a copied routine to the environment that served it", async () => {
+    await act(async () => {
+      renderer = create(<RoutinesPage />);
+    });
+    const current = renderer!;
+
+    const cards = routineCardsNamed(current, "Daily brief");
+    expect(cards).toHaveLength(2);
+    const copiedCard = cards.find((card) => nodeText(card).includes("Copied"));
+    if (!copiedCard) throw new Error("Copied routine card not found");
+    await act(async () => {
+      copiedCard.props.onClick?.();
+    });
+
+    await act(async () => {
+      buttonWithText(current, "Test run").props.onClick?.();
+      await Promise.resolve();
+    });
+
+    const testCalls = testState.command.mock.calls.filter(
+      ([value]) => (value as { input?: { id?: string } }).input?.id === "routine-shared",
+    );
+    expect(testCalls).toHaveLength(1);
+    expect(testCalls[0]?.[0]).toEqual({
+      environmentId: "environment-2",
+      input: {
+        id: "routine-shared",
+        expectedRevision: 7,
+        requestId: expect.any(String),
+      },
+    });
+    expect(
+      testState.command.mock.calls.every(
+        ([value]) => (value as { environmentId?: string }).environmentId !== "environment-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps an offline copied routine from reaching the environment named in its record", async () => {
+    testState.environments = [
+      { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
+      { environmentId: "environment-2", label: "Copied", connection: { phase: "connecting" } },
+    ];
+    await act(async () => {
+      renderer = create(<RoutinesPage />);
+    });
+    const current = renderer!;
+
+    const cards = routineCardsNamed(current, "Daily brief");
+    expect(cards).toHaveLength(2);
+    const copiedCard = cards.find((card) => nodeText(card).includes("Copied"));
+    if (!copiedCard) throw new Error("Copied routine card not found");
+    await act(async () => {
+      copiedCard.props.onClick?.();
+    });
+
+    expect(
+      current.root.findAll((node) => nodeText(node).includes("This environment is offline")).length,
+    ).toBeGreaterThan(0);
+    const testButton = buttonWithText(current, "Test run");
+    expect(testButton.props.disabled).toBe(true);
+
+    await act(async () => {
+      testButton.props.onClick?.();
+      await Promise.resolve();
+    });
+
+    expect(
+      testState.command.mock.calls.filter(
+        ([value]) => (value as { environmentId?: string }).environmentId === "environment-1",
+      ),
+    ).toHaveLength(0);
+  });
+});
+
+const REMOTE_PROJECT = {
+  id: "project-2",
+  environmentId: "environment-2",
+  title: "Remote widgets",
+  workspaceRoot: "/tmp/remote-widgets",
+  repositoryIdentity: null,
+};
+
+function routineFixture(input: {
+  id: string;
+  environmentId: string;
+  name: string;
+  state?: "enabled" | "paused";
+  projectId?: string;
+}): Record<string, unknown> {
+  return {
+    id: input.id,
+    environmentId: input.environmentId,
+    revision: 1,
+    configuration: {
+      name: input.name,
+      instruction: "Reply with exactly: routine-ok",
+      projectId: input.projectId ?? "project-1",
+      modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+      runtimeMode: "approval-required",
+      workspace: { kind: "shared", directory: "/tmp/widgets" },
+      trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
+    },
+    state: input.state ?? "enabled",
+    nextDueAt: "2026-09-17T09:00:00.000Z",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+function withEnvironmentPhases(secondPhase: string): void {
+  testState.environments = [
+    { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
+    { environmentId: "environment-2", label: "Remote", connection: { phase: secondPhase } },
+  ];
+}
+
+async function openRoutineEditor(name: string): Promise<ReactTestRenderer> {
+  return openRoutineFrom((current) => buttonWithText(current, name).props.onClick?.());
+}
+
 describe("RoutinesPage offline environments", () => {
   let renderer: ReactTestRenderer | undefined;
 
@@ -607,22 +813,33 @@ describe("RoutinesPage offline environments", () => {
     testState.command.mockReset();
     testState.connectionsData.length = 0;
     testState.metadataData.repository = null;
-    testState.listByEnvironment = {};
+    testState.listData.length = 0;
+    testState.listDataByEnvironment = {};
+    if (!testState.projects.some((project) => project.id === REMOTE_PROJECT.id)) {
+      testState.projects.push(REMOTE_PROJECT);
+    }
     withEnvironmentPhases("offline");
   });
 
   afterEach(async () => {
     await act(async () => renderer?.unmount());
     vi.unstubAllGlobals();
+    testState.environments = [
+      { environmentId: "environment-1", label: "Local", connection: { phase: "connected" } },
+    ];
+    testState.listDataByEnvironment = {};
+    const remoteIndex = testState.projects.findIndex((project) => project.id === REMOTE_PROJECT.id);
+    if (remoteIndex >= 0) testState.projects.splice(remoteIndex, 1);
   });
 
   it("disables mutations for a routine a disconnected environment serves", async () => {
-    testState.listByEnvironment = {
+    testState.listDataByEnvironment = {
       "environment-2": [
         routineFixture({
           id: "routine-shared",
           environmentId: "environment-1",
           name: "Remote routine",
+          projectId: "project-2",
         }),
       ],
     };
@@ -637,7 +854,7 @@ describe("RoutinesPage offline environments", () => {
   });
 
   it("disables Resume for a paused routine a disconnected environment serves", async () => {
-    testState.listByEnvironment = {
+    testState.listDataByEnvironment = {
       "environment-2": [
         routineFixture({
           id: "routine-paused",
@@ -656,12 +873,13 @@ describe("RoutinesPage offline environments", () => {
   });
 
   it("re-enables mutations when the environment reconnects without a reload", async () => {
-    testState.listByEnvironment = {
+    testState.listDataByEnvironment = {
       "environment-2": [
         routineFixture({
           id: "routine-shared",
           environmentId: "environment-1",
           name: "Remote routine",
+          projectId: "project-2",
         }),
       ],
     };
@@ -681,12 +899,13 @@ describe("RoutinesPage offline environments", () => {
 
   it("disables mutations when the environment disconnects while the editor is open", async () => {
     withEnvironmentPhases("connected");
-    testState.listByEnvironment = {
+    testState.listDataByEnvironment = {
       "environment-2": [
         routineFixture({
           id: "routine-shared",
           environmentId: "environment-1",
           name: "Remote routine",
+          projectId: "project-2",
         }),
       ],
     };
@@ -706,12 +925,13 @@ describe("RoutinesPage offline environments", () => {
 
   it("keeps the offline gate after saving a routine a disconnected environment serves", async () => {
     withEnvironmentPhases("connected");
-    testState.listByEnvironment = {
+    testState.listDataByEnvironment = {
       "environment-2": [
         routineFixture({
           id: "routine-shared",
           environmentId: "environment-1",
           name: "Remote routine",
+          projectId: "project-2",
         }),
       ],
     };
@@ -719,8 +939,9 @@ describe("RoutinesPage offline environments", () => {
       _tag: "Success",
       value: routineFixture({
         id: "routine-shared",
-        environmentId: "environment-1",
+        environmentId: "environment-2",
         name: "Remote routine",
+        projectId: "project-2",
       }),
     }));
     renderer = await openRoutineEditor("Remote routine");
@@ -741,18 +962,19 @@ describe("RoutinesPage offline environments", () => {
   });
 
   it("keeps the offline gate when an unavailable environment drops its rows", async () => {
-    testState.listByEnvironment = {
+    testState.listDataByEnvironment = {
       "environment-2": [
         routineFixture({
           id: "routine-shared",
           environmentId: "environment-1",
           name: "Remote routine",
+          projectId: "project-2",
         }),
       ],
     };
     renderer = await openRoutineEditor("Remote routine");
 
-    testState.listByEnvironment = {};
+    testState.listDataByEnvironment = {};
     await act(async () => {
       renderer!.update(<RoutinesPage />);
     });
@@ -763,7 +985,7 @@ describe("RoutinesPage offline environments", () => {
   });
 
   it("keeps a connected environment's controls enabled", async () => {
-    testState.listByEnvironment = {
+    testState.listDataByEnvironment = {
       "environment-1": [
         routineFixture({
           id: "routine-local",
@@ -779,85 +1001,5 @@ describe("RoutinesPage offline environments", () => {
     expect(buttonWithText(renderer, "Save").props.disabled).toBe(false);
     expect(buttonWithText(renderer, "Pause").props.disabled).toBe(false);
     expect(buttonWithText(renderer, "Delete").props.disabled).toBe(false);
-  });
-});
-
-describe("RoutinesPage save failures", () => {
-  const CONFLICT_MESSAGE = "This routine changed. Reload the saved version before saving again.";
-  const GENERIC_MESSAGE = "The routine request failed. Try again.";
-  let renderer: ReactTestRenderer | undefined;
-
-  const submitSave = async () => {
-    await act(async () => {
-      buttonWithText(renderer!, "Save").props.onClick?.();
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-  };
-
-  beforeEach(() => {
-    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-    testState.command.mockReset();
-    testState.listByEnvironment = {};
-    testState.connectionsData.length = 0;
-  });
-
-  afterEach(async () => {
-    await act(async () => renderer?.unmount());
-    vi.unstubAllGlobals();
-  });
-
-  it("shows the stale-revision conflict message when the save is rejected", async () => {
-    testState.listByEnvironment = { "environment-1": [savedRoutineFor("routine-conflict")] };
-    testState.command.mockImplementation(async () => ({
-      _tag: "Failure",
-      cause: Cause.fail(new RoutineError({ code: "conflict", message: CONFLICT_MESSAGE })),
-    }));
-    renderer = await openSavedRoutineEditor();
-
-    await submitSave();
-
-    const text = nodeText(renderer!.root);
-    expect(text).toContain(CONFLICT_MESSAGE);
-    expect(text).not.toContain(GENERIC_MESSAGE);
-    expect(renderer!.root.findByProps({ id: "routine-name" }).props.value).toBe(
-      "Daily project brief",
-    );
-  });
-
-  it("keeps the message of an unrelated save failure", async () => {
-    testState.listByEnvironment = { "environment-1": [savedRoutineFor("routine-validation")] };
-    testState.command.mockImplementation(async () => ({
-      _tag: "Failure",
-      cause: Cause.fail(
-        new RoutineError({
-          code: "validation",
-          message: "Connect the GitHub repository before saving.",
-        }),
-      ),
-    }));
-    renderer = await openSavedRoutineEditor();
-
-    await submitSave();
-
-    const text = nodeText(renderer!.root);
-    expect(text).toContain("Connect the GitHub repository before saving.");
-    expect(text).not.toContain(CONFLICT_MESSAGE);
-  });
-
-  it("falls back to the generic message when no failure carries a message", async () => {
-    testState.listByEnvironment = { "environment-1": [savedRoutineFor("routine-defect")] };
-    testState.command.mockImplementation(async () => ({
-      _tag: "Failure",
-      cause: Cause.die(new Error("boom")),
-    }));
-    renderer = await openSavedRoutineEditor();
-
-    await submitSave();
-
-    const text = nodeText(renderer!.root);
-    expect(text).toContain(GENERIC_MESSAGE);
-    expect(text).not.toContain(CONFLICT_MESSAGE);
   });
 });
