@@ -267,6 +267,7 @@ import {
   RoutineConnectionCreateInput,
   RoutineConnectionInput,
   RoutineConnectionList,
+  RoutineConnectionSecretInput,
   RoutineDraftGenerationInput,
   RoutineDraftGenerationResult,
   RoutineError,
@@ -274,6 +275,8 @@ import {
   RoutineGitHubMetadata,
   RoutineGitHubMetadataInput,
   RoutineHistory,
+  RoutineLinearMetadata,
+  RoutineLinearMetadataInput,
   RoutineHistoryInput,
   RoutineList,
   RoutinePreview,
@@ -300,7 +303,9 @@ export const WS_METHODS = {
   routinesConnectionsVerify: "routines.connections.verify",
   routinesConnectionsDisable: "routines.connections.disable",
   routinesConnectionsRotateSecret: "routines.connections.rotateSecret",
+  routinesConnectionsAttachSecret: "routines.connections.attachSecret",
   routinesGitHubMetadata: "routines.github.metadata",
+  routinesLinearMetadata: "routines.linear.metadata",
 
   // Project registry methods
   projectsList: "projects.list",
@@ -551,9 +556,21 @@ const WsRoutinesConnectionsRotateSecretRpc = Rpc.make(WS_METHODS.routinesConnect
   error: RoutineRpcError,
 });
 
+const WsRoutinesConnectionsAttachSecretRpc = Rpc.make(WS_METHODS.routinesConnectionsAttachSecret, {
+  payload: RoutineConnectionSecretInput,
+  success: RoutineConnection,
+  error: RoutineRpcError,
+});
+
 const WsRoutinesGitHubMetadataRpc = Rpc.make(WS_METHODS.routinesGitHubMetadata, {
   payload: RoutineGitHubMetadataInput,
   success: RoutineGitHubMetadata,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesLinearMetadataRpc = Rpc.make(WS_METHODS.routinesLinearMetadata, {
+  payload: RoutineLinearMetadataInput,
+  success: RoutineLinearMetadata,
   error: RoutineRpcError,
 });
 
@@ -1462,7 +1479,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsRoutinesConnectionsVerifyRpc,
   WsRoutinesConnectionsDisableRpc,
   WsRoutinesConnectionsRotateSecretRpc,
+  WsRoutinesConnectionsAttachSecretRpc,
   WsRoutinesGitHubMetadataRpc,
+  WsRoutinesLinearMetadataRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

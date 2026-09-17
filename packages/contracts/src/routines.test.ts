@@ -9,7 +9,9 @@ import {
   RoutineDraftGenerationInput,
   RoutineDraftGenerationResult,
   RoutineError,
+  RoutineConnection,
   RoutineConnectionCreateInput,
+  RoutineLinearMetadata,
   RoutineRun,
   ScheduleTrigger,
   isScheduleTrigger,
@@ -212,15 +214,183 @@ describe("routine trigger union", () => {
   });
 });
 
-describe("routine connection identifiers", () => {
-  const decodeCreateInput = Schema.decodeUnknownSync(RoutineConnectionCreateInput);
+describe("linear trigger union", () => {
+  const decodeDraft = Schema.decodeUnknownSync(RoutineDraft);
+  const base = {
+    name: "Issue triage",
+    instruction: "Triage the issue.",
+    projectId: "project-1",
+    modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+    runtimeMode: "approval-required",
+    workspace: { kind: "shared", directory: "/tmp/project" },
+  };
+
+  it("accepts a Linear issue trigger keyed on stable ids", () => {
+    const draft = decodeDraft({
+      ...base,
+      trigger: {
+        kind: "linear",
+        connectionId: "connection-1",
+        workspaceId: "workspace-uuid",
+        event: "status_changed",
+        stateId: "state-uuid",
+      },
+    });
+    expect(draft.trigger.kind).toBe("linear");
+    expect(isScheduleTrigger(draft.trigger)).toBe(false);
+    expect(isScheduleTrigger({ kind: "daily", time: "09:00", timezone: "UTC" })).toBe(true);
+  });
+
+  it("requires transition or label evidence for the Linear update events", () => {
+    expect(() =>
+      decodeDraft({
+        ...base,
+        trigger: {
+          kind: "linear",
+          connectionId: "connection-1",
+          workspaceId: "workspace-uuid",
+          event: "status_changed",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeDraft({
+        ...base,
+        trigger: {
+          kind: "linear",
+          connectionId: "connection-1",
+          workspaceId: "workspace-uuid",
+          event: "label_added",
+        },
+      }),
+    ).toThrow();
+    const created = decodeDraft({
+      ...base,
+      trigger: {
+        kind: "linear",
+        connectionId: "connection-1",
+        workspaceId: "workspace-uuid",
+        event: "issue_created",
+        teamId: "team-uuid",
+      },
+    });
+    expect(created.trigger.kind).toBe("linear");
+  });
+
+  it("admits linear as a run source with an optional source link", () => {
+    const decodeRun = Schema.decodeUnknownSync(RoutineRun);
+    const run = decodeRun({
+      id: "run-1",
+      routineId: "routine-1",
+      environmentId: "environment-1",
+      revision: 1,
+      configuration: {
+        ...base,
+        trigger: {
+          kind: "linear",
+          connectionId: "connection-1",
+          workspaceId: "workspace-uuid",
+          event: "issue_created",
+        },
+      },
+      occurrenceKey: "linear:delivery-1",
+      source: "linear",
+      sourceUrl: "https://linear.app/acme/issue/ENG-7",
+      threadId: "thread-1",
+      messageId: "message-1",
+      commandId: "command-1",
+      conversation: { kind: "unconfirmed" },
+      status: "queued",
+      stage: "admitted",
+      turnId: null,
+      detail: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(run.source).toBe("linear");
+    expect(run.sourceUrl).toBe("https://linear.app/acme/issue/ENG-7");
+  });
+});
+
+describe("routine connection records", () => {
+  const decodeConnection = Schema.decodeUnknownSync(RoutineConnection);
+  const base = {
+    id: "connection-1",
+    environmentId: "environment-1",
+    callbackUrl: "https://example.test/api/routines/webhooks/linear/connection-1",
+    status: "pending",
+    lastDelivery: null,
+    acceptedCount: 0,
+    ignoredCount: 0,
+    rejectedCount: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  it("discriminates Linear and GitHub connection records by provider", () => {
+    const linear = decodeConnection({
+      ...base,
+      provider: "linear",
+      workspaceId: "workspace-uuid",
+      workspaceName: "Acme",
+      teamIds: ["team-1"],
+      allTeams: false,
+      metadataAccess: "ok",
+    });
+    expect(linear.provider).toBe("linear");
+    const github = decodeConnection({
+      ...base,
+      provider: "github",
+      repositoryId: 42,
+      repositoryName: "acme/widgets",
+      repositoryUrl: "https://github.com/acme/widgets",
+      defaultBranch: "main",
+      hookId: 7,
+    });
+    expect(github.provider).toBe("github");
+    expect(() =>
+      decodeConnection({ ...base, provider: "slack", workspaceId: "workspace-uuid" }),
+    ).toThrow();
+  });
+
+  it("carries Linear workspace, team, project, state, and label metadata", () => {
+    const decodeMetadata = Schema.decodeUnknownSync(RoutineLinearMetadata);
+    const metadata = decodeMetadata({
+      workspace: { id: "workspace-uuid", name: "Acme", urlKey: "acme" },
+      teams: [{ id: "team-1", name: "Engineering", key: "ENG" }],
+      projects: [{ id: "project-1", name: "Roadmap", teamIds: ["team-1"] }],
+      states: [{ id: "state-1", name: "In Progress", teamId: "team-1", type: "started" }],
+      labels: [
+        { id: "label-1", name: "Bug", teamId: "team-1" },
+        { id: "label-2", name: "Workspace label", teamId: null },
+      ],
+    });
+    expect(metadata.teams[0]?.key).toBe("ENG");
+    expect(metadata.states[0]?.type).toBe("started");
+    expect(metadata.labels[1]?.teamId).toBeNull();
+  });
 
   it("accepts the client identifier shape and rejects path-like values", () => {
-    expect(decodeCreateInput({ id: " connection_1-abc ", repository: "acme/widgets" }).id).toBe(
-      "connection_1-abc",
-    );
+    const decodeCreateInput = Schema.decodeUnknownSync(RoutineConnectionCreateInput);
+    expect(
+      decodeCreateInput({
+        provider: "github",
+        id: " connection_1-abc ",
+        repository: "acme/widgets",
+      }).id,
+    ).toBe("connection_1-abc");
     for (const id of ["../escape", "connection/secret", "connection.with.dot", "a".repeat(129)]) {
-      expect(() => decodeCreateInput({ id, repository: "acme/widgets" })).toThrow();
+      expect(() =>
+        decodeCreateInput({ provider: "github", id, repository: "acme/widgets" }),
+      ).toThrow();
     }
+    const linear = decodeCreateInput({
+      provider: "linear",
+      id: "connection-linear",
+      apiKey: "lin_api_example",
+      allTeams: true,
+      teamIds: [],
+    });
+    expect(linear.provider).toBe("linear");
   });
 });

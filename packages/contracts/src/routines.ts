@@ -83,10 +83,59 @@ export const GitHubEventTrigger = Schema.Struct({
   issueLabelId: Schema.optional(PositiveInt),
 });
 export type GitHubEventTrigger = typeof GitHubEventTrigger.Type;
-export const RoutineTrigger = Schema.Union([ScheduleTrigger, GitHubEventTrigger]);
+export const LinearRoutineEvent = Schema.Literals([
+  "issue_created",
+  "status_changed",
+  "label_added",
+]);
+export type LinearRoutineEvent = typeof LinearRoutineEvent.Type;
+export const LINEAR_ROUTINE_EVENT_LABELS: Record<LinearRoutineEvent, string> = {
+  issue_created: "Issue created",
+  status_changed: "Status changed",
+  label_added: "Label added",
+};
+/** Linear ids are workspace-scoped UUIDs; they survive renames. */
+const LinearResourceId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
+const LinearTriggerScope = {
+  connectionId: RoutineConnectionId,
+  workspaceId: LinearResourceId,
+  teamId: Schema.optional(LinearResourceId),
+  projectId: Schema.optional(LinearResourceId),
+} as const;
+/**
+ * Linear update events carry the evidence they need to be actionable: a status
+ * transition names the destination state, and a label addition names the added
+ * label. A matching final state without a transition is not an event.
+ */
+export const LinearEventTrigger = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("linear"),
+    ...LinearTriggerScope,
+    event: Schema.Literal("issue_created"),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("linear"),
+    ...LinearTriggerScope,
+    event: Schema.Literal("status_changed"),
+    stateId: LinearResourceId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("linear"),
+    ...LinearTriggerScope,
+    event: Schema.Literal("label_added"),
+    labelId: LinearResourceId,
+  }),
+]);
+export type LinearEventTrigger = typeof LinearEventTrigger.Type;
+export const RoutineTrigger = Schema.Union([
+  ScheduleTrigger,
+  GitHubEventTrigger,
+  LinearEventTrigger,
+]);
 export type RoutineTrigger = typeof RoutineTrigger.Type;
+export const SCHEDULE_TRIGGER_KINDS = new Set(["weekdays", "daily", "weekly", "cron"]);
 export const isScheduleTrigger = (trigger: RoutineTrigger): trigger is ScheduleTrigger =>
-  trigger.kind !== "github";
+  SCHEDULE_TRIGGER_KINDS.has(trigger.kind);
 /** Event routines are never due; the scheduler filters them out by trigger kind. */
 export const EVENT_ROUTINE_NEXT_DUE_AT = "9999-12-31T00:00:00.000Z";
 export const RoutineWorkspace = Schema.Union([
@@ -217,7 +266,7 @@ export const RoutineRun = Schema.Struct({
   revision: PositiveInt,
   configuration: RoutineDraft,
   occurrenceKey: Schema.String,
-  source: Schema.Literals(["schedule", "test", "downtime", "github"]),
+  source: Schema.Literals(["schedule", "test", "downtime", "github", "linear"]),
   /** Link to the provider resource that admitted this run, shown beside the run. */
   sourceUrl: Schema.optional(Schema.String),
   /** Bounded, untrusted provider context appended under the saved instruction. */
@@ -288,19 +337,9 @@ export const RoutineConnectionStatus = Schema.Literals([
   "unavailable",
 ]);
 export type RoutineConnectionStatus = typeof RoutineConnectionStatus.Type;
-/**
- * A repository webhook owned by this environment. The signing secret lives only
- * in the server secret store and never appears on this record.
- */
-export const RoutineConnection = Schema.Struct({
+const RoutineConnectionFields = {
   id: RoutineConnectionId,
   environmentId: EnvironmentId,
-  provider: Schema.Literal("github"),
-  repositoryId: PositiveInt,
-  repositoryName: TrimmedNonEmptyString,
-  repositoryUrl: TrimmedNonEmptyString,
-  defaultBranch: TrimmedNonEmptyString,
-  hookId: Schema.NullOr(PositiveInt),
   callbackUrl: TrimmedNonEmptyString,
   status: RoutineConnectionStatus,
   lastDelivery: Schema.NullOr(RoutineDelivery),
@@ -309,14 +348,65 @@ export const RoutineConnection = Schema.Struct({
   rejectedCount: NonNegativeInt,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+} as const;
+/**
+ * A repository webhook owned by this environment. The signing secret lives only
+ * in the server secret store and never appears on this record.
+ */
+export const GitHubRoutineConnection = Schema.Struct({
+  ...RoutineConnectionFields,
+  provider: Schema.Literal("github"),
+  repositoryId: PositiveInt,
+  repositoryName: TrimmedNonEmptyString,
+  repositoryUrl: TrimmedNonEmptyString,
+  defaultBranch: TrimmedNonEmptyString,
+  hookId: Schema.NullOr(PositiveInt),
 });
+export type GitHubRoutineConnection = typeof GitHubRoutineConnection.Type;
+/**
+ * A Linear workspace webhook owned by this environment. The administrator
+ * creates the webhook in Linear; this record stores only its identity and
+ * scope. Both the signing secret and the metadata read credential live in the
+ * server secret store and never appear on this record.
+ */
+export const LinearRoutineConnection = Schema.Struct({
+  ...RoutineConnectionFields,
+  provider: Schema.Literal("linear"),
+  workspaceId: TrimmedNonEmptyString,
+  workspaceName: TrimmedNonEmptyString,
+  /** Teams the connected webhook may deliver for; empty means all public teams. */
+  teamIds: Schema.Array(TrimmedNonEmptyString),
+  allTeams: Schema.Boolean,
+  metadataAccess: Schema.Literals(["ok", "revoked"]),
+});
+export type LinearRoutineConnection = typeof LinearRoutineConnection.Type;
+export const RoutineConnection = Schema.Union([GitHubRoutineConnection, LinearRoutineConnection]);
 export type RoutineConnection = typeof RoutineConnection.Type;
 export const RoutineConnectionList = Schema.Array(RoutineConnection);
-export const RoutineConnectionCreateInput = Schema.Struct({
+export const RoutineGitHubConnectionCreateInput = Schema.Struct({
+  provider: Schema.Literal("github"),
   id: RoutineConnectionId,
   repository: TrimmedNonEmptyString,
 });
+export const RoutineLinearConnectionCreateInput = Schema.Struct({
+  provider: Schema.Literal("linear"),
+  id: RoutineConnectionId,
+  /** Least-privilege metadata read credential. Stored only on the server. */
+  apiKey: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
+  allTeams: Schema.Boolean,
+  teamIds: Schema.Array(TrimmedNonEmptyString),
+});
+export const RoutineConnectionCreateInput = Schema.Union([
+  RoutineGitHubConnectionCreateInput,
+  RoutineLinearConnectionCreateInput,
+]);
+export type RoutineConnectionCreateInput = typeof RoutineConnectionCreateInput.Type;
 export const RoutineConnectionInput = Schema.Struct({ id: RoutineConnectionId });
+/** The webhook signing secret the administrator copies from Linear's settings. */
+export const RoutineConnectionSecretInput = Schema.Struct({
+  id: RoutineConnectionId,
+  signingSecret: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
+});
 export const RoutineGitHubMetadataInput = Schema.Struct({
   repository: Schema.optional(TrimmedNonEmptyString),
 });
@@ -335,6 +425,45 @@ export const RoutineGitHubMetadata = Schema.Struct({
   ),
 });
 export type RoutineGitHubMetadata = typeof RoutineGitHubMetadata.Type;
+export const RoutineLinearMetadataInput = Schema.Struct({ connectionId: RoutineConnectionId });
+/** Workspace, team, project, workflow-state, and label metadata for Linear pickers. */
+export const RoutineLinearMetadata = Schema.Struct({
+  workspace: Schema.Struct({
+    id: TrimmedNonEmptyString,
+    name: TrimmedNonEmptyString,
+    urlKey: TrimmedNonEmptyString,
+  }),
+  teams: Schema.Array(
+    Schema.Struct({
+      id: TrimmedNonEmptyString,
+      name: TrimmedNonEmptyString,
+      key: TrimmedNonEmptyString,
+    }),
+  ),
+  projects: Schema.Array(
+    Schema.Struct({
+      id: TrimmedNonEmptyString,
+      name: TrimmedNonEmptyString,
+      teamIds: Schema.Array(TrimmedNonEmptyString),
+    }),
+  ),
+  states: Schema.Array(
+    Schema.Struct({
+      id: TrimmedNonEmptyString,
+      name: TrimmedNonEmptyString,
+      teamId: TrimmedNonEmptyString,
+      type: TrimmedNonEmptyString,
+    }),
+  ),
+  labels: Schema.Array(
+    Schema.Struct({
+      id: TrimmedNonEmptyString,
+      name: TrimmedNonEmptyString,
+      teamId: Schema.NullOr(TrimmedNonEmptyString),
+    }),
+  ),
+});
+export type RoutineLinearMetadata = typeof RoutineLinearMetadata.Type;
 export const RoutinePreview = Schema.Struct({
   expression: Schema.String,
   dates: Schema.Array(IsoDateTime),
