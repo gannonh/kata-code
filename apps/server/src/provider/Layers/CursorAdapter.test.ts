@@ -355,7 +355,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
     }),
   );
 
-  it.effect("sends selected project skills in Cursor's native slash form", () =>
+  it.effect("sends skills in Cursor's native form and preserves exact slash command input", () =>
     Effect.gen(function* () {
       const adapter = yield* CursorAdapter;
       const settings = yield* ServerSettingsService;
@@ -400,6 +400,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
           ],
         ],
       );
+      yield* adapter.sendTurn({ threadId, input: "/copy-request-id" });
       yield* adapter.stopSession(threadId);
 
       const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
@@ -413,6 +414,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
             { type: "text", text: "please /review this" },
             { type: "text", text: buildRuntimeInstructions({ harness: "Cursor" }) },
           ],
+          [{ type: "text", text: "/copy-request-id" }],
         ],
       );
     }),

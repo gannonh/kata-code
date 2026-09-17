@@ -16,43 +16,21 @@ Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCod
 > - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
 > - Antigravity: enable it in Settings, then use **Install Antigravity** and **Sign in with Google**. No CLI is required.
 
-### Try it out (install-free)
-
-The easiest way to test Kata Code is to run the server in your terminal (requires Node.js 22.16+, 23.11+, or 24.10+):
+### Command line
 
 ```bash
-npx @kata-sh/code-cli@latest
+curl -fsSL https://raw.githubusercontent.com/gannonh/kata-code/main/scripts/install.sh | sh
 ```
 
-This will launch Kata Code's backend on your machine as well as the local web app to control your agents.
+On Windows, in PowerShell:
 
-Tip: Use `npx @kata-sh/code-cli@latest --help` for the full CLI reference.
-
-### Test a headless remote environment
-
-Run a second, isolated server on your machine:
-
-```bash
-npx @kata-sh/code-cli@latest serve \
-  --port 53210 \
-  --base-dir ~/.katacode-headless-test
+```powershell
+irm https://raw.githubusercontent.com/gannonh/kata-code/main/scripts/install.ps1 | iex
 ```
 
-In the desktop app, open **Settings** → **Connections** → **Add environment** → **Remote link**,
-paste the printed pairing URL into **Host**, then click **Add environment**. Use `@nightly` instead
-of `@latest` when testing with the Nightly app.
+Then run `katacode` to start the server and open the local web app. `katacode service install` keeps it running in the background, `katacode update` moves to a newer release, and `katacode --help` has the full reference.
 
-To expose a headless Linux server through Kata Code Connect:
-
-```bash
-npx @kata-sh/code-cli@latest connect link --headless
-npx @kata-sh/code-cli@latest serve
-```
-
-Approve the managed relay-client installation when prompted. Then open the authorization URL on a
-machine with a browser, paste the resulting code into the headless terminal, and sign in to the same
-account in the desktop app. See
-[Remote access](./docs/user/remote-access.md) for the complete flow and background-service options.
+To try it once without installing, run `npx @kata-sh/code-cli@latest` instead.
 
 ### Desktop app
 

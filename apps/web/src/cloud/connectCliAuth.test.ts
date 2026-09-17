@@ -4,7 +4,6 @@ import {
   buildConnectCliClerkAuthorizeUrl,
   connectCliSignInRedirectUrl,
   hasConnectCliAuthConfig,
-  readConnectCliCallbackResult,
 } from "./connectCliAuth";
 
 // Any pk_test_* key decodes to <base64 hostname>.clerk.accounts.dev.
@@ -19,36 +18,13 @@ describe("connectCliAuth", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
     vi.stubEnv("VITE_CLERK_JWT_TEMPLATE", "kata-relay");
     vi.stubEnv("VITE_KATACODE_RELAY_URL", "https://relay.example.com");
-    vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "");
     expect(hasConnectCliAuthConfig()).toBe(false);
 
     vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "oauthapp_123");
     expect(hasConnectCliAuthConfig()).toBe(true);
   });
 
-  it("builds the Clerk authorize URL with the configured hosted origin's callback", () => {
-    vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
-    vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "oauthapp_123");
-    vi.stubEnv("VITE_HOSTED_APP_URL", "https://nightly.app.kata.sh");
-
-    const authorizeUrl = buildConnectCliClerkAuthorizeUrl({
-      state: "state-1",
-      challenge: "challenge-1",
-    });
-    expect(authorizeUrl).not.toBeNull();
-
-    const url = new URL(authorizeUrl!);
-    expect(url.hostname).toBe("witty-mole-42.clerk.accounts.dev");
-    expect(url.pathname).toBe("/oauth/authorize");
-    expect(url.searchParams.get("redirect_uri")).toBe(
-      "https://nightly.app.kata.sh/connect/callback",
-    );
-    expect(url.searchParams.get("state")).toBe("state-1");
-    expect(url.searchParams.get("code_challenge")).toBe("challenge-1");
-    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-  });
-
-  it("redirects straight to the CLI's loopback listener when the request carries a port", () => {
+  it("builds a PKCE authorize URL that redirects to the CLI's loopback listener", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
     vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "oauthapp_123");
 
@@ -60,15 +36,22 @@ describe("connectCliAuth", () => {
     expect(authorizeUrl).not.toBeNull();
 
     const url = new URL(authorizeUrl!);
+    expect(url.hostname).toBe("witty-mole-42.clerk.accounts.dev");
+    expect(url.pathname).toBe("/oauth/authorize");
     expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:34338/callback");
     expect(url.searchParams.get("state")).toBe("state-1");
+    expect(url.searchParams.get("code_challenge")).toBe("challenge-1");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 
   it("returns null when the CLI OAuth client id is not configured", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
-    vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "");
     expect(
-      buildConnectCliClerkAuthorizeUrl({ state: "state-1", challenge: "challenge-1" }),
+      buildConnectCliClerkAuthorizeUrl({
+        state: "state-1",
+        challenge: "challenge-1",
+        loopbackPort: 34338,
+      }),
     ).toBeNull();
   });
 
@@ -76,9 +59,10 @@ describe("connectCliAuth", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
     vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "oauthapp_123");
 
-    const connectUrl = "https://app.kata.sh/connect#state=state-1&challenge=challenge-1";
+    const connectUrl =
+      "https://app.kata.sh/connect#state=state-1&challenge=challenge-1&port=34338";
     const redirectUrl = connectCliSignInRedirectUrl(
-      { state: "state-1", challenge: "challenge-1" },
+      { state: "state-1", challenge: "challenge-1", loopbackPort: 34338 },
       connectUrl,
     );
 
@@ -88,25 +72,14 @@ describe("connectCliAuth", () => {
 
   it("falls back to the current URL when the authorize URL cannot be built", () => {
     vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", TEST_PUBLISHABLE_KEY);
-    vi.stubEnv("VITE_CLERK_CLI_OAUTH_CLIENT_ID", "");
 
-    const connectUrl = "https://app.kata.sh/connect#state=state-1&challenge=challenge-1";
+    const connectUrl =
+      "https://app.kata.sh/connect#state=state-1&challenge=challenge-1&port=34338";
     expect(
-      connectCliSignInRedirectUrl({ state: "state-1", challenge: "challenge-1" }, connectUrl),
-    ).toBe(connectUrl);
-  });
-
-  it("reads the code and state Clerk echoes back to the callback", () => {
-    expect(
-      readConnectCliCallbackResult(
-        new URL("https://app.kata.sh/connect/callback?code=abc&state=state-1"),
+      connectCliSignInRedirectUrl(
+        { state: "state-1", challenge: "challenge-1", loopbackPort: 34338 },
+        connectUrl,
       ),
-    ).toEqual({ code: "abc", state: "state-1" });
-    expect(
-      readConnectCliCallbackResult(new URL("https://app.kata.sh/connect/callback?code=abc")),
-    ).toBeNull();
-    expect(
-      readConnectCliCallbackResult(new URL("https://app.kata.sh/connect/callback?state=s")),
-    ).toBeNull();
+    ).toBe(connectUrl);
   });
 });

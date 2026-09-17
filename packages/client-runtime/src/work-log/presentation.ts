@@ -11,8 +11,17 @@ import { resolveMediaSource } from "@kata-sh/code-client-runtime/media-source";
 import { parseChangeRequestUrl } from "@kata-sh/code-shared/changeRequestUrl";
 import { isWorkspaceImagePreviewPath } from "@kata-sh/code-shared/filePreview";
 
+/**
+ * Activities the worktree setup card already represents. The settled record
+ * is rendered by the card on web and mobile, never as a
+ * worklog entry, so it is hidden from the activity feed even when it failed.
+ */
 export function isWorktreeSetupActivity(kind: string): boolean {
-  return kind === "setup-script.requested" || kind === "setup-script.started";
+  return (
+    kind === "setup-script.requested" ||
+    kind === "setup-script.started" ||
+    kind === "worktree-setup"
+  );
 }
 
 export type WorkLogToolLifecycleStatus = RuntimeItemStatus | "stopped";

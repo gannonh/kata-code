@@ -1,12 +1,7 @@
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
 import { scopeThreadRef } from "@kata-sh/code-client-runtime/environment";
-import type {
-  EnvironmentId,
-  PullRequestRef,
-  ScopedThreadRef,
-  ThreadId,
-} from "@kata-sh/code-contracts";
-import { CheckIcon, LinkIcon, MessageSquareIcon, UnlinkIcon } from "lucide-react";
+import type { EnvironmentId, PullRequestRef, ScopedThreadRef, ThreadId } from "@kata-sh/code-contracts";
+import { CheckIcon, MessageSquareIcon } from "lucide-react";
 import { useState } from "react";
 import { threadPullRequestLinkMode } from "@kata-sh/code-client-runtime/thread-pull-request-compatibility";
 import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
@@ -23,6 +18,7 @@ import { Command, CommandInput, CommandItem, CommandList } from "../ui/command";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { MenuItem } from "../ui/menu";
 import { toastManager } from "../ui/toast";
+import { PullRequestGlyph } from "./pullRequestIcons";
 
 interface PullRequestThreadLinksProps {
   environmentId: EnvironmentId;
@@ -149,9 +145,9 @@ function EnabledPullRequestThreadLinks({
           }}
         >
           {linkedHere ? (
-            <UnlinkIcon aria-hidden className="size-3.5" />
+            <PullRequestGlyph.unlink aria-hidden className="size-3.5" />
           ) : (
-            <LinkIcon aria-hidden className="size-3.5" />
+            <PullRequestGlyph.link aria-hidden className="size-3.5" />
           )}
           {linkedHere
             ? "Unlink from this thread"

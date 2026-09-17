@@ -39,7 +39,7 @@ jobs:
       - name: Fetch and verify frozen upstream tip
         env:
           UPSTREAM_URL: https://github.com/pingdotgg/t3code.git
-          UPSTREAM_TIP: 47ace94962a714a561d7cfbdbaa4c721ef6b0598
+          UPSTREAM_TIP: 0150c6a53b409ba3bcb45645709b649cf8708354
           UPSTREAM_BASE: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
         run: |
           set -euo pipefail
@@ -73,7 +73,7 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
-          UPSTREAM_SHA: 47ace94962a714a561d7cfbdbaa4c721ef6b0598
+          UPSTREAM_SHA: 0150c6a53b409ba3bcb45645709b649cf8708354
           UPSTREAM_BASE_SHA: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
         run: |
           set -euo pipefail
@@ -160,6 +160,9 @@ jobs:
       - name: Install browser secret helper build libraries
         run: |
           sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+
+      - name: Test preview artifact validation
+        run: python3 -B .github/scripts/stage-preview-bundle.test.py
 
       - name: Test nightly release checks
         run: node --test .github/scripts/check-nightly-release.test.cjs

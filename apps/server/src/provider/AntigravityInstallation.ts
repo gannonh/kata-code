@@ -1,4 +1,3 @@
-// @effect-diagnostics deterministicKeys:off - FORK.md retains internal upstream service identifiers.
 // @effect-diagnostics nodeBuiltinImport:off - Effect has no incremental digest or free-space query.
 import * as EffectNodeStream from "@effect/platform-node/NodeStream";
 import { ProviderDriverKind, type ProviderInstallState } from "@kata-sh/code-contracts";
@@ -7,6 +6,7 @@ import {
   HostProcessEnvironment,
   HostProcessPlatform,
 } from "@kata-sh/code-shared/hostProcess";
+import { resolveNodeExecutable, nodeRuntimeUnavailableMessage } from "@kata-sh/code-shared/nodeRuntime";
 import * as Clock from "effect/Clock";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -518,6 +518,14 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
 
   const install = Effect.fn("AntigravityInstallation.install")(
     function* (asset: AntigravityReleaseAsset) {
+      yield* resolveNodeExecutable("Antigravity", environment).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path),
+        Effect.provideService(HostProcessPlatform, platform),
+        Effect.mapError((cause) =>
+          installationError("verify", nodeRuntimeUnavailableMessage("Antigravity"), cause),
+        ),
+      );
       const report = (phase: ProviderInstallState["phase"], message: string | null) =>
         SubscriptionRef.update(state, (current) => ({ ...current, phase, message }));
       yield* fs.makeDirectory(versionsDirectory, { recursive: true });

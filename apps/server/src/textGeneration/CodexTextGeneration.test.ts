@@ -22,17 +22,6 @@ const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
   "gpt-5.4-mini",
 );
 
-const ROUTINE_DRAFT_OUTPUT = {
-  draft: {
-    name: "Weekday brief",
-    instruction: "Summarize repository changes.",
-    projectId: "project-1",
-    modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-    trigger: { kind: "weekdays", time: "09:00", timezone: "UTC" },
-  },
-  assistantMessage: "I drafted a weekday brief.",
-};
-
 const CodexTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-codex-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
@@ -46,9 +35,7 @@ interface FakeCodexInput {
   requireReasoningEffort?: string;
   forbidReasoningEffort?: boolean;
   requireArg?: string;
-  requireArgs?: ReadonlyArray<string>;
   forbidArg?: string;
-  cwdMustNotBe?: string;
   stdinMustContain?: string;
   stdinMustNotContain?: string;
 }
@@ -64,9 +51,7 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
     requireReasoningEffort: input.requireReasoningEffort ?? null,
     forbidReasoningEffort: input.forbidReasoningEffort ?? false,
     requireArg: input.requireArg ?? null,
-    requireArgs: input.requireArgs ?? [],
     forbidArg: input.forbidArg ?? null,
-    cwdMustNotBe: input.cwdMustNotBe ?? null,
     stdinMustContain: input.stdinMustContain ?? null,
     stdinMustNotContain: input.stdinMustNotContain ?? null,
     stderr: input.stderr ?? null,
@@ -108,14 +93,8 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         '  process.stderr.write(message + "\\n");',
         "  process.exit(code);",
         "}",
-        "if (check.cwdMustNotBe !== null && NodeFS.realpathSync(process.cwd()) === NodeFS.realpathSync(check.cwdMustNotBe)) {",
-        '  fail("routine generation ran in the project directory", 11);',
-        "}",
         "if (check.requireArg !== null && !originalArgs.includes(` ${check.requireArg} `)) {",
         '  fail("missing arg: " + check.requireArg, 8);',
-        "}",
-        "for (const requiredArg of check.requireArgs) {",
-        '  if (!originalArgs.includes(` ${requiredArg} `)) fail("missing arg: " + requiredArg, 10);',
         "}",
         "if (check.forbidArg !== null && originalArgs.includes(` ${check.forbidArg} `)) {",
         '  fail("forbidden arg: " + check.forbidArg, 9);',
@@ -181,94 +160,6 @@ function withFakeCodexEnv<A, E, R>(
 }
 
 it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
-  it.effect("generates a strict routine draft with all tools disabled", () =>
-    withFakeCodexEnv(
-      {
-        output: JSON.stringify(ROUTINE_DRAFT_OUTPUT),
-        launchArgs: "--config features.shell_tool=true --config web_search=enabled",
-        requireArgs: [
-          "--config features.shell_tool=false",
-          "--config features.unified_exec=false",
-          "--config features.multi_agent=false",
-          "--config features.apps=false",
-          "--config features.plugins=false",
-          "--config features.browser_use=false",
-          "--config features.computer_use=false",
-          "--config features.image_generation=false",
-          "--config features.view_image=false",
-          "--config features.goals=false",
-          "--config features.hooks=false",
-          "--config features.skill_search=false",
-          "--config features.sleep_tool=false",
-          "--config mcp_servers={}",
-          '--config web_search="disabled"',
-        ],
-        cwdMustNotBe: process.cwd(),
-        stdinMustContain: "Return one JSON object",
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const result = yield* textGeneration.generateRoutineDraft({
-            cwd: process.cwd(),
-            prompt: "Return one JSON object. Create a weekday brief at 9am.",
-            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-          });
-
-          expect(result).toEqual(ROUTINE_DRAFT_OUTPUT);
-        }),
-    ),
-  );
-
-  it.effect("rejects permission and workspace fields in a routine draft", () =>
-    withFakeCodexEnv(
-      {
-        output: JSON.stringify({
-          ...ROUTINE_DRAFT_OUTPUT,
-          draft: {
-            ...ROUTINE_DRAFT_OUTPUT.draft,
-            runtimeMode: "full-access",
-            workspace: { kind: "shared", directory: process.cwd() },
-          },
-        }),
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const error = yield* textGeneration
-            .generateRoutineDraft({
-              cwd: process.cwd(),
-              prompt: "Return one JSON object.",
-              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-            })
-            .pipe(Effect.flip);
-
-          expect(error).toBeInstanceOf(TextGenerationError);
-          expect(error.operation).toBe("generateRoutineDraft");
-          expect(error.detail).toContain("invalid structured output");
-        }),
-    ),
-  );
-
-  it.effect("accepts a clarification routine response", () =>
-    withFakeCodexEnv(
-      {
-        output: JSON.stringify({ draft: null, assistantMessage: "Which timezone should I use?" }),
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const result = yield* textGeneration.generateRoutineDraft({
-            cwd: process.cwd(),
-            prompt: "Return one JSON object and ask for clarification.",
-            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-          });
-
-          expect(result).toEqual({
-            draft: null,
-            assistantMessage: "Which timezone should I use?",
-          });
-        }),
-    ),
-  );
-
   for (const selectedModel of ["gpt-5.6-luna", "openai.gpt-5.6-luna"]) {
     it.effect(`dispatches the qualified live model for ${selectedModel}`, () =>
       withFakeCodexEnv(
@@ -375,7 +266,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           body: "",
         }),
         launchArgs: "--enable settings-feature",
-        environment: { KATACODE_CODEX_LAUNCH_ARGS: " --strict-config --listen off " },
+        environment: { ...process.env, KATACODE_CODEX_LAUNCH_ARGS: " --strict-config --listen off " },
         requireArg: "--strict-config",
         forbidArg: "settings-feature",
       },
@@ -501,7 +392,25 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
 
-          expect(generated.title).toBe("Investigate websocket reconnect regressions aft...");
+          expect(generated.title).toBe(
+            "Investigate websocket reconnect regressions after worktree restore",
+          );
+        }),
+    ),
+  );
+
+  it.effect("returns the refinement signal for an unresolved subject", () =>
+    withFakeCodexEnv(
+      { output: JSON.stringify({ title: "Investigate issue", needsRefinement: true }) },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          expect(
+            yield* textGeneration.generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Fix this",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            }),
+          ).toEqual({ title: "Investigate issue", needsRefinement: true });
         }),
     ),
   );

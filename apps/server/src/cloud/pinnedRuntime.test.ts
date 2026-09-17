@@ -15,6 +15,7 @@ import {
   pinnedRuntimeCommand,
   pinnedRuntimePaths,
   PinnedRuntimeInstallError,
+  type PinnedRuntimeProgress,
 } from "./pinnedRuntime.ts";
 
 // Every install fetches the release archive, checks it against SHA256SUMS,
@@ -40,7 +41,6 @@ const releaseHttpClient = (checksums: string, requests: string[] = []) =>
   });
 const extractingRunner = (fs: FileSystem.FileSystem, path: Path.Path, commands: string[] = []) =>
   ProcessRunner.ProcessRunner.of({
-    runBytes: () => Effect.die("unused binary process runner"),
     run: (input) =>
       Effect.gen(function* () {
         commands.push(input.command);
@@ -49,9 +49,7 @@ const extractingRunner = (fs: FileSystem.FileSystem, path: Path.Path, commands: 
         if (input.command !== "tar" || stagingDir === undefined) {
           return yield* Effect.die(`unexpected command ${input.command}`);
         }
-        yield* fs
-          .writeFileString(path.join(stagingDir, "katacode"), "#!/bin/sh\n")
-          .pipe(Effect.orDie);
+        yield* fs.writeFileString(path.join(stagingDir, "katacode"), "#!/bin/sh\n").pipe(Effect.orDie);
         return {
           stdout: "",
           stderr: "",
@@ -117,6 +115,126 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     }),
   );
 
+  it.effect.each([true, false])(
+    "reports bytes before completion, then verifies and extracts (known size: %s)",
+    (knownSize) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-pinned-progress-" });
+        const firstChunk = yield* Deferred.make<void>();
+        let archiveController: ReadableStreamDefaultController<Uint8Array> | undefined;
+        const checksums = yield* validChecksums;
+        const progress: PinnedRuntimeProgress[] = [];
+        const client = HttpClient.make((request) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              request.url.endsWith("/SHA256SUMS")
+                ? new Response(checksums)
+                : new Response(
+                    new ReadableStream({
+                      start(controller) {
+                        archiveController = controller;
+                        controller.enqueue(archiveBytes.slice(0, 4));
+                      },
+                    }),
+                    { headers: knownSize ? { "content-length": String(archiveBytes.length) } : {} },
+                  ),
+            ),
+          ),
+        );
+        const install = yield* ensurePinnedRuntimeInstalled({
+          baseDir,
+          version,
+          fs,
+          path,
+          platform: "linux",
+          arch: "x64",
+          httpClient: client,
+          runner: extractingRunner(fs, path),
+          validate: () => Effect.void,
+          onProgress: (event) => {
+            progress.push(event);
+            if (event.stage === "download" && event.received === 4) {
+              Deferred.doneUnsafe(firstChunk, Effect.void);
+            }
+          },
+        }).pipe(Effect.forkScoped);
+        yield* Deferred.await(firstChunk);
+        assert.deepEqual(progress.at(-1), {
+          stage: "download",
+          received: 4,
+          total: knownSize ? archiveBytes.length : undefined,
+        });
+        assert.isFalse(progress.some((event) => event.stage === "extract"));
+        assert.isDefined(archiveController);
+        archiveController!.enqueue(archiveBytes.slice(4));
+        archiveController!.close();
+        const installed = yield* Fiber.join(install);
+        assert.deepEqual(progress.slice(-4), [
+          { stage: "download", received: archiveBytes.length, total: archiveBytes.length },
+          { stage: "verify" },
+          { stage: "extract" },
+          { stage: "validate" },
+        ]);
+        assert.equal(yield* fs.readFileString(installed.sentinelPath), `${version}\n`);
+      }),
+  );
+
+  it.effect("cleans up an interrupted download without reporting verification or extraction", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-pinned-progress-failed-" });
+      const checksums = yield* validChecksums;
+      const progress: PinnedRuntimeProgress[] = [];
+      let cancelled = false;
+      const client = HttpClient.make((request) =>
+        Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            request.url.endsWith("/SHA256SUMS")
+              ? new Response(checksums)
+              : new Response(
+                  new ReadableStream({
+                    start(controller) {
+                      controller.enqueue(archiveBytes.slice(0, 4));
+                    },
+                    cancel() {
+                      cancelled = true;
+                    },
+                  }),
+                ),
+          ),
+        ),
+      );
+      const firstChunk = yield* Deferred.make<void>();
+      const install = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version,
+        fs,
+        path,
+        platform: "linux",
+        arch: "x64",
+        httpClient: client,
+        runner: extractingRunner(fs, path),
+        validate: () => Effect.die("must not validate an interrupted archive"),
+        onProgress: (event) => {
+          progress.push(event);
+          if (event.stage === "download" && event.received === 4)
+            Deferred.doneUnsafe(firstChunk, Effect.void);
+        },
+      }).pipe(Effect.forkScoped);
+      yield* Deferred.await(firstChunk);
+      yield* Fiber.interrupt(install);
+      assert.deepEqual(progress.at(-1), { stage: "download", received: 4, total: undefined });
+      assert.isTrue(progress.every((event) => event.stage === "download"));
+      assert.isTrue(cancelled);
+      assert.deepEqual(yield* fs.readDirectory(path.join(baseDir, "runtime", "versions")), []);
+    }),
+  );
+
   it.effect("refuses an archive whose checksum does not match the release", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -145,9 +263,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "katacode-pinned-runtime-test-",
-      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-pinned-runtime-test-" });
       const finalPaths = pinnedRuntimePaths(path, baseDir, version, "linux");
       let validatedDirectory = "";
 
@@ -179,9 +295,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "katacode-pinned-runtime-test-",
-      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-pinned-runtime-test-" });
       const finalPaths = pinnedRuntimePaths(path, baseDir, version, "linux");
 
       yield* ensurePinnedRuntimeInstalled({
@@ -211,9 +325,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "katacode-pinned-runtime-repair-",
-      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-pinned-runtime-repair-" });
       const finalPaths = pinnedRuntimePaths(path, baseDir, version, "linux");
       yield* fs.makeDirectory(finalPaths.versionDir, { recursive: true });
       yield* fs.writeFileString(path.join(finalPaths.versionDir, "partial"), "incomplete\n");
@@ -235,52 +347,11 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     }),
   );
 
-  it.effect("backfills a cached archive without downloading or replacing it", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "katacode-pinned-legacy-cache-",
-      });
-      const cached = pinnedRuntimePaths(path, baseDir, version, "linux");
-      const legacyEntry = path.join(
-        cached.versionDir,
-        "node_modules/@kata-sh/code-cli/dist/bin.mjs",
-      );
-      yield* fs.makeDirectory(cached.versionDir, { recursive: true });
-      yield* fs.writeFileString(cached.entryPath, "cached executable\n");
-      yield* fs.writeFileString(cached.sentinelPath, `${version}\n`);
-      const requests: string[] = [];
-      const commands: string[] = [];
-      yield* ensurePinnedRuntimeInstalled({
-        baseDir,
-        version,
-        fs,
-        path,
-        platform: "linux",
-        arch: "x64",
-        httpClient: releaseHttpClient(yield* validChecksums, requests),
-        runner: extractingRunner(fs, path, commands),
-        validate: () =>
-          fs.exists(legacyEntry).pipe(
-            Effect.flatMap((exists) => (exists ? Effect.void : Effect.die("missing legacy entry"))),
-            Effect.orDie,
-          ),
-      });
-      assert.deepEqual(requests, []);
-      assert.deepEqual(commands, []);
-      assert.equal(yield* fs.readFileString(cached.entryPath), "cached executable\n");
-      assert.equal(yield* fs.readFileString(cached.sentinelPath), `${version}\n`);
-    }),
-  );
-
   it.effect("preserves a completed runtime when validation fails", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "katacode-pinned-runtime-repair-",
-      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-pinned-runtime-repair-" });
       const finalPaths = pinnedRuntimePaths(path, baseDir, version, "linux");
       yield* fs.makeDirectory(path.dirname(finalPaths.entryPath), { recursive: true });
       yield* fs.writeFileString(finalPaths.entryPath, "broken\n");
@@ -317,12 +388,9 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "katacode-pinned-runtime-interrupt-",
-      });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-pinned-runtime-interrupt-" });
       const started = yield* Deferred.make<void>();
       const runner = ProcessRunner.ProcessRunner.of({
-        runBytes: () => Effect.die("unused binary process runner"),
         run: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
       });
       const install = yield* ensurePinnedRuntimeInstalled({

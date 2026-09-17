@@ -1,5 +1,10 @@
 [
   {
+    "path": "apps/web/src/components/settings/ConnectionsSettings.tsx",
+    "line": "// A saved T3 Connect machine this device has never reached (unsupported,",
+    "reason": "Internal source comment; no rendered product copy."
+  },
+  {
     "path": "apps/web/src/components/Sidebar.tsx",
     "line": "// Threads on non-primary environments (T3 Connect, hosted) resolve their",
     "reason": "Internal source comment; no rendered product copy."

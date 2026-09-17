@@ -112,6 +112,7 @@ export function makeDevelopmentEnvironmentScript(environment) {
     ["KATACODE_OTLP_TRACES_URL", environment.KATACODE_OTLP_TRACES_URL],
     ["KATACODE_OTLP_EXPORT_INTERVAL_MS", environment.KATACODE_OTLP_EXPORT_INTERVAL_MS],
     ["KATACODE_OTLP_HEADERS", environment.KATACODE_OTLP_HEADERS],
+    ["KATACODE_OTLP_PROTOCOL", environment.KATACODE_OTLP_PROTOCOL],
     ["KATACODE_DESKTOP_APP_USER_MODEL_ID", APP_BUNDLE_ID],
   ].filter((entry) => typeof entry[1] === "string" && entry[1].trim().length > 0);
   return [
