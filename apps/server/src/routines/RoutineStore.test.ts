@@ -5,18 +5,23 @@ import {
   MessageId,
   ModelSelection,
   ProjectId,
+  RoutineConnectionId,
   RoutineId,
   RoutineOwnerGeneration,
   RoutineRequestId,
+  RoutineRun,
   RuntimeMode,
   ThreadId,
   TurnId,
+  type RoutineConnection,
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import { summarizeGitHubEvent } from "./GitHubRoutineEvents.ts";
 import { RoutineStore, RoutineStoreLive } from "./RoutineStore.ts";
 
 const environmentId = EnvironmentId.make("routine-test-environment");
@@ -35,6 +40,53 @@ const storeLayer = Layer.mergeAll(
   RoutineStoreLive.pipe(Layer.provide(SqlitePersistenceMemory)),
   SqlitePersistenceMemory,
 );
+const decodeRun = Schema.decodeUnknownSync(Schema.fromJsonString(RoutineRun));
+const githubConfiguration = (connectionId: RoutineConnectionId) => ({
+  ...configuration,
+  trigger: {
+    kind: "github" as const,
+    connectionId,
+    repositoryId: 42,
+    event: "pr_opened" as const,
+    includeDrafts: false,
+  },
+});
+const githubConnection = (
+  id: RoutineConnectionId,
+  connectionEnvironmentId: EnvironmentId,
+): RoutineConnection => ({
+  id,
+  environmentId: connectionEnvironmentId,
+  provider: "github",
+  repositoryId: 42,
+  repositoryName: "acme/widgets",
+  repositoryUrl: "https://github.com/acme/widgets",
+  defaultBranch: "main",
+  hookId: 1001,
+  callbackUrl: `https://env.example/api/routines/webhooks/github/${id}`,
+  status: "verified",
+  lastDelivery: null,
+  acceptedCount: 0,
+  ignoredCount: 0,
+  rejectedCount: 0,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+});
+const prOpened = (number: number) =>
+  summarizeGitHubEvent("pull_request", {
+    action: "opened",
+    repository: { id: 42, full_name: "acme/widgets" },
+    sender: { login: "octocat" },
+    pull_request: {
+      id: 900 + number,
+      number,
+      title: `PR ${number}`,
+      html_url: `https://github.com/acme/widgets/pull/${number}`,
+      draft: false,
+      base: { ref: "main" },
+      labels: [],
+    },
+  });
 
 it.layer(storeLayer)("RoutineStore", (it) => {
   it.effect("orders history by admission chronology and uses a stable composite cursor", () =>
@@ -901,6 +953,265 @@ it.layer(storeLayer)("RoutineStore", (it) => {
         false,
       );
     }),
+  );
+
+  it.effect(
+    "serves a routine from the database environment that owns it when a copied record names another environment",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const sql = yield* SqlClient.SqlClient;
+        const environmentA = EnvironmentId.make("routine-copy-source-environment");
+        const environmentB = EnvironmentId.make("routine-copy-target-environment");
+        const routine = yield* store.save(
+          environmentA,
+          {
+            id: RoutineId.make("routine-copied-record"),
+            expectedRevision: 0,
+            configuration,
+          },
+          100_000,
+        );
+        yield* sql`UPDATE routines SET environment_id=${environmentB} WHERE id=${routine.id}`;
+        const listed = yield* store.list(environmentB);
+        assert.equal(listed.length, 1);
+        assert.equal(listed[0]?.environmentId, environmentB);
+        const missing = yield* store
+          .get(environmentA, routine.id)
+          .pipe(
+            Effect.match({ onFailure: (error) => error.code, onSuccess: () => "success" as const }),
+          );
+        assert.equal(missing, "not-found");
+        const served = yield* store.get(environmentB, routine.id);
+        assert.equal(served.environmentId, environmentB);
+      }),
+  );
+
+  it.effect(
+    "admits a test run in the environment that serves the routine, not the environment in the copied record",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const sql = yield* SqlClient.SqlClient;
+        const environmentA = EnvironmentId.make("routine-copy-source-run-environment");
+        const environmentB = EnvironmentId.make("routine-copy-target-run-environment");
+        const routine = yield* store.save(
+          environmentA,
+          {
+            id: RoutineId.make("routine-copied-run-record"),
+            expectedRevision: 0,
+            configuration,
+          },
+          100_100,
+        );
+        yield* sql`UPDATE routines SET environment_id=${environmentB} WHERE id=${routine.id}`;
+        const run = yield* store.testRun(
+          environmentB,
+          {
+            id: routine.id,
+            expectedRevision: routine.revision,
+            requestId: RoutineRequestId.make("request-copied-run"),
+          },
+          100_101,
+        );
+        assert.equal(run.environmentId, environmentB);
+        const served = yield* store.history(environmentB, { id: routine.id });
+        assert.equal(served.runs[0]?.id, run.id);
+        const missing = yield* store
+          .history(environmentA, { id: routine.id })
+          .pipe(
+            Effect.match({ onFailure: (error) => error.code, onSuccess: () => "success" as const }),
+          );
+        assert.equal(missing, "not-found");
+        const stored = yield* sql<{
+          record: string;
+        }>`SELECT record FROM routine_runs WHERE routine_id=${routine.id}`;
+        assert.equal(stored.length, 1);
+        assert.equal(decodeRun(stored[0]!.record).environmentId, environmentB);
+      }),
+  );
+
+  it.effect("rejects a save whose id is already owned by another environment", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const environmentA = EnvironmentId.make("routine-id-owner-environment");
+      const environmentB = EnvironmentId.make("routine-id-collision-environment");
+      const original = yield* store.save(
+        environmentA,
+        {
+          id: RoutineId.make("routine-id-collision"),
+          expectedRevision: 0,
+          configuration,
+        },
+        100_200,
+      );
+      const result = yield* store
+        .save(environmentB, { id: original.id, expectedRevision: 0, configuration }, 100_201)
+        .pipe(
+          Effect.match({ onFailure: (error) => error.code, onSuccess: () => "success" as const }),
+        );
+      assert.equal(result, "conflict");
+      const served = yield* store.get(environmentA, original.id);
+      assert.equal(served.environmentId, environmentA);
+      assert.equal(served.revision, original.revision);
+      assert.deepEqual(served.configuration, original.configuration);
+    }),
+  );
+
+  it.effect(
+    "admits a scheduled run under the environment that owns the row when a copied record names another environment",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const sql = yield* SqlClient.SqlClient;
+        const environmentA = EnvironmentId.make("routine-copy-source-schedule-environment");
+        const environmentB = EnvironmentId.make("routine-copy-target-schedule-environment");
+        const routine = yield* store.save(
+          environmentA,
+          {
+            id: RoutineId.make("routine-copied-schedule-record"),
+            expectedRevision: 0,
+            configuration,
+          },
+          Date.parse("2026-02-01T08:00:00.000Z"),
+        );
+        yield* sql`UPDATE routines SET environment_id=${environmentB} WHERE id=${routine.id}`;
+        const changes = () =>
+          sql<{
+            environmentId: EnvironmentId;
+            count: number;
+          }>`SELECT environment_id AS environmentId, COUNT(*) AS count FROM routine_changes
+            WHERE environment_id IN (${environmentA}, ${environmentB}) GROUP BY environment_id`;
+        const countFor = (
+          rows: ReadonlyArray<{ environmentId: EnvironmentId; count: number }>,
+          environmentId: EnvironmentId,
+        ) => rows.find((row) => row.environmentId === environmentId)?.count ?? 0;
+        const before = yield* changes();
+        yield* store.tick("copy-schedule-worker", Date.parse("2026-02-01T12:00:00.000Z"));
+        const runs = yield* sql<{
+          record: string;
+        }>`SELECT record FROM routine_runs WHERE routine_id=${routine.id}`;
+        assert.equal(runs.length, 1);
+        assert.equal(decodeRun(runs[0]!.record).environmentId, environmentB);
+        const after = yield* changes();
+        assert.equal(countFor(after, environmentA), countFor(before, environmentA));
+        assert.isAbove(countFor(after, environmentB), countFor(before, environmentB));
+      }),
+  );
+
+  it.effect(
+    "admits a webhook run under the environment that owns the routine row when a copied record names another environment",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const sql = yield* SqlClient.SqlClient;
+        const environmentA = EnvironmentId.make("routine-copy-source-event-environment");
+        const environmentB = EnvironmentId.make("routine-copy-target-event-environment");
+        const connectionId = RoutineConnectionId.make("routine-copied-event-connection");
+        yield* store.saveConnection(githubConnection(connectionId, environmentA));
+        const routine = yield* store.save(
+          environmentA,
+          {
+            id: RoutineId.make("routine-copied-event-record"),
+            expectedRevision: 0,
+            configuration: githubConfiguration(connectionId),
+          },
+          100_300,
+        );
+        yield* sql`UPDATE routines SET environment_id=${environmentB} WHERE id=${routine.id}`;
+        yield* sql`UPDATE routine_connections SET environment_id=${environmentB} WHERE id=${connectionId}`;
+        // The copied database keeps the source environment in both records; the
+        // target environment re-owns its inherited connection.
+        yield* store.updateConnection(connectionId, (current) => ({
+          ...current,
+          environmentId: environmentB,
+        }));
+        const changes = () =>
+          sql<{
+            environmentId: EnvironmentId;
+            count: number;
+          }>`SELECT environment_id AS environmentId, COUNT(*) AS count FROM routine_changes
+            WHERE environment_id IN (${environmentA}, ${environmentB}) GROUP BY environment_id`;
+        const countFor = (
+          rows: ReadonlyArray<{ environmentId: EnvironmentId; count: number }>,
+          environmentId: EnvironmentId,
+        ) => rows.find((row) => row.environmentId === environmentId)?.count ?? 0;
+        const before = yield* changes();
+        const admission = yield* store.admitEvent({
+          connectionId,
+          deliveryId: "delivery-copied-event",
+          digest: "digest-copied-event",
+          eventName: "pull_request",
+          repositoryId: 42,
+          summary: prOpened(21),
+          now: 100_400,
+        });
+        assert.equal(admission.status, "accepted");
+        assert.equal(admission.runs.length, 1);
+        assert.equal(admission.runs[0]?.environmentId, environmentB);
+        const history = yield* store.history(environmentB, { id: routine.id });
+        assert.equal(history.runs.length, 1);
+        const stored = yield* sql<{
+          record: string;
+        }>`SELECT record FROM routine_runs WHERE routine_id=${routine.id}`;
+        assert.equal(stored.length, 1);
+        assert.equal(decodeRun(stored[0]!.record).environmentId, environmentB);
+        const after = yield* changes();
+        assert.equal(countFor(after, environmentA), countFor(before, environmentA));
+        assert.isAbove(countFor(after, environmentB), countFor(before, environmentB));
+      }),
+  );
+
+  it.effect(
+    "does not hand back a stale environment when a copied webhook admission is replayed",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const sql = yield* SqlClient.SqlClient;
+        const environmentA = EnvironmentId.make("routine-copy-source-replay-environment");
+        const environmentB = EnvironmentId.make("routine-copy-target-replay-environment");
+        const connectionId = RoutineConnectionId.make("routine-copied-replay-connection");
+        yield* store.saveConnection(githubConnection(connectionId, environmentA));
+        const routine = yield* store.save(
+          environmentA,
+          {
+            id: RoutineId.make("routine-copied-replay-record"),
+            expectedRevision: 0,
+            configuration: githubConfiguration(connectionId),
+          },
+          100_500,
+        );
+        const delivery = {
+          connectionId,
+          deliveryId: "delivery-copied-replay",
+          digest: "digest-copied-replay",
+          eventName: "pull_request",
+          repositoryId: 42,
+          summary: prOpened(22),
+          now: 100_501,
+        };
+        const first = yield* store.admitEvent(delivery);
+        assert.equal(first.status, "accepted");
+        assert.equal(first.runs.length, 1);
+        assert.equal(first.runs[0]?.environmentId, environmentA);
+        yield* sql`UPDATE routines SET environment_id=${environmentB} WHERE id=${routine.id}`;
+        yield* sql`UPDATE routine_connections SET environment_id=${environmentB} WHERE id=${connectionId}`;
+        // The copied database keeps the source environment in both records; the
+        // target environment re-owns its inherited connection.
+        yield* store.updateConnection(connectionId, (current) => ({
+          ...current,
+          environmentId: environmentB,
+        }));
+        // The original delivery falls outside the digest window, so the replay
+        // reaches the existing-run branch with a record that still names A.
+        const replayed = yield* store.admitEvent({
+          ...delivery,
+          now: delivery.now + 8 * 86_400_000,
+        });
+        assert.equal(replayed.status, "accepted");
+        assert.equal(replayed.runs.length, 1);
+        assert.equal(replayed.runs[0]?.environmentId, environmentB);
+      }),
   );
 
   it.effect("delete removes the library row and keeps history without later scheduled starts", () =>

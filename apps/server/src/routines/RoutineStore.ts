@@ -113,12 +113,19 @@ export const makeRoutineStore = Effect.gen(function* () {
         sql`UPDATE routine_scheduler SET id = id WHERE id = 1`.pipe(Effect.andThen(body)),
       )
       .pipe(Effect.mapError(persistenceError));
-  const readRoutine = (id: string) =>
+  /** The database row's environment is authoritative; a copied record may still name its source. */
+  const withOwningEnvironment = <A extends { readonly environmentId: EnvironmentId }>(
+    environmentId: EnvironmentId,
+    record: A,
+  ): A => ({ ...record, environmentId });
+  const readRoutine = (environmentId: EnvironmentId, id: string) =>
     Effect.gen(function* () {
-      const rows = yield* sql<{ record: string }>`SELECT record FROM routines WHERE id = ${id}`;
+      const rows = yield* sql<{
+        record: string;
+      }>`SELECT record FROM routines WHERE id = ${id} AND environment_id = ${environmentId}`;
       if (!rows[0]) return yield* failure("not-found", "Routine no longer exists.");
       return yield* Effect.try({
-        try: () => decodeRoutine(rows[0]!.record),
+        try: () => withOwningEnvironment(environmentId, decodeRoutine(rows[0]!.record)),
         catch: persistenceError,
       });
     });
@@ -196,16 +203,17 @@ export const makeRoutineStore = Effect.gen(function* () {
     }>`SELECT record FROM routines WHERE environment_id=${environmentId} AND state <> 'deleted' ORDER BY id`.pipe(
       Effect.flatMap((rows) =>
         Effect.try({
-          try: () => rows.map((row) => decodeRoutine(row.record)),
+          try: () =>
+            rows.map((row) => withOwningEnvironment(environmentId, decodeRoutine(row.record))),
           catch: persistenceError,
         }),
       ),
       Effect.mapError(persistenceError),
     );
   const get = (environmentId: EnvironmentId, id: string) =>
-    readRoutine(id).pipe(
+    readRoutine(environmentId, id).pipe(
       Effect.filterOrFail(
-        (routine) => routine.environmentId === environmentId && routine.state !== "deleted",
+        (routine) => routine.state !== "deleted",
         () => failure("not-found", "Routine no longer exists."),
       ),
       Effect.mapError(persistenceError),
@@ -215,12 +223,16 @@ export const makeRoutineStore = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* checkTrigger(environmentId, input.configuration);
         const nextDueAt = yield* nextDue(input.configuration, now);
+        const owners = yield* sql<{
+          environmentId: EnvironmentId;
+        }>`SELECT environment_id AS environmentId FROM routines WHERE id=${input.id}`;
+        const owner = owners[0]?.environmentId;
+        if (owner !== undefined && owner !== environmentId)
+          return yield* failure("conflict", "This routine id belongs to another environment.");
         const rows = yield* sql<{
           record: string;
-        }>`SELECT record FROM routines WHERE id=${input.id}`;
+        }>`SELECT record FROM routines WHERE id=${input.id} AND environment_id=${environmentId}`;
         const previous = rows[0] ? decodeRoutine(rows[0].record) : undefined;
-        if (previous && previous.environmentId !== environmentId)
-          return yield* failure("not-found", "Routine does not belong to this environment.");
         if ((previous?.revision ?? 0) !== input.expectedRevision || previous?.state === "deleted")
           return yield* failure(
             "conflict",
@@ -262,9 +274,7 @@ export const makeRoutineStore = Effect.gen(function* () {
   ) =>
     transaction(
       Effect.gen(function* () {
-        const previous = yield* readRoutine(input.id);
-        if (previous.environmentId !== environmentId)
-          return yield* failure("not-found", "Routine does not belong to this environment.");
+        const previous = yield* readRoutine(environmentId, input.id);
         yield* checkRevision(previous, input.expectedRevision);
         if (previous.state === "deleted")
           return yield* failure("not-found", "Routine was deleted.");
@@ -308,7 +318,8 @@ export const makeRoutineStore = Effect.gen(function* () {
       const existing = yield* sql<{
         record: string;
       }>`SELECT record FROM routine_runs WHERE routine_id=${routine.id} AND occurrence_key=${occurrenceKey}`;
-      if (existing[0]) return decodeRun(existing[0].record);
+      if (existing[0])
+        return withOwningEnvironment(routine.environmentId, decodeRun(existing[0].record));
       const active =
         yield* sql`SELECT id FROM routine_runs WHERE routine_id=${routine.id} AND active=1`;
       const reason =
@@ -363,9 +374,7 @@ export const makeRoutineStore = Effect.gen(function* () {
             );
           return run;
         }
-        const routine = yield* readRoutine(input.id);
-        if (routine.environmentId !== environmentId)
-          return yield* failure("not-found", "Routine does not belong to this environment.");
+        const routine = yield* readRoutine(environmentId, input.id);
         yield* checkRevision(routine, input.expectedRevision);
         if (routine.state !== "enabled")
           return yield* failure("blocked", "Resume the routine before testing it.");
@@ -378,9 +387,7 @@ export const makeRoutineStore = Effect.gen(function* () {
     );
   const history = (environmentId: EnvironmentId, input: typeof RoutineHistoryInput.Type) =>
     Effect.gen(function* () {
-      const routine = yield* readRoutine(input.id);
-      if (routine.environmentId !== environmentId)
-        return yield* failure("not-found", "Routine does not belong to this environment.");
+      yield* readRoutine(environmentId, input.id);
       const limit = Math.min(input.limit ?? 20, 100);
       const cursor = input.before === undefined ? undefined : decodeCursor(input.before);
       const rows = cursor
@@ -397,7 +404,9 @@ export const makeRoutineStore = Effect.gen(function* () {
             id: string;
           }>`SELECT record, admitted_at AS admittedAt, id FROM routine_runs WHERE routine_id=${input.id}
           ORDER BY admitted_at DESC, id DESC LIMIT ${limit + 1}`;
-      const runs = rows.slice(0, limit).map((row) => decodeRun(row.record));
+      const runs = rows
+        .slice(0, limit)
+        .map((row) => withOwningEnvironment(environmentId, decodeRun(row.record)));
       const last = rows.at(limit - 1);
       return {
         runs,
@@ -437,9 +446,10 @@ export const makeRoutineStore = Effect.gen(function* () {
         const nowIso = isoAt(now);
         const due = yield* sql<{
           record: string;
-        }>`SELECT record FROM routines WHERE state='enabled' AND trigger_kind='schedule' AND next_due_at <= ${nowIso}`;
+          environmentId: EnvironmentId;
+        }>`SELECT record, environment_id AS environmentId FROM routines WHERE state='enabled' AND trigger_kind='schedule' AND next_due_at <= ${nowIso}`;
         for (const row of due) {
-          const routine = decodeRoutine(row.record);
+          const routine = withOwningEnvironment(row.environmentId, decodeRoutine(row.record));
           const downtime =
             leader.observed_at > 0 && workerStartedAt > Date.parse(routine.nextDueAt);
           yield* insertRun(routine, {
@@ -574,7 +584,10 @@ export const makeRoutineStore = Effect.gen(function* () {
           }>`SELECT record FROM routines WHERE environment_id=${connection.environmentId}
             AND state='enabled' AND trigger_kind='github' ORDER BY id`;
           for (const row of candidates) {
-            const routine = decodeRoutine(row.record);
+            const routine = withOwningEnvironment(
+              connection.environmentId,
+              decodeRoutine(row.record),
+            );
             const trigger = routine.configuration.trigger;
             if (isScheduleTrigger(trigger) || trigger.connectionId !== connection.id) continue;
             if (!triggerMatchesEvent(trigger, summary)) continue;
@@ -686,7 +699,7 @@ export const makeRoutineStore = Effect.gen(function* () {
     transaction(
       Effect.gen(function* () {
         yield* assertClaim(claim, now);
-        const routine = yield* readRoutine(claim.run.routineId);
+        const routine = yield* readRoutine(claim.run.environmentId, claim.run.routineId);
         if (routine.state !== "enabled")
           return yield* failure("blocked", "Routine is no longer enabled.");
         const rows = yield* sql<{
