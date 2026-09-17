@@ -20,7 +20,7 @@ const defaults = defaultThemeVariables as Readonly<
 export function getMobileThemeRuntimeVariables(
   themeId: MobileThemeId,
   appearance: MobileThemeAppearance,
-  platform: string,
+  platform?: string,
 ): MobileThemeVariables {
   const usesDefaultPalette = themeId === DEFAULT_MOBILE_THEME_ID || themeId === "material-you";
   const variables = usesDefaultPalette

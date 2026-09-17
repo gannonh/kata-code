@@ -31,20 +31,8 @@ const palette: MaterialYouPalette = {
 };
 
 describe("Material You system colors", () => {
-  it.each(["light", "dark"] as const)(
-    "uses the system surface for the Android frame in %s",
-    (appearance) => {
-      const variables = materialYouPaletteToMobileThemeVariables(
-        palette,
-        appearance,
-        getMobileThemeRuntimeVariables("material-you", appearance, "android"),
-      );
-      expect(variables["--color-header"]).toBe(palette.surfaceContainerHigh);
-    },
-  );
-
   it("overrides the selected theme without mutating its base variables", () => {
-    const base = getMobileThemeRuntimeVariables("t3-code", "dark", "android");
+    const base = getMobileThemeRuntimeVariables("t3-code", "dark");
     const snapshot = { ...base };
 
     const variables = materialYouPaletteToMobileThemeVariables(palette, "dark", base);
@@ -59,7 +47,7 @@ describe("Material You system colors", () => {
   });
 
   it("uses the Messages-style RCS tones for sent messages", () => {
-    const base = getMobileThemeRuntimeVariables("t3-code", "dark", "android");
+    const base = getMobileThemeRuntimeVariables("t3-code", "dark");
     const dark = materialYouPaletteToMobileThemeVariables(
       { ...palette, inversePrimary: "#A31D8DFF" },
       "dark",
@@ -68,7 +56,7 @@ describe("Material You system colors", () => {
     const light = materialYouPaletteToMobileThemeVariables(
       { ...palette, inversePrimary: "#A31D8DFF" },
       "light",
-      getMobileThemeRuntimeVariables("t3-code", "light", "android"),
+      getMobileThemeRuntimeVariables("t3-code", "light"),
     );
 
     expect(dark["--color-user-bubble"]).toBe("#850073FF");

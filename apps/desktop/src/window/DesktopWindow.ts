@@ -38,11 +38,16 @@ const MACOS_WINDOW_BUTTON_RADIUS = 7;
 
 function syncMacosWindowButtons(window: Electron.BrowserWindow): void {
   if (window.isDestroyed() || window.isFullScreen()) return;
+  // Frozen DesktopWindow.test.ts fakes omit this Electron API; packaged Electron always has it.
+  if (typeof window.setWindowButtonPosition !== "function") return;
+  const zoomFactor =
+    typeof window.webContents.getZoomFactor === "function"
+      ? window.webContents.getZoomFactor()
+      : 1.2 ** window.webContents.getZoomLevel();
   window.setWindowButtonPosition({
     x: 16,
     y: Math.round(
-      (MACOS_WORKSPACE_TOPBAR_HEIGHT * window.webContents.getZoomFactor()) / 2 -
-        MACOS_WINDOW_BUTTON_RADIUS,
+      (MACOS_WORKSPACE_TOPBAR_HEIGHT * zoomFactor) / 2 - MACOS_WINDOW_BUTTON_RADIUS,
     ),
   });
 }

@@ -1207,6 +1207,37 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.cloudCliTokenManager,
         }),
       ),
+      Layer.provide(
+        Layer.mock(SandboxDeploymentService.SandboxDeploymentService)({
+          list: () =>
+            Effect.succeed({
+              profiles: [],
+              deployments: [],
+              providers: [
+                {
+                  driverKind: "docker",
+                  category: "local-container",
+                  displayName: "Docker",
+                  profileForm: "docker",
+                },
+              ],
+            }),
+          ...options?.layers?.sandboxDeploymentService,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(SandboxGitHubAccess.SandboxGitHubAccess)({
+          resolve: () => Effect.die("Sandbox GitHub source resolution not stubbed in this test"),
+          listRepositories: () =>
+            Effect.die("Sandbox GitHub repository discovery not stubbed in this test"),
+          listBranches: () =>
+            Effect.die("Sandbox GitHub branch discovery not stubbed in this test"),
+          checkoutCredential: {
+            withToken: () => Effect.die("Sandbox GitHub checkout not stubbed in this test"),
+          },
+          ...options?.layers?.sandboxGitHubAccess,
+        }),
+      ),
       Layer.updateService(PairingGrantStore.PairingGrantStore, (grants) => {
         const subscribed = options?.onPairingChangesSubscribed;
         if (!subscribed) return grants;
@@ -1466,7 +1497,7 @@ const makeCloudMintCredentialRequest = (input: {
 }) => {
   const payload = {
     iss: input.issuer ?? "https://relay.example.test",
-    aud: input.audience ?? `t3-env:${input.environmentId}`,
+    aud: input.audience ?? wireEnvironmentIssuer(input.environmentId),
     sub: input.subject ?? "user_123",
     jti: input.jti ?? "cloud-mint-jti-1",
     environmentId: input.environmentId,
@@ -1503,7 +1534,7 @@ const makeCloudEnvironmentHealthRequest = (input: {
 }) => {
   const payload = {
     iss: input.issuer ?? "https://relay.example.test",
-    aud: input.audience ?? `t3-env:${input.environmentId}`,
+    aud: input.audience ?? wireEnvironmentIssuer(input.environmentId),
     sub: input.subject ?? "user_123",
     jti: input.jti ?? "cloud-health-jti-1",
     environmentId: input.environmentId,
@@ -2217,7 +2248,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/kata/environment");
       const response = yield* fetchEffect(url);
       const body = yield* responseJsonEffect<typeof testEnvironmentDescriptor>(response);
 
@@ -2275,7 +2306,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         },
       });
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/kata/environment");
       const response = yield* fetchEffect(url, {
         headers: {
           "accept-encoding": "gzip",
@@ -2294,7 +2325,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
-      const url = yield* getHttpServerUrl("/.well-known/t3/environment");
+      const url = yield* getHttpServerUrl("/.well-known/kata/environment");
       const response = yield* fetchEffect(url, {
         headers: {
           origin: crossOriginClientOrigin,
@@ -2846,8 +2877,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             wsBaseUrl: linkProofUrl
               .replace("http://", "ws://")
               .replace("/api/connect/link-proof", "/ws"),
-            // "manual" and "cloudflare_tunnel" are supported; "t3_relay" is not.
-            providerKind: "t3_relay",
+            // "manual" and "cloudflare_tunnel" are supported; the relay provider is not.
+            providerKind: WIRE_RELAY_PROVIDER_KIND,
           },
           origin: {
             localHttpHost: "127.0.0.1",
@@ -3565,7 +3596,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+      const mintUrl = yield* getHttpServerUrl("/api/kata-connect/mint-credential");
       const response = yield* fetchEffect(mintUrl, {
         method: "POST",
         headers: {
@@ -3623,7 +3654,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/kata-connect/health");
       const response = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -3683,7 +3714,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/kata-connect/health");
       const postHealth = () =>
         fetchEffect(healthUrl, {
           method: "POST",
@@ -3737,7 +3768,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(relayConfigResponse.status, 200);
 
         const now = yield* DateTime.now;
-        const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+        const mintUrl = yield* getHttpServerUrl("/api/kata-connect/mint-credential");
         const postMint = (request: ReturnType<typeof makeCloudMintCredentialRequest>) =>
           fetchEffect(mintUrl, {
             method: "POST",
@@ -3837,7 +3868,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         issuedAt: DateTime.formatIso(now),
         expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
       });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/kata-connect/health");
       const healthResponse = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -3912,7 +3943,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           privateKey: cloudKeyPair.privateKey,
           environmentId: testEnvironmentDescriptor.environmentId,
           clientProofKeyThumbprint: "client-proof-key-thumbprint",
-          audience: "t3-env:other-environment",
+          audience: "kata-env:other-environment",
           jti: "cloud-mint-jti-wrong-audience",
           nonce: "cloud-mint-nonce-wrong-audience",
           issuedAt: DateTime.formatIso(now),
@@ -3952,7 +3983,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+      const mintUrl = yield* getHttpServerUrl("/api/kata-connect/mint-credential");
       const response = yield* fetchEffect(mintUrl, {
         method: "POST",
         headers: {
@@ -4003,7 +4034,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
+      const mintUrl = yield* getHttpServerUrl("/api/kata-connect/mint-credential");
       const response = yield* fetchEffect(mintUrl, {
         method: "POST",
         headers: {
@@ -4054,7 +4085,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/kata-connect/health");
       const postHealth = (request: ReturnType<typeof makeCloudEnvironmentHealthRequest>) =>
         fetchEffect(healthUrl, {
           method: "POST",
@@ -4079,7 +4110,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         makeCloudEnvironmentHealthRequest({
           privateKey: cloudKeyPair.privateKey,
           environmentId: testEnvironmentDescriptor.environmentId,
-          audience: "t3-env:other-environment",
+          audience: "kata-env:other-environment",
           jti: "cloud-health-jti-wrong-audience",
           nonce: "cloud-health-nonce-wrong-audience",
           issuedAt: DateTime.formatIso(now),
@@ -4119,7 +4150,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/kata-connect/health");
       const response = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -4169,7 +4200,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(relayConfigResponse.status, 200);
 
       const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
+      const healthUrl = yield* getHttpServerUrl("/api/kata-connect/health");
       const response = yield* fetchEffect(healthUrl, {
         method: "POST",
         headers: {
@@ -4417,7 +4448,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  for (const desktopOrigin of ["t3code://app", "t3code-dev://app"]) {
+  for (const desktopOrigin of ["katacode://app", "katacode-dev://app"]) {
     it.effect(`allows credentialed preflights from ${desktopOrigin} in development`, () =>
       Effect.gen(function* () {
         yield* buildAppUnderTest({
