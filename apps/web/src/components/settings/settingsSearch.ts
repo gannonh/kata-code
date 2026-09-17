@@ -395,6 +395,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "sandboxes-preview",
+    title: "Sandboxes (preview)",
+    to: "/settings/general",
+  },
+  {
     id: "new-threads",
     title: "New threads",
     to: "/settings/general",
