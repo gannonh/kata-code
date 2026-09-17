@@ -767,6 +767,86 @@ export const make = Effect.gen(function* () {
         ),
         Effect.map(normalizeRepositoryCloneUrls),
       ),
+    listRepositories: (input) =>
+      executeSafe({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "--method",
+          "GET",
+          "--include",
+          "/user/repos",
+          "-f",
+          "affiliation=owner,collaborator,organization_member",
+          "-f",
+          "sort=updated",
+          "-F",
+          "per_page=30",
+          "-F",
+          `page=${input.page}`,
+        ],
+      }).pipe(
+        Effect.flatMap((result) =>
+          decodeIncludedJson(
+            result.stdout,
+            RawGitHubAccessibleRepositoryPageSchema,
+            input.cwd,
+          ).pipe(
+            Effect.map((rows) => ({
+              repositories: rows.map((row) => ({
+                nameWithOwner: row.full_name,
+                defaultBranch: row.default_branch,
+                visibility: row.visibility,
+              })),
+              page: input.page,
+              hasMore: includesNextLink(result.stdout),
+            })),
+          ),
+        ),
+      ),
+    listBranches: (input) =>
+      executeSafe({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "--method",
+          "GET",
+          "--include",
+          `/repos/${input.repository}/branches`,
+          "-F",
+          "per_page=30",
+          "-F",
+          `page=${input.page}`,
+        ],
+      }).pipe(
+        Effect.flatMap((result) =>
+          decodeIncludedJson(result.stdout, RawGitHubBranchPageSchema, input.cwd).pipe(
+            Effect.map((rows) => ({
+              branches: rows.map((row) => row.name),
+              page: input.page,
+              hasMore: includesNextLink(result.stdout),
+            })),
+          ),
+        ),
+      ),
+    assertAuthenticated: (input) =>
+      executeSafe({
+        cwd: input.cwd,
+        args: ["auth", "status", "--hostname", "github.com"],
+        maxOutputBytes: 64 * 1024,
+      }).pipe(
+        Effect.mapError((error) =>
+          error._tag === "GitHubCliUnavailableError"
+            ? error
+            : new GitHubCliAuthenticationError({
+                command: "gh",
+                cwd: input.cwd,
+                cause: "GitHub CLI output omitted.",
+              }),
+        ),
+        Effect.asVoid,
+      ),
+    withAuthTokenBytes: (input, use) => useAuthTokenBytes(process, input, use),
     createRepository: (input) =>
       execute({
         cwd: input.cwd,

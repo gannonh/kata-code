@@ -6,7 +6,7 @@ const TARGETS = ["web", "electron", "native", "cli", "tui", "api", "sdk", "mixed
 const ALWAYS_VISUAL_TARGETS = ["web", "electron", "native", "tui", "mixed"];
 const COMMAND_KINDS = new Set(["e2e", "contract", "supporting"]);
 const SLICE_RESULTS = new Set(["Pass", "Fail", "Blocked", "Not tested"]);
-const CHECKPOINTS = ["starting", "key", "final"];
+const CHECKPOINTS = new Set(["starting", "key", "final"]);
 
 function arg(name, fallback = "") {
   const index = process.argv.indexOf(`--${name}`);
@@ -91,7 +91,7 @@ if (manifest) {
     }
     if (!fileIsNonempty(artifact.path)) fail(`artifact file is missing or empty: ${artifact.path}`);
     if (artifact.type === "screenshot") {
-      if (!CHECKPOINTS.includes(artifact.checkpoint))
+      if (!CHECKPOINTS.has(artifact.checkpoint))
         fail(`screenshot needs checkpoint starting, key, or final: ${artifact.path}`);
       if (!fileHasImageSignature(artifact.path))
         fail(`screenshot is not a readable PNG, JPEG, GIF, or WebP: ${artifact.path}`);

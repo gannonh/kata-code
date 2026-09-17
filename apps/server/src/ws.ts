@@ -79,6 +79,9 @@ import {
   WORKTREE_SETUP_ACTIVITY_KIND,
   worktreeSetupActivityId,
   type WorktreeSetupSnapshot,
+  isProviderAvailable,
+  previewRoutineSchedule,
+  RoutineError,
 } from "@kata-sh/code-contracts";
 import { resolveServerBackgroundActivitySettings } from "@kata-sh/code-shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -118,6 +121,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { presentServerSettingsForClient } from "./kataSandbox/sandboxFeature.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -154,6 +158,10 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as RoutineConnections from "./routines/RoutineConnections.ts";
+import * as RoutineStore from "./routines/RoutineStore.ts";
+import { makeRoutineDraftGeneration } from "./routines/RoutineDraftGeneration.ts";
+import { makeTextGenerationFromRegistry } from "./textGeneration/TextGeneration.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import { listLinkedPullRequestThreads } from "./pullRequest/linkedThreads.ts";
@@ -568,6 +576,7 @@ const makeWsRpcLayer = (
       const providerInstallation = yield* makeProviderInstallation();
       const serverUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
+      const sandboxesEnabledOverride = config.sandboxesEnabled;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -624,6 +633,75 @@ const makeWsRpcLayer = (
       >();
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+      const routineDraftGeneration = makeRoutineDraftGeneration({
+        projects: projectionSnapshotQuery.getProjectShells().pipe(
+          Effect.mapError(
+            () =>
+              new RoutineError({
+                code: "blocked",
+                message: "Unable to read available projects.",
+              }),
+          ),
+        ),
+        models: Effect.gen(function* () {
+          const instances = yield* providerInstances.listInstances;
+          const providers = yield* providerRegistry.getProviders;
+          const enabledInstanceIds = new Set(
+            instances.filter((instance) => instance.enabled).map((instance) => instance.instanceId),
+          );
+          return providers
+            .filter(
+              (provider) =>
+                enabledInstanceIds.has(provider.instanceId) &&
+                provider.enabled &&
+                provider.status !== "disabled" &&
+                isProviderAvailable(provider),
+            )
+            .flatMap((provider) =>
+              provider.models.map((model) => ({
+                instanceId: provider.instanceId,
+                model: model.slug,
+                name: model.name,
+              })),
+            );
+        }),
+        generate: (input) =>
+          makeTextGenerationFromRegistry(providerInstances)
+            .generateRoutineDraft(input)
+            .pipe(
+              Effect.mapError(
+                (cause) => new RoutineError({ code: "blocked", message: cause.detail }),
+              ),
+            ),
+      });
+      const routineStore = yield* Effect.serviceOption(RoutineStore.RoutineStore);
+      const withRoutineStore = <A, E>(
+        run: (store: RoutineStore.RoutineStore["Service"]) => Effect.Effect<A, E>,
+      ): Effect.Effect<A, E | RoutineError> =>
+        Option.match(routineStore, {
+          onNone: () =>
+            Effect.fail(
+              new RoutineError({
+                code: "blocked",
+                message: "Scheduled routines are unavailable in this server runtime.",
+              }),
+            ),
+          onSome: run,
+        });
+      const routineConnections = yield* Effect.serviceOption(RoutineConnections.RoutineConnections);
+      const withRoutineConnections = <A, E>(
+        run: (connections: RoutineConnections.RoutineConnections["Service"]) => Effect.Effect<A, E>,
+      ): Effect.Effect<A, E | RoutineError> =>
+        Option.match(routineConnections, {
+          onNone: () =>
+            Effect.fail(
+              new RoutineError({
+                code: "blocked",
+                message: "GitHub connections are unavailable in this server runtime.",
+              }),
+            ),
+          onSome: run,
+        });
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
       yield* Effect.addFinalizer(() =>
@@ -1769,8 +1847,9 @@ const makeWsRpcLayer = (
           const providers = options.usageLimitsCommand
             ? withUsageLimitsCommands(currentProviders, yield* usageLimitSources.current)
             : currentProviders;
-          const settings = ServerSettings.redactServerSettingsForClient(
+          const settings = presentServerSettingsForClient(
             yield* serverSettings.getSettings,
+            sandboxesEnabledOverride,
           );
           const environment = yield* serverEnvironment.getDescriptor;
           const auth = yield* serverAuth.getDescriptor();
@@ -1829,6 +1908,171 @@ const makeWsRpcLayer = (
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
 
       return WsRpcGroup.of({
+        [WS_METHODS.routinesDraft]: (input) =>
+          observeRpcEffect(WS_METHODS.routinesDraft, routineDraftGeneration.generate(input), {
+            "rpc.aggregate": "routines",
+          }),
+        [WS_METHODS.routinesList]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesList,
+            withRoutineStore((store) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => store.list(environmentId)),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesGet]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesGet,
+            withRoutineStore((store) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => store.get(environmentId, input.id)),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesSave]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesSave,
+            withRoutineStore((store) =>
+              Effect.gen(function* () {
+                const environmentId = yield* serverEnvironment.getEnvironmentId;
+                const now = DateTime.toEpochMillis(yield* DateTime.now);
+                return yield* store.save(environmentId, input, now);
+              }),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesChange]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesChange,
+            withRoutineStore((store) =>
+              Effect.gen(function* () {
+                const environmentId = yield* serverEnvironment.getEnvironmentId;
+                const now = DateTime.toEpochMillis(yield* DateTime.now);
+                return yield* store.change(environmentId, input, now);
+              }),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesTest]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesTest,
+            withRoutineStore((store) =>
+              Effect.gen(function* () {
+                const environmentId = yield* serverEnvironment.getEnvironmentId;
+                const now = DateTime.toEpochMillis(yield* DateTime.now);
+                return yield* store.testRun(environmentId, input, now);
+              }),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesHistory]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesHistory,
+            withRoutineStore((store) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => store.history(environmentId, input)),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesPreview]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesPreview,
+            Effect.gen(function* () {
+              const now = yield* DateTime.now;
+              return yield* Effect.try({
+                try: () => previewRoutineSchedule(input.trigger, DateTime.toDateUtc(now)),
+                catch: (cause) =>
+                  Schema.is(RoutineError)(cause)
+                    ? cause
+                    : new RoutineError({
+                        code: "validation",
+                        message: cause instanceof Error ? cause.message : String(cause),
+                      }),
+              });
+            }),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesSubscribe]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.routinesSubscribe,
+            withRoutineStore((store) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => store.subscribe(environmentId)),
+                Effect.map(({ latest, changes }) => Stream.concat(Stream.make(latest), changes)),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsList]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsList,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => connections.list(environmentId)),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsCreate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsCreate,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) =>
+                  connections.create({ environmentId, id: input.id, repository: input.repository }),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsVerify]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsVerify,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) =>
+                  connections.verify({ environmentId, id: input.id }),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsDisable]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsDisable,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) =>
+                  connections.disable({ environmentId, id: input.id }),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsRotateSecret]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsRotateSecret,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) =>
+                  connections.rotateSecret({ environmentId, id: input.id }),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesGitHubMetadata]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesGitHubMetadata,
+            withRoutineConnections((connections) =>
+              connections.metadata({ repository: input.repository }),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
@@ -2526,7 +2770,9 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.serverGetSettings,
             serverSettings.getSettings.pipe(
-              Effect.map(ServerSettings.redactServerSettingsForClient),
+              Effect.map((settings) =>
+                presentServerSettingsForClient(settings, sandboxesEnabledOverride),
+              ),
             ),
             {
               "rpc.aggregate": "server",
@@ -2545,7 +2791,7 @@ const makeWsRpcLayer = (
                 ...patch,
                 ...(deviceHosts ? { deviceHosts } : {}),
               });
-              return ServerSettings.redactServerSettingsForClient(settings);
+              return presentServerSettingsForClient(settings, sandboxesEnabledOverride);
             }),
             {
               "rpc.aggregate": "server",
@@ -3572,7 +3818,9 @@ const makeWsRpcLayer = (
                     )
                   : Stream.empty;
               const settingsUpdates = serverSettings.streamChanges.pipe(
-                Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
+                Stream.map((settings) =>
+                  presentServerSettingsForClient(settings, sandboxesEnabledOverride),
+                ),
                 Stream.map((settings) => ({
                   version: 1 as const,
                   type: "settingsUpdated" as const,

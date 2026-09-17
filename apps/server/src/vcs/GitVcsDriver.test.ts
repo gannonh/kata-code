@@ -242,6 +242,7 @@ it.effect("checkpoint capture keeps the legacy path when Git lacks add --sparse"
     const originalIndex = yield* fs.readFile(path.join(cwd, ".git/index"));
     const captureDriver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
       Effect.provideService(VcsProcess.VcsProcess, {
+        runBytes: (input) => liveProcess.runBytes(input),
         run: (input) => {
           if (input.args.includes("-h"))
             return Effect.succeed({
@@ -302,6 +303,7 @@ for (const indexMode of ["normal", "flags", "sparse"] as const) {
         const originalIndex = yield* fs.readFile(path.join(cwd, ".git/index"));
         const captureDriver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
           Effect.provideService(VcsProcess.VcsProcess, {
+            runBytes: (input) => liveProcess.runBytes(input),
             run: (input) =>
               liveProcess.run(
                 input.args.includes("ls-files")
@@ -384,6 +386,7 @@ it.effect("checkpoint capture preserves racy edits made after resetting the inde
     const originalIndexMtime = (yield* fileSystem.stat(indexPath)).mtime;
     const captureDriver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
       Effect.provideService(VcsProcess.VcsProcess, {
+        runBytes: (input) => liveProcess.runBytes(input),
         run: Effect.fn(function* (input: VcsProcess.VcsProcessInput) {
           const result = yield* liveProcess.run(input);
           if (input.args.includes("read-tree") && input.args.includes("--reset")) {

@@ -43,4 +43,4 @@ Shared contracts, package manifests, the lockfile, workflow ownership, and migra
 
 ## Verification
 
-Build verification uses the checker and inventory archived from the frozen Kata base. Required checks include formatting and lint, typecheck, unused-code checks, CI test partitions, desktop build, preload verification, branding, ancestry, workflow-reference scan, and the preservation checker. Mandatory live browser, device, provider, Android artwork, and macOS Icon Composer evidence remains `NOT RUN` until exercised against an exact candidate.
+Build verification uses the checker and inventory archived from the frozen Kata base. Required checks include formatting and lint, typecheck, unused-code checks, CI test partitions, desktop build, preload verification, branding, ancestry, workflow-reference scan, and the preservation checker. Trusted-base `--mode ci` PASS on candidate `36427e288d5e62d286979cf873c3709a0f16af7c` (superseded by later preservation commits). Mandatory live browser, device, provider, Android artwork, and macOS Icon Composer evidence remains `NOT RUN` until exercised against an exact candidate.

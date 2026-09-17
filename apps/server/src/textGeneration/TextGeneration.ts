@@ -155,6 +155,32 @@ const resolveInstance = (
     ),
   );
 
+export const makeTextGenerationFromRegistry = (
+  registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
+): TextGeneration["Service"] =>
+  TextGeneration.of({
+    generateCommitMessage: (input) =>
+      resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),
+      ),
+    generatePrContent: (input) =>
+      resolveInstance(registry, "generatePrContent", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generatePrContent(input)),
+      ),
+    generateBranchName: (input) =>
+      resolveInstance(registry, "generateBranchName", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateBranchName(input)),
+      ),
+    generateThreadTitle: (input) =>
+      resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+      ),
+    generateRoutineDraft: (input) =>
+      resolveInstance(registry, "generateRoutineDraft", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateRoutineDraft(input)),
+      ),
+  });
+
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;

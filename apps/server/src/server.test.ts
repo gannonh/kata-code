@@ -1199,44 +1199,42 @@ const buildAppUnderTest = (options?: {
         ),
       ),
       Layer.provide(
-        Layer.mock(CloudCliTokenManager.CloudCliTokenManager)({
-          get: Effect.die(new Error("Unexpected Kata Code Connect CLI authorization request.")),
-          getExisting: Effect.succeed(Option.none()),
-          hasCredential: Effect.succeed(false),
-          clear: Effect.void,
-          ...options?.layers?.cloudCliTokenManager,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(SandboxDeploymentService.SandboxDeploymentService)({
-          list: () =>
-            Effect.succeed({
-              profiles: [],
-              deployments: [],
-              providers: [
-                {
-                  driverKind: "docker",
-                  category: "local-container",
-                  displayName: "Docker",
-                  profileForm: "docker",
-                },
-              ],
-            }),
-          ...options?.layers?.sandboxDeploymentService,
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(SandboxGitHubAccess.SandboxGitHubAccess)({
-          resolve: () => Effect.die("Sandbox GitHub source resolution not stubbed in this test"),
-          listRepositories: () =>
-            Effect.die("Sandbox GitHub repository discovery not stubbed in this test"),
-          listBranches: () =>
-            Effect.die("Sandbox GitHub branch discovery not stubbed in this test"),
-          checkoutCredential: {
-            withToken: () => Effect.die("Sandbox GitHub checkout not stubbed in this test"),
-          },
-          ...options?.layers?.sandboxGitHubAccess,
-        }),
+        Layer.mergeAll(
+          Layer.mock(CloudCliTokenManager.CloudCliTokenManager)({
+            get: Effect.die(new Error("Unexpected Kata Code Connect CLI authorization request.")),
+            getExisting: Effect.succeed(Option.none()),
+            hasCredential: Effect.succeed(false),
+            clear: Effect.void,
+            ...options?.layers?.cloudCliTokenManager,
+          }),
+          Layer.mock(SandboxDeploymentService.SandboxDeploymentService)({
+            list: () =>
+              Effect.succeed({
+                profiles: [],
+                deployments: [],
+                providers: [
+                  {
+                    driverKind: "docker",
+                    category: "local-container",
+                    displayName: "Docker",
+                    profileForm: "docker",
+                  },
+                ],
+              }),
+            ...options?.layers?.sandboxDeploymentService,
+          }),
+          Layer.mock(SandboxGitHubAccess.SandboxGitHubAccess)({
+            resolve: () => Effect.die("Sandbox GitHub source resolution not stubbed in this test"),
+            listRepositories: () =>
+              Effect.die("Sandbox GitHub repository discovery not stubbed in this test"),
+            listBranches: () =>
+              Effect.die("Sandbox GitHub branch discovery not stubbed in this test"),
+            checkoutCredential: {
+              withToken: () => Effect.die("Sandbox GitHub checkout not stubbed in this test"),
+            },
+            ...options?.layers?.sandboxGitHubAccess,
+          }),
+        ),
       ),
       Layer.updateService(PairingGrantStore.PairingGrantStore, (grants) => {
         const subscribed = options?.onPairingChangesSubscribed;

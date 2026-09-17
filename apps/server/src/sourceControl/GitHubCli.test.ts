@@ -118,6 +118,7 @@ describe("GitHubCli.layer", () => {
       let reads = 0;
       const gh = yield* GitHubCli.make.pipe(
         Effect.provideService(VcsProcess.VcsProcess, {
+          runBytes: () => Effect.die("unused binary process runner"),
           run: (input) =>
             Effect.sync(() => {
               if (input.args[1] === "rate_limit")

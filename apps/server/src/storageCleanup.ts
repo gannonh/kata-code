@@ -42,7 +42,7 @@ export class StorageCleanup extends Context.Service<
     readonly start: () => Effect.Effect<void, never, Scope.Scope>;
     readonly drain: Effect.Effect<void>;
   }
->()("t3/storageCleanup") {}
+>()("@kata-sh/code-cli/storageCleanup") {}
 
 const DAY_MS = 86_400_000;
 
