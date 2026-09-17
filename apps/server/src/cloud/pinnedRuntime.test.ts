@@ -63,6 +63,7 @@ const extractingRunner = (fs: FileSystem.FileSystem, path: Path.Path, commands: 
           stderrInvalidUtf8: false,
         };
       }),
+    runBytes: () => Effect.die("unused binary process runner"),
   });
 
 it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
@@ -406,6 +407,7 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       const started = yield* Deferred.make<void>();
       const runner = ProcessRunner.ProcessRunner.of({
         run: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+        runBytes: () => Effect.die("unused binary process runner"),
       });
       const install = yield* ensurePinnedRuntimeInstalled({
         baseDir,
