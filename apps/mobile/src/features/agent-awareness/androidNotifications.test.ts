@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   requireModule: vi.fn(),
 }));
 
-vi.mock("expo", () => ({ requireOptionalNativeModule: mocks.requireModule }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: mocks.config } }));
 vi.mock("react-native", () => ({
   Linking: { openSettings: mocks.openSettings },
@@ -40,8 +39,12 @@ beforeEach(() => {
 describe("Android native notification capability", () => {
   it("opens the Live Update controls on supported Android builds", async () => {
     mocks.native!.openLiveUpdateSettings = vi.fn(() => true);
-    const { openAndroidLiveUpdateSettings, supportsAndroidLiveUpdateSettings } =
-      await import("./androidNotifications");
+    const {
+      openAndroidLiveUpdateSettings,
+      supportsAndroidLiveUpdateSettings,
+      __setAndroidNotificationsNativeLoaderForTest,
+    } = await import("./androidNotifications");
+    __setAndroidNotificationsNativeLoaderForTest(mocks.requireModule);
     expect(supportsAndroidLiveUpdateSettings()).toBe(true);
     await openAndroidLiveUpdateSettings();
     expect(mocks.native!.openLiveUpdateSettings).toHaveBeenCalledOnce();
@@ -57,21 +60,34 @@ describe("Android native notification capability", () => {
     "falls back to app settings for older binaries or missing system activities (%j)",
     async (openLiveUpdateSettings) => {
       if (openLiveUpdateSettings) mocks.native!.openLiveUpdateSettings = openLiveUpdateSettings;
-      const { openAndroidLiveUpdateSettings } = await import("./androidNotifications");
+      const {
+        openAndroidLiveUpdateSettings,
+        __setAndroidNotificationsNativeLoaderForTest,
+      } = await import("./androidNotifications");
+      __setAndroidNotificationsNativeLoaderForTest(mocks.requireModule);
       await openAndroidLiveUpdateSettings();
       expect(mocks.openSettings).toHaveBeenCalledOnce();
     },
   );
 
   it("uses the installed module and the build variant's deep-link scheme", async () => {
-    const { configureAndroidAgentNotifications, clearAndroidAgentNotifications } =
-      await import("./androidNotifications");
+    const {
+      configureAndroidAgentNotifications,
+      clearAndroidAgentNotifications,
+      __setAndroidNotificationsNativeLoaderForTest,
+    } = await import("./androidNotifications");
+    __setAndroidNotificationsNativeLoaderForTest(mocks.requireModule);
     const { supportsAgentAwarenessPush } = await import("./capabilities");
     // An iOS-only signing restriction must not disable Android notifications.
     mocks.config.extra.iosPersonalTeamBuild = true;
     expect(supportsAgentAwarenessPush()).toBe(true);
     configureAndroidAgentNotifications("device", "user", false);
-    expect(mocks.native?.configure).toHaveBeenCalledWith("device", "user", "katacode-preview", false);
+    expect(mocks.native?.configure).toHaveBeenCalledWith(
+      "device",
+      "user",
+      "katacode-preview",
+      false,
+    );
     clearAndroidAgentNotifications();
     expect(mocks.native?.clear).toHaveBeenCalledOnce();
   });
@@ -80,8 +96,12 @@ describe("Android native notification capability", () => {
     "disables push when the native binary is missing required methods (%j)",
     async (native) => {
       mocks.native = native;
-      const { configureAndroidAgentNotifications, clearAndroidAgentNotifications } =
-        await import("./androidNotifications");
+      const {
+        configureAndroidAgentNotifications,
+        clearAndroidAgentNotifications,
+        __setAndroidNotificationsNativeLoaderForTest,
+      } = await import("./androidNotifications");
+      __setAndroidNotificationsNativeLoaderForTest(mocks.requireModule);
       const { supportsAgentAwarenessPush } = await import("./capabilities");
       expect(supportsAgentAwarenessPush()).toBe(false);
       expect(() => configureAndroidAgentNotifications("device", "user", true)).not.toThrow();

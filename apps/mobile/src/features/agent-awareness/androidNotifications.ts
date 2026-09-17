@@ -1,5 +1,4 @@
 import Constants from "expo-constants";
-import { requireOptionalNativeModule } from "expo";
 import { Linking, Platform } from "react-native";
 
 interface AndroidAgentNotifications {
@@ -8,12 +7,24 @@ interface AndroidAgentNotifications {
   openLiveUpdateSettings?(): boolean;
 }
 
-const native =
-  Platform.OS === "android"
-    ? requireOptionalNativeModule<AndroidAgentNotifications>("T3AgentNotifications")
-    : null;
+type NativeLoader = () => AndroidAgentNotifications | null;
+
+function readNativeModule(): AndroidAgentNotifications | null {
+  if (Platform.OS !== "android") return null;
+  try {
+    const expo = require("expo") as {
+      requireOptionalNativeModule: <T>(name: string) => T | null;
+    };
+    return expo.requireOptionalNativeModule<AndroidAgentNotifications>("T3AgentNotifications");
+  } catch {
+    return null;
+  }
+}
+
+let nativeLoader: NativeLoader = readNativeModule;
 
 export function supportsAndroidAgentNotifications(): boolean {
+  const native = nativeLoader();
   return typeof native?.configure === "function" && typeof native?.clear === "function";
 }
 
@@ -23,7 +34,7 @@ export function configureAndroidAgentNotifications(
   ongoingEnabled: boolean,
 ): void {
   const scheme = Constants.expoConfig?.scheme;
-  native?.configure?.(
+  nativeLoader()?.configure?.(
     deviceId,
     userId,
     (Array.isArray(scheme) ? scheme[0] : scheme) ?? "katacode",
@@ -32,7 +43,7 @@ export function configureAndroidAgentNotifications(
 }
 
 export function clearAndroidAgentNotifications(): void {
-  native?.clear?.();
+  nativeLoader()?.clear?.();
 }
 
 export function supportsAndroidLiveUpdateSettings(): boolean {
@@ -40,7 +51,11 @@ export function supportsAndroidLiveUpdateSettings(): boolean {
 }
 
 export async function openAndroidLiveUpdateSettings(): Promise<void> {
-  if (!native?.openLiveUpdateSettings?.()) {
+  if (!nativeLoader()?.openLiveUpdateSettings?.()) {
     await Linking.openSettings();
   }
+}
+
+export function __setAndroidNotificationsNativeLoaderForTest(loader: NativeLoader): void {
+  nativeLoader = loader;
 }
