@@ -108,6 +108,7 @@ import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import { RoutineStoreLive } from "./routines/RoutineStore.ts";
 import { RoutineConnectionsLive } from "./routines/RoutineConnections.ts";
+import { LinearRoutineMetadataLive } from "./routines/LinearRoutineMetadata.ts";
 import { RoutineDispatcherLive } from "./routines/RoutineDispatcher.ts";
 import { RoutineSchedulerLive } from "./routines/RoutineScheduler.ts";
 import {
@@ -559,6 +560,7 @@ const RuntimeCoreDependenciesLive = RoutineSchedulerLive.pipe(
     RoutineConnectionsLive.pipe(
       Layer.provide(RoutineStoreLayerLive),
       Layer.provide(GitHubCli.layer.pipe(Layer.provide(VcsProcess.layer))),
+      Layer.provide(LinearRoutineMetadataLive),
     ),
   ),
   Layer.provideMerge(RoutineStoreLayerLive),

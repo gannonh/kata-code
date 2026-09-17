@@ -102,6 +102,11 @@ const invalid = (message: string): LinearMetadataError => ({
   message: bounded(message),
 });
 
+const encodeGraphqlBody = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Struct({ query: Schema.String })),
+);
+const decodeGraphqlBody = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+
 const isAuthenticationError = (error: unknown): boolean => {
   if (typeof error !== "object" || error === null) return false;
   const record = error as Record<string, unknown>;
@@ -139,7 +144,7 @@ export function makeLinearGraphqlRequest(fetchImpl: typeof fetch) {
               authorization: request.apiKey,
               "content-type": "application/json",
             },
-            body: JSON.stringify({ query: request.query }),
+            body: encodeGraphqlBody({ query: request.query }),
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
           }),
         catch: () => unavailable("Linear did not respond. Check network access and try again."),
@@ -154,10 +159,9 @@ export function makeLinearGraphqlRequest(fetchImpl: typeof fetch) {
         );
       if (response.status >= 500)
         return yield* Effect.fail(unavailable(`Linear returned status ${response.status}.`));
-      const parsed = yield* Effect.try({
-        try: () => JSON.parse(text) as unknown,
-        catch: () => invalid("Linear returned a response that is not JSON."),
-      });
+      const parsed = yield* Effect.fromOption(decodeGraphqlBody(text)).pipe(
+        Effect.mapError(() => invalid("Linear returned a response that is not JSON.")),
+      );
       const errors = graphqlErrors(parsed);
       if (errors.some(isAuthenticationError))
         return yield* Effect.fail(
