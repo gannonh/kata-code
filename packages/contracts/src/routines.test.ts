@@ -6,6 +6,8 @@ import { ProjectId } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   RoutineDraft,
+  RoutineDraftConversationState,
+  RoutineDraftGeneratedFields,
   RoutineDraftGenerationInput,
   RoutineDraftGenerationResult,
   RoutineError,
@@ -275,6 +277,50 @@ describe("linear trigger union", () => {
       },
     });
     expect(created.trigger.kind).toBe("linear");
+  });
+
+  it("admits Linear triggers in generated fields and conversation state with event evidence", () => {
+    const decodeFields = Schema.decodeUnknownSync(RoutineDraftGeneratedFields);
+    const decodeState = Schema.decodeUnknownSync(RoutineDraftConversationState);
+    const linearTrigger = {
+      kind: "linear",
+      connectionId: "connection-1",
+      workspaceId: "workspace-uuid",
+      event: "status_changed",
+      stateId: "state-uuid",
+    };
+    const generated = decodeFields({
+      name: "Issue triage",
+      instruction: "Triage the issue.",
+      projectId: "project-1",
+      modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+      trigger: linearTrigger,
+    });
+    expect(generated.trigger.kind).toBe("linear");
+    const state = decodeState({
+      name: "",
+      instruction: "",
+      projectId: "project-1",
+      modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+      runtimeMode: "approval-required",
+      workspace: { kind: "shared", directory: "/tmp/project" },
+      trigger: linearTrigger,
+    });
+    expect(state.trigger.kind).toBe("linear");
+    expect(() =>
+      decodeFields({
+        name: "Issue triage",
+        instruction: "Triage the issue.",
+        projectId: "project-1",
+        modelSelection: { instanceId: "codex", model: "gpt-5.4" },
+        trigger: {
+          kind: "linear",
+          connectionId: "connection-1",
+          workspaceId: "workspace-uuid",
+          event: "status_changed",
+        },
+      }),
+    ).toThrow();
   });
 
   it("admits linear as a run source with an optional source link", () => {

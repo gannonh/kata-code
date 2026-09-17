@@ -174,7 +174,7 @@ export const RoutineDraftGeneratedFields = Schema.Struct({
     instanceId: Schema.String.check(Schema.isMaxLength(200)),
     model: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   }),
-  trigger: ScheduleTrigger,
+  trigger: Schema.Union([ScheduleTrigger, LinearEventTrigger]),
 });
 export type RoutineDraftGeneratedFields = typeof RoutineDraftGeneratedFields.Type;
 
@@ -203,7 +203,7 @@ export const RoutineDraftConversationState = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   workspace: RoutineWorkspace,
-  trigger: ScheduleTrigger,
+  trigger: RoutineTrigger,
 });
 export type RoutineDraftConversationState = typeof RoutineDraftConversationState.Type;
 
