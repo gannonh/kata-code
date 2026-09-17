@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, existsSync, statSync } from "node:fs";
-import { join } from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 const TARGETS = ["web", "electron", "native", "cli", "tui", "api", "sdk", "mixed"];
 const ALWAYS_VISUAL_TARGETS = ["web", "electron", "native", "tui", "mixed"];
@@ -17,11 +17,13 @@ function fail(message) {
   failures += 1;
 }
 function fileIsNonempty(path) {
-  return existsSync(path) && statSync(path).isFile() && statSync(path).size > 0;
+  return (
+    NodeFS.existsSync(path) && NodeFS.statSync(path).isFile() && NodeFS.statSync(path).size > 0
+  );
 }
 function fileHasImageSignature(path) {
   if (!fileIsNonempty(path)) return false;
-  const bytes = readFileSync(path);
+  const bytes = NodeFS.readFileSync(path);
   const png =
     bytes.length >= 8 &&
     bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
@@ -54,11 +56,11 @@ if (!evidenceDir) {
   process.exit(2);
 }
 
-const manifestPath = join(evidenceDir, "evidence.json");
-if (!existsSync(manifestPath)) fail(`missing ${manifestPath}`);
+const manifestPath = NodePath.join(evidenceDir, "evidence.json");
+if (!NodeFS.existsSync(manifestPath)) fail(`missing ${manifestPath}`);
 let manifest = null;
 try {
-  manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  manifest = JSON.parse(NodeFS.readFileSync(manifestPath, "utf8"));
 } catch (error) {
   fail(`invalid evidence.json: ${error.message}`);
 }
@@ -180,7 +182,7 @@ if (manifest) {
   }
 }
 
-const reportPath = join(evidenceDir, "evidence.md");
+const reportPath = NodePath.join(evidenceDir, "evidence.md");
 if (!fileIsNonempty(reportPath)) fail(`missing or empty ${reportPath}`);
 
 if (failures > 0) process.exit(1);

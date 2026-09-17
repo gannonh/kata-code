@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 function arg(name, fallback = "") {
   const index = process.argv.indexOf(`--${name}`);
@@ -23,18 +23,25 @@ if (!evidenceDir || !screenshotPath || !["starting", "key", "final"].includes(ch
 }
 
 function readManifest(dir) {
-  return JSON.parse(readFileSync(join(dir, "evidence.json"), "utf8"));
+  return JSON.parse(NodeFS.readFileSync(NodePath.join(dir, "evidence.json"), "utf8"));
 }
 function writeManifest(dir, manifest) {
-  writeFileSync(join(dir, "evidence.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  NodeFS.writeFileSync(
+    NodePath.join(dir, "evidence.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
 }
 function artifactPath(path) {
-  if (isAbsolute(path))
+  if (NodePath.isAbsolute(path))
     throw new Error(`Artifact path must be relative to the evidence directory: ${path}`);
-  const root = resolve(evidenceDir);
-  const candidate = resolve(root, path);
-  const fromRoot = relative(root, candidate);
-  if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+  const root = NodePath.resolve(evidenceDir);
+  const candidate = NodePath.resolve(root, path);
+  const fromRoot = NodePath.relative(root, candidate);
+  if (
+    fromRoot === ".." ||
+    fromRoot.startsWith(`..${NodePath.sep}`) ||
+    NodePath.isAbsolute(fromRoot)
+  ) {
     throw new Error(`Artifact path escapes the evidence directory: ${path}`);
   }
   return candidate;
@@ -84,8 +91,8 @@ const screenshot = await send("Page.captureScreenshot", {
   fromSurface: true,
 });
 const resolvedScreenshotPath = artifactPath(screenshotPath);
-mkdirSync(dirname(resolvedScreenshotPath), { recursive: true });
-writeFileSync(resolvedScreenshotPath, Buffer.from(screenshot.data, "base64"));
+NodeFS.mkdirSync(NodePath.dirname(resolvedScreenshotPath), { recursive: true });
+NodeFS.writeFileSync(resolvedScreenshotPath, Buffer.from(screenshot.data, "base64"));
 
 let resolvedTextPath = "";
 if (textPath) {
@@ -94,12 +101,12 @@ if (textPath) {
     returnByValue: true,
   });
   resolvedTextPath = artifactPath(textPath);
-  mkdirSync(dirname(resolvedTextPath), { recursive: true });
-  writeFileSync(resolvedTextPath, `${text.result?.value ?? ""}\n`);
+  NodeFS.mkdirSync(NodePath.dirname(resolvedTextPath), { recursive: true });
+  NodeFS.writeFileSync(resolvedTextPath, `${text.result?.value ?? ""}\n`);
 }
 ws.close();
 
-if (existsSync(join(evidenceDir, "evidence.json"))) {
+if (NodeFS.existsSync(NodePath.join(evidenceDir, "evidence.json"))) {
   const manifest = readManifest(evidenceDir);
   manifest.artifacts.push({
     type: "screenshot",

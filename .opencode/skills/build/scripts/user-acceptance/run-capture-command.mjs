@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { createWriteStream, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { spawn } from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeChildProcess from "node:child_process";
 
 const dashDash = process.argv.indexOf("--");
 const command = dashDash >= 0 ? process.argv.slice(dashDash + 1) : [];
@@ -24,11 +24,14 @@ function slug(input) {
   );
 }
 function readManifest(dir) {
-  const path = join(dir, "evidence.json");
-  return JSON.parse(readFileSync(path, "utf8"));
+  const path = NodePath.join(dir, "evidence.json");
+  return JSON.parse(NodeFS.readFileSync(path, "utf8"));
 }
 function writeManifest(dir, manifest) {
-  writeFileSync(join(dir, "evidence.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  NodeFS.writeFileSync(
+    NodePath.join(dir, "evidence.json"),
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
 }
 
 const evidenceDir = arg("evidence");
@@ -44,19 +47,23 @@ if (!evidenceDir || command.length === 0 || !["e2e", "contract", "supporting"].i
   process.exit(2);
 }
 
-const logPath = join(evidenceDir, "logs", `${slug(name)}.log`);
-const exitPath = join(evidenceDir, "logs", `${slug(name)}.exit`);
-mkdirSync(dirname(logPath), { recursive: true });
-if (!existsSync(join(evidenceDir, "evidence.json"))) {
-  console.error(`Missing manifest: ${join(evidenceDir, "evidence.json")}`);
+const logPath = NodePath.join(evidenceDir, "logs", `${slug(name)}.log`);
+const exitPath = NodePath.join(evidenceDir, "logs", `${slug(name)}.exit`);
+NodeFS.mkdirSync(NodePath.dirname(logPath), { recursive: true });
+if (!NodeFS.existsSync(NodePath.join(evidenceDir, "evidence.json"))) {
+  console.error(`Missing manifest: ${NodePath.join(evidenceDir, "evidence.json")}`);
   process.exit(2);
 }
 
-const log = createWriteStream(logPath, { flags: "w" });
+const log = NodeFS.createWriteStream(logPath, { flags: "w" });
 log.write(`$ ${command.map((part) => JSON.stringify(part)).join(" ")}\n`);
 log.write(`cwd: ${cwd}\nstarted_at: ${new Date().toISOString()}\n\n`);
 
-const child = spawn(command[0], command.slice(1), { cwd, shell: false, env: process.env });
+const child = NodeChildProcess.spawn(command[0], command.slice(1), {
+  cwd,
+  shell: false,
+  env: process.env,
+});
 let timedOut = false;
 let timer = null;
 if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
@@ -82,7 +89,7 @@ if (timer) clearTimeout(timer);
 const exitCode = timedOut ? 124 : exitCodeRaw;
 log.write(`\nexit_code: ${exitCode}\nfinished_at: ${new Date().toISOString()}\n`);
 log.end();
-writeFileSync(exitPath, `${exitCode}\n`);
+NodeFS.writeFileSync(exitPath, `${exitCode}\n`);
 
 const manifest = readManifest(evidenceDir);
 manifest.commands.push({

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 
 function arg(name, fallback = "") {
   const index = process.argv.indexOf(`--${name}`);
@@ -11,13 +11,13 @@ if (!evidenceDir) {
   console.error("Usage: write-report.mjs --evidence <dir>");
   process.exit(2);
 }
-const manifestPath = join(evidenceDir, "evidence.json");
-if (!existsSync(manifestPath)) {
+const manifestPath = NodePath.join(evidenceDir, "evidence.json");
+if (!NodeFS.existsSync(manifestPath)) {
   console.error(`Missing manifest: ${manifestPath}`);
   process.exit(2);
 }
-const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-const reportPath = join(evidenceDir, "evidence.md");
+const manifest = JSON.parse(NodeFS.readFileSync(manifestPath, "utf8"));
+const reportPath = NodePath.join(evidenceDir, "evidence.md");
 const requiredKind = manifest.mode === "technical-enablement" ? "contract" : "e2e";
 const requiredCommand = manifest.commands?.find(
   (command) => command.kind === requiredKind && command.exit_code === 0,
@@ -111,5 +111,5 @@ lines.push("");
 lines.push("Approval and merge permission follow Linear workflow states.");
 lines.push("Follow the owning skill for the next workflow step.");
 lines.push("");
-writeFileSync(reportPath, lines.join("\n"));
+NodeFS.writeFileSync(reportPath, lines.join("\n"));
 console.log(reportPath);

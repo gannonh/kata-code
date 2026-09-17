@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { execSync } from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeChildProcess from "node:child_process";
 
 function arg(name, fallback = "") {
   const index = process.argv.indexOf(`--${name}`);
@@ -45,12 +45,12 @@ const subdirs = [
   "payloads",
   "examples",
 ];
-mkdirSync(dir, { recursive: true });
-for (const subdir of subdirs) mkdirSync(join(dir, subdir), { recursive: true });
+NodeFS.mkdirSync(dir, { recursive: true });
+for (const subdir of subdirs) NodeFS.mkdirSync(NodePath.join(dir, subdir), { recursive: true });
 
 let gitCommit = "unknown";
 try {
-  gitCommit = execSync("git rev-parse --short HEAD", {
+  gitCommit = NodeChildProcess.execSync("git rev-parse --short HEAD", {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],
   }).trim();
@@ -58,7 +58,7 @@ try {
 
 let gitignored = false;
 try {
-  const ignore = readFileSync(".gitignore", "utf8");
+  const ignore = NodeFS.readFileSync(".gitignore", "utf8");
   gitignored =
     /^\/?uat-evidence\/?$/m.test(ignore) ||
     /^uat-evidence\//m.test(ignore) ||
@@ -80,9 +80,9 @@ const manifest = {
   notes: [],
 };
 
-const manifestPath = join(dir, "evidence.json");
-if (!existsSync(manifestPath)) {
-  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+const manifestPath = NodePath.join(dir, "evidence.json");
+if (!NodeFS.existsSync(manifestPath)) {
+  NodeFS.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 console.log(JSON.stringify({ dir, manifest: manifestPath, gitignored }, null, 2));
