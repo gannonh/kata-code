@@ -120,10 +120,11 @@ export interface RoutineConnectionsShape {
   readonly metadata: (input: {
     readonly repository?: string | undefined;
   }) => Effect.Effect<RoutineGitHubMetadata, RoutineError>;
-  readonly linearMetadata: (input: {
-    readonly environmentId: EnvironmentId;
-    readonly connectionId: RoutineConnectionId;
-  }) => Effect.Effect<RoutineLinearMetadata, RoutineError>;
+  readonly linearMetadata: (
+    input:
+      | { readonly environmentId: EnvironmentId; readonly connectionId: RoutineConnectionId }
+      | { readonly environmentId: EnvironmentId; readonly apiKey: string },
+  ) => Effect.Effect<RoutineLinearMetadata, RoutineError>;
 }
 
 export class RoutineConnections extends Context.Service<
@@ -620,6 +621,13 @@ const makeRoutineConnections = Effect.gen(function* () {
   const linearMetadata: RoutineConnectionsShape["linearMetadata"] = Effect.fn(
     "RoutineConnections.linearMetadata",
   )(function* (input) {
+    if ("apiKey" in input) {
+      // Setup preview: the credential is used for this read only and is never
+      // stored or returned.
+      return yield* linearMetadataClient
+        .read(input.apiKey.trim())
+        .pipe(Effect.mapError(linearMetadataFailure));
+    }
     const connection = yield* owned(input.environmentId, input.connectionId);
     if (connection.provider !== "linear")
       return yield* failure("validation", "This connection is not a Linear connection.");

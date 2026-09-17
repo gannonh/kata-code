@@ -1,11 +1,16 @@
 import {
   GITHUB_ROUTINE_EVENT_LABELS,
+  LINEAR_ROUTINE_EVENT_LABELS,
   ModelSelection,
   isProviderAvailable,
   isScheduleTrigger,
   RoutineId,
   RoutineRequestId,
+  SCHEDULE_TRIGGER_KINDS,
   type GitHubEventTrigger,
+  type GitHubRoutineConnection,
+  type LinearEventTrigger,
+  type LinearRoutineConnection,
   type Routine,
   type RoutineConnection,
   type RoutineDeliveryStatus,
@@ -135,7 +140,20 @@ export type GitHubTriggerDraft = {
   readonly issueLabelId?: GitHubEventTrigger["issueLabelId"];
 };
 export type RoutineEditorGitHubTrigger = GitHubTriggerDraft | GitHubEventTrigger;
-export type RoutineEditorTrigger = ScheduleTrigger | RoutineEditorGitHubTrigger;
+/** Editor-only state while Linear setup has not produced a real connection. */
+export type LinearTriggerDraft = {
+  readonly kind: "linear";
+  readonly event: LinearEventTrigger["event"];
+  readonly teamId?: LinearEventTrigger["teamId"];
+  readonly projectId?: LinearEventTrigger["projectId"];
+  readonly stateId?: string;
+  readonly labelId?: string;
+};
+export type RoutineEditorLinearTrigger = LinearTriggerDraft | LinearEventTrigger;
+export type RoutineEditorTrigger =
+  | ScheduleTrigger
+  | RoutineEditorGitHubTrigger
+  | RoutineEditorLinearTrigger;
 export type RoutineEditorDraft = Omit<RoutineDraft, "trigger"> & {
   readonly trigger: RoutineEditorTrigger;
 };
@@ -165,13 +183,19 @@ export function routineDraftRevisionAfterEdit(
  * The server only sees an untouched default editor. Once a generation or a
  * user edit initialized the draft, send the authoritative editor state,
  * including mid-edit blank name or instruction fields. Draft generation
- * produces schedules only, so a GitHub trigger is sent as no current draft.
+ * produces schedules and Linear triggers, so a GitHub trigger or an
+ * incomplete Linear draft is sent as no current draft.
  */
 export function routineDraftForGenerationInput(
   current: RoutineEditorDraft,
   initialized: boolean,
 ): RoutineDraftConversationState | null {
-  if (!initialized || !isRoutineEditorScheduleTrigger(current.trigger)) return null;
+  if (
+    !initialized ||
+    (!isRoutineEditorScheduleTrigger(current.trigger) && !isCompleteLinearTrigger(current.trigger))
+  ) {
+    return null;
+  }
   return {
     name: current.name,
     instruction: current.instruction,
@@ -282,12 +306,12 @@ export function keepDeletedRoutineInEditor(state: Routine["state"]): boolean {
   return state === "deleted";
 }
 
-export type RoutineTriggerKind = "schedule" | "github";
+export type RoutineTriggerKind = "schedule" | "github" | "linear";
 
 export function isRoutineEditorScheduleTrigger(
   trigger: RoutineEditorTrigger,
 ): trigger is ScheduleTrigger {
-  return trigger.kind !== "github";
+  return SCHEDULE_TRIGGER_KINDS.has(trigger.kind);
 }
 
 export function isCompleteGitHubTrigger(
@@ -296,12 +320,23 @@ export function isCompleteGitHubTrigger(
   return trigger.kind === "github" && "connectionId" in trigger && "repositoryId" in trigger;
 }
 
+export function isCompleteLinearTrigger(
+  trigger: RoutineEditorTrigger,
+): trigger is LinearEventTrigger {
+  return trigger.kind === "linear" && "connectionId" in trigger && "workspaceId" in trigger;
+}
+
 export function isRoutineEditorDraftComplete(draft: RoutineEditorDraft): draft is RoutineDraft {
-  return isRoutineEditorScheduleTrigger(draft.trigger) || isCompleteGitHubTrigger(draft.trigger);
+  return (
+    isRoutineEditorScheduleTrigger(draft.trigger) ||
+    isCompleteGitHubTrigger(draft.trigger) ||
+    isCompleteLinearTrigger(draft.trigger)
+  );
 }
 
 export function routineTriggerKind(trigger: RoutineEditorTrigger): RoutineTriggerKind {
-  return isRoutineEditorScheduleTrigger(trigger) ? "schedule" : "github";
+  if (isRoutineEditorScheduleTrigger(trigger)) return "schedule";
+  return trigger.kind === "linear" ? "linear" : "github";
 }
 
 /**
@@ -319,7 +354,31 @@ export function withApplicableTriggerFilters(
   ) as RoutineEditorGitHubTrigger;
 }
 
+/**
+ * A status transition carries the destination state; a label event carries the
+ * added label. Dropping the filter the event cannot use keeps a hidden value
+ * from silently blocking every delivery, and a key cleared to `undefined` is
+ * removed so it cannot come back from the previously saved value.
+ */
+export function withApplicableLinearTriggerFilters(
+  trigger: RoutineEditorLinearTrigger,
+): RoutineEditorLinearTrigger {
+  const omitted = new Set(
+    trigger.event === "status_changed"
+      ? ["labelId"]
+      : trigger.event === "label_added"
+        ? ["stateId"]
+        : ["stateId", "labelId"],
+  );
+  return Object.fromEntries(
+    Object.entries(trigger).filter(([key, value]) => !omitted.has(key) && value !== undefined),
+  ) as RoutineEditorLinearTrigger;
+}
+
 export function formatRoutineTrigger(trigger: RoutineTrigger): string {
+  if (trigger.kind === "linear") {
+    return `Linear · ${LINEAR_ROUTINE_EVENT_LABELS[trigger.event]}`;
+  }
   if (!isScheduleTrigger(trigger)) {
     const branch = trigger.branch ? ` on ${trigger.branch}` : "";
     return `GitHub · ${GITHUB_ROUTINE_EVENT_LABELS[trigger.event].split(" (")[0]}${branch}`;
@@ -335,7 +394,7 @@ export function formatRoutineTrigger(trigger: RoutineTrigger): string {
   return `${triggerText} · ${trigger.timezone}`;
 }
 
-export function defaultGitHubTrigger(connection: RoutineConnection): GitHubEventTrigger {
+export function defaultGitHubTrigger(connection: GitHubRoutineConnection): GitHubEventTrigger {
   return {
     kind: "github",
     connectionId: connection.id,
@@ -344,6 +403,24 @@ export function defaultGitHubTrigger(connection: RoutineConnection): GitHubEvent
     branch: connection.defaultBranch,
     includeDrafts: false,
   };
+}
+
+export function defaultLinearTrigger(connection: LinearRoutineConnection): LinearEventTrigger {
+  return {
+    kind: "linear",
+    connectionId: connection.id,
+    workspaceId: connection.workspaceId,
+    event: "issue_created",
+    ...(connection.teamIds.length === 1 ? { teamId: connection.teamIds[0]! } : {}),
+  };
+}
+
+export function defaultLinearTriggerDraft(): LinearTriggerDraft {
+  return { kind: "linear", event: "issue_created" };
+}
+
+export function linearTriggerConnectionId(trigger: RoutineEditorLinearTrigger): string | null {
+  return "connectionId" in trigger ? trigger.connectionId : null;
 }
 
 export function defaultGitHubTriggerDraft(): GitHubTriggerDraft {
@@ -365,9 +442,12 @@ export function selectableConnections(
 }
 
 export function gitHubHookSettingsUrl(connection: RoutineConnection): string | null {
-  return connection.hookId === null
-    ? null
-    : `${connection.repositoryUrl}/settings/hooks/${connection.hookId}`;
+  if (connection.provider !== "github" || connection.hookId === null) return null;
+  return `${connection.repositoryUrl}/settings/hooks/${connection.hookId}`;
+}
+
+export function linearWebhookSettingsUrl(): string {
+  return "https://linear.app/settings/api/webhooks";
 }
 
 export const ROUTINE_CONNECTION_STATUS_LABELS: Record<
@@ -380,6 +460,17 @@ export const ROUTINE_CONNECTION_STATUS_LABELS: Record<
   unavailable: "Unavailable",
 };
 
+export function routineConnectionStatusLabel(
+  connection: Pick<RoutineConnection, "provider" | "status">,
+): string {
+  if (connection.status === "pending") {
+    return connection.provider === "linear"
+      ? "Waiting for the first delivery"
+      : "Waiting for GitHub ping";
+  }
+  return ROUTINE_CONNECTION_STATUS_LABELS[connection.status];
+}
+
 export const ROUTINE_DELIVERY_STATUS_LABELS: Record<RoutineDeliveryStatus, string> = {
   accepted: "Accepted",
   ignored: "Ignored",
@@ -388,3 +479,8 @@ export const ROUTINE_DELIVERY_STATUS_LABELS: Record<RoutineDeliveryStatus, strin
 
 export const GITHUB_REDELIVERY_NOTE =
   "GitHub does not resend a delivery that failed on its own. Redeliver it from the repository's webhook settings.";
+
+export const LINEAR_RETRY_NOTE =
+  "Linear retries a failed delivery three times, after 1 minute, 1 hour, and 6 hours, then may disable the webhook. Re-enable it in the webhook's settings.";
+export const LINEAR_PROVIDER_REMOVAL_NOTE =
+  "Disconnect removes the stored signing secret and metadata credential here. Delete the webhook in Linear's workspace settings to stop provider deliveries.";

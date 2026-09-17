@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type {
+  GitHubRoutineConnection,
+  LinearRoutineConnection,
   Routine,
-  RoutineConnection,
   RoutineDraft,
   RoutineDraftGenerationResult,
   ServerProvider,
@@ -20,6 +21,8 @@ import {
   confirmDialogAccepted,
   defaultGitHubTriggerDraft,
   defaultGitHubTrigger,
+  defaultLinearTrigger,
+  defaultLinearTriggerDraft,
   DELETE_ROUTINE_MESSAGE,
   formatRoutineTrigger,
   gitHubHookSettingsUrl,
@@ -28,8 +31,12 @@ import {
   firstEnabledProviderModel,
   isRoutineDraftDirty,
   isCompleteGitHubTrigger,
+  isCompleteLinearTrigger,
+  isRoutineEditorDraftComplete,
+  isRoutineEditorScheduleTrigger,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
+  linearWebhookSettingsUrl,
   newRoutineDraftId,
   newRoutineRequestId,
   preferredWorktreeBaseBranch,
@@ -38,6 +45,7 @@ import {
   ROUTINE_EDITOR_FIELDS_CLASS,
   ROUTINE_PERMISSION_MODE_LABELS,
   ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS,
+  routineConnectionStatusLabel,
   routineDraftBaselineAfterAutomaticChange,
   applyRoutineDraftGenerationResponse,
   routineDraftChatHistoryAfterTurn,
@@ -46,6 +54,7 @@ import {
   routinesLibraryEmptyKind,
   routineTriggerKind,
   selectableConnections,
+  withApplicableLinearTriggerFilters,
   withApplicableTriggerFilters,
   worktreeBaseExists,
 } from "./RoutinesPage.logic";
@@ -101,6 +110,50 @@ function provider(input: {
     slashCommands: [],
     skills: [],
     ...(input.availability ? { availability: input.availability } : {}),
+  };
+}
+
+function connection(patch: Partial<GitHubRoutineConnection> = {}): GitHubRoutineConnection {
+  return {
+    id: RoutineConnectionId.make("connection-1"),
+    environmentId: "environment-1" as GitHubRoutineConnection["environmentId"],
+    provider: "github",
+    repositoryId: 42,
+    repositoryName: "acme/widgets",
+    repositoryUrl: "https://github.com/acme/widgets",
+    defaultBranch: "main",
+    hookId: 1001,
+    callbackUrl: "https://env.example/api/routines/webhooks/github/connection-1",
+    status: "verified",
+    lastDelivery: null,
+    acceptedCount: 0,
+    ignoredCount: 0,
+    rejectedCount: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...patch,
+  };
+}
+
+function linearConnection(patch: Partial<LinearRoutineConnection> = {}): LinearRoutineConnection {
+  return {
+    id: RoutineConnectionId.make("connection-1"),
+    environmentId: "environment-1" as LinearRoutineConnection["environmentId"],
+    provider: "linear",
+    workspaceId: "workspace-1",
+    workspaceName: "Acme",
+    teamIds: [],
+    allTeams: true,
+    metadataAccess: "ok",
+    callbackUrl: "https://env.example/api/routines/webhooks/linear/connection-1",
+    status: "verified",
+    lastDelivery: null,
+    acceptedCount: 0,
+    ignoredCount: 0,
+    rejectedCount: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...patch,
   };
 }
 
@@ -447,26 +500,6 @@ describe("routine delete in the library", () => {
 });
 
 describe("GitHub event triggers", () => {
-  const connection = (patch: Partial<RoutineConnection> = {}): RoutineConnection => ({
-    id: RoutineConnectionId.make("connection-1"),
-    environmentId: "environment-1" as RoutineConnection["environmentId"],
-    provider: "github",
-    repositoryId: 42,
-    repositoryName: "acme/widgets",
-    repositoryUrl: "https://github.com/acme/widgets",
-    defaultBranch: "main",
-    hookId: 1001,
-    callbackUrl: "https://env.example/api/routines/webhooks/github/connection-1",
-    status: "verified",
-    lastDelivery: null,
-    acceptedCount: 0,
-    ignoredCount: 0,
-    rejectedCount: 0,
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z",
-    ...patch,
-  });
-
   it("labels schedule and GitHub triggers for the library card", () => {
     expect(formatRoutineTrigger({ kind: "daily", time: "09:00", timezone: "UTC" })).toBe(
       "Daily at 09:00 · UTC",
@@ -551,6 +584,149 @@ describe("GitHub event triggers", () => {
       "https://github.com/acme/widgets/settings/hooks/1001",
     );
     expect(gitHubHookSettingsUrl(connection({ hookId: null }))).toBeNull();
+  });
+});
+
+describe("Linear event triggers", () => {
+  it("treats a Linear trigger as an event trigger, not a schedule", () => {
+    expect(isRoutineEditorScheduleTrigger({ kind: "linear", event: "issue_created" })).toBe(false);
+    expect(isRoutineEditorScheduleTrigger({ kind: "daily", time: "09:00", timezone: "UTC" })).toBe(
+      true,
+    );
+  });
+
+  it("keeps an unconnected Linear choice outside the saved trigger contract", () => {
+    expect(isCompleteLinearTrigger({ kind: "linear", event: "issue_created" })).toBe(false);
+    expect(
+      isCompleteLinearTrigger({
+        kind: "linear",
+        event: "issue_created",
+        connectionId: RoutineConnectionId.make("connection-1"),
+        workspaceId: "workspace-1",
+      }),
+    ).toBe(true);
+  });
+
+  it("treats a draft with a complete Linear trigger as saveable", () => {
+    expect(
+      isRoutineEditorDraftComplete(draft({ trigger: defaultLinearTrigger(linearConnection()) })),
+    ).toBe(true);
+    expect(isRoutineEditorDraftComplete({ ...draft(), trigger: defaultLinearTriggerDraft() })).toBe(
+      false,
+    );
+  });
+
+  it("links each provider's webhook settings only for its own connections", () => {
+    expect(linearWebhookSettingsUrl()).toBe("https://linear.app/settings/api/webhooks");
+    expect(gitHubHookSettingsUrl(linearConnection())).toBeNull();
+  });
+
+  it("labels a pending connection with the provider-specific wait", () => {
+    expect(routineConnectionStatusLabel({ provider: "github", status: "pending" })).toBe(
+      "Waiting for GitHub ping",
+    );
+    expect(routineConnectionStatusLabel({ provider: "linear", status: "pending" })).toBe(
+      "Waiting for the first delivery",
+    );
+    expect(routineConnectionStatusLabel({ provider: "linear", status: "verified" })).toBe(
+      "Verified",
+    );
+    expect(routineConnectionStatusLabel({ provider: "github", status: "disabled" })).toBe(
+      "Disabled",
+    );
+    expect(routineConnectionStatusLabel({ provider: "linear", status: "unavailable" })).toBe(
+      "Unavailable",
+    );
+  });
+
+  it("sends the editor state for a schedule or a complete Linear trigger only", () => {
+    const scheduled = draft({ name: "Daily brief" });
+    expect(routineDraftForGenerationInput(scheduled, true)).toEqual(scheduled);
+
+    const linear = draft({
+      name: "Linear brief",
+      trigger: defaultLinearTrigger(linearConnection()),
+    });
+    expect(routineDraftForGenerationInput(linear, true)).toEqual(linear);
+
+    expect(
+      routineDraftForGenerationInput(draft({ trigger: defaultGitHubTrigger(connection()) }), true),
+    ).toBeNull();
+    expect(
+      routineDraftForGenerationInput({ ...draft(), trigger: defaultLinearTriggerDraft() }, true),
+    ).toBeNull();
+  });
+
+  it("defaults a new Linear trigger to issue created on a single scoped team", () => {
+    expect(
+      defaultLinearTrigger(linearConnection({ teamIds: ["team-1"], allTeams: false })),
+    ).toEqual({
+      kind: "linear",
+      connectionId: "connection-1",
+      workspaceId: "workspace-1",
+      event: "issue_created",
+      teamId: "team-1",
+    });
+    const multipleTeams = defaultLinearTrigger(
+      linearConnection({ teamIds: ["team-1", "team-2"], allTeams: false }),
+    );
+    expect(multipleTeams).toEqual({
+      kind: "linear",
+      connectionId: "connection-1",
+      workspaceId: "workspace-1",
+      event: "issue_created",
+    });
+    expect("teamId" in multipleTeams).toBe(false);
+  });
+
+  it("drops Linear filters the selected event cannot use", () => {
+    expect(
+      withApplicableLinearTriggerFilters({
+        kind: "linear",
+        event: "status_changed",
+        stateId: "state-1",
+        labelId: "label-1",
+      }),
+    ).toEqual({ kind: "linear", event: "status_changed", stateId: "state-1" });
+    expect(
+      withApplicableLinearTriggerFilters({
+        kind: "linear",
+        event: "label_added",
+        stateId: "state-1",
+        labelId: "label-1",
+      }),
+    ).toEqual({ kind: "linear", event: "label_added", labelId: "label-1" });
+    expect(
+      withApplicableLinearTriggerFilters({
+        kind: "linear",
+        event: "issue_created",
+        teamId: undefined,
+        projectId: undefined,
+      }),
+    ).toEqual({ kind: "linear", event: "issue_created" });
+  });
+
+  it("labels each Linear event for the library card", () => {
+    const scope = {
+      kind: "linear" as const,
+      connectionId: RoutineConnectionId.make("connection-1"),
+      workspaceId: "workspace-1",
+    };
+    expect(formatRoutineTrigger({ ...scope, event: "issue_created" })).toBe(
+      "Linear · Issue created",
+    );
+    expect(formatRoutineTrigger({ ...scope, event: "status_changed", stateId: "state-1" })).toBe(
+      "Linear · Status changed",
+    );
+    expect(formatRoutineTrigger({ ...scope, event: "label_added", labelId: "label-1" })).toBe(
+      "Linear · Label added",
+    );
+  });
+
+  it("names schedule, GitHub, and Linear trigger kinds for the editor", () => {
+    expect(routineTriggerKind({ kind: "daily", time: "09:00", timezone: "UTC" })).toBe("schedule");
+    expect(routineTriggerKind(defaultGitHubTriggerDraft())).toBe("github");
+    expect(routineTriggerKind({ kind: "linear", event: "issue_created" })).toBe("linear");
   });
 });
 

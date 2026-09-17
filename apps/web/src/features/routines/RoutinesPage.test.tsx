@@ -52,11 +52,16 @@ const testState = vi.hoisted(() => ({
       labels: Array<{ id: number; name: string }>;
     },
   },
+  linearMetadataData: null as null | Record<string, unknown>,
+  linearMetadataError: null as string | null,
+  linearPreviewData: null as null | Record<string, unknown>,
+  linearPreviewError: null as string | null,
   queries: {
     list: Symbol("list"),
     connections: Symbol("connections"),
     preview: Symbol("preview"),
     metadata: Symbol("metadata"),
+    linearMetadata: Symbol("linear-metadata"),
   },
 }));
 
@@ -87,11 +92,16 @@ vi.mock("../../state/routines", () => ({
     connections: () => testState.queries.connections,
     preview: () => testState.queries.preview,
     gitHubMetadata: () => testState.queries.metadata,
+    linearMetadata: (request: { input: Record<string, unknown> }) => ({
+      tag: testState.queries.linearMetadata,
+      input: request.input,
+    }),
     history: () => Symbol("history"),
     save: Symbol("save"),
     change: Symbol("change"),
     test: Symbol("test"),
     createConnection: Symbol("create-connection"),
+    attachConnectionSecret: Symbol("attach-secret"),
     verifyConnection: Symbol("verify-connection"),
     disableConnection: Symbol("disable-connection"),
     rotateConnectionSecret: Symbol("rotate-secret"),
@@ -125,6 +135,17 @@ vi.mock("../../state/query", () => ({
       return {
         data: testState.metadataData,
         error: null,
+        isPending: false,
+        isSuccess: true,
+        refresh: vi.fn(),
+      };
+    }
+    if (listQuery?.tag === testState.queries.linearMetadata) {
+      const input = (listQuery as { input?: Record<string, unknown> }).input;
+      const preview = input !== undefined && "apiKey" in input;
+      return {
+        data: preview ? testState.linearPreviewData : testState.linearMetadataData,
+        error: preview ? testState.linearPreviewError : testState.linearMetadataError,
         isPending: false,
         isSuccess: true,
         refresh: vi.fn(),
@@ -186,6 +207,48 @@ function connectionFor(id: string): Record<string, unknown> {
     rejectedCount: 0,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+function linearConnectionFor(
+  id: string,
+  patch: Partial<Record<string, unknown>> = {},
+): Record<string, unknown> {
+  return {
+    id,
+    environmentId: "environment-1",
+    provider: "linear",
+    workspaceId: "workspace-1",
+    workspaceName: "Acme",
+    teamIds: [] as string[],
+    allTeams: true,
+    metadataAccess: "ok",
+    callbackUrl: `https://env.example/hooks/${id}`,
+    status: "pending",
+    lastDelivery: null,
+    acceptedCount: 0,
+    ignoredCount: 0,
+    rejectedCount: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...patch,
+  };
+}
+
+function linearRoutineFor(id: string, name = "Linear brief"): Record<string, unknown> {
+  const routine = savedRoutineFor(id);
+  return {
+    ...routine,
+    configuration: {
+      ...(routine.configuration as Record<string, unknown>),
+      name,
+      trigger: {
+        kind: "linear",
+        connectionId: "connection-linear",
+        workspaceId: "workspace-1",
+        event: "issue_created",
+      },
+    },
   };
 }
 
@@ -540,6 +603,279 @@ describe("RoutinesPage GitHub trigger setup", () => {
       event: "issue_opened",
       includeDrafts: false,
     });
+  });
+});
+
+describe("RoutinesPage Linear trigger setup", () => {
+  let renderer: ReactTestRenderer | undefined;
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    testState.command.mockReset();
+    testState.listData.length = 0;
+    testState.connectionsData.length = 0;
+    testState.linearMetadataData = null;
+    testState.linearMetadataError = null;
+    testState.linearPreviewData = null;
+    testState.linearPreviewError = null;
+  });
+
+  afterEach(async () => {
+    await act(async () => renderer?.unmount());
+    vi.unstubAllGlobals();
+  });
+
+  it("switches the editor to Linear event fields without a connection", async () => {
+    renderer = await openNewRoutineEditor();
+
+    await act(async () => {
+      buttonWithText(renderer!, "Linear event").props.onClick?.();
+    });
+
+    expect(renderer!.root.findByProps({ "data-testid": "routine-linear-trigger" })).toBeDefined();
+    expect(buttonWithText(renderer!, "Connect a workspace")).toBeDefined();
+    expect(renderer!.root.findByProps({ id: "routine-linear-connection" }).props.value).toBe("");
+    expect(buttonWithText(renderer!, "Save").props.disabled).toBe(true);
+  });
+
+  it("previews a workspace and creates a scoped connection from an API key", async () => {
+    testState.linearPreviewData = {
+      workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
+      teams: [
+        { id: "team-1", name: "Engineering", key: "ENG" },
+        { id: "team-2", name: "Design", key: "DES" },
+      ],
+      projects: [],
+      states: [],
+      labels: [],
+    };
+    testState.command.mockImplementation(async (value: unknown) => {
+      const input = (value as { input?: Record<string, unknown> }).input ?? {};
+      if (input.provider === "linear") {
+        const connection = linearConnectionFor(input.id as string, {
+          teamIds: (input.teamIds as string[]) ?? [],
+          allTeams: input.allTeams === true,
+        });
+        testState.connectionsData.push(connection);
+        return { _tag: "Success", value: connection };
+      }
+      return {
+        _tag: "Success",
+        value: { ...linearConnectionFor("connection-linear"), status: "verified" },
+      };
+    });
+    renderer = await openNewRoutineEditor();
+
+    await act(async () => {
+      buttonWithText(renderer!, "Linear event").props.onClick?.();
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-api-key" })
+        .props.onValueChange("lin_api_key");
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Check workspace").props.onClick?.();
+    });
+
+    expect(nodeText(renderer!.root)).toContain("Acme");
+
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-all-teams" })
+        .props.onChange({ target: { checked: false } });
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-team-team-1" })
+        .props.onChange({ target: { checked: true } });
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Create connection").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const createCall = testState.command.mock.calls.find(
+      ([value]) => (value as { input?: { provider?: string } }).input?.provider === "linear",
+    );
+    expect(createCall?.[0]).toMatchObject({
+      environmentId: "environment-1",
+      input: {
+        provider: "linear",
+        id: expect.stringMatching(/^connection-/),
+        apiKey: "lin_api_key",
+        allTeams: false,
+        teamIds: ["team-1"],
+      },
+    });
+    const connectionId = (createCall?.[0] as { input: { id: string } }).input.id;
+    expect(nodeText(renderer!.root)).toContain(`https://env.example/hooks/${connectionId}`);
+    expect(nodeText(renderer!.root)).toContain("Open Linear webhook settings");
+    expect(renderer!.root.findByProps({ id: "routine-linear-connection" }).props.value).toBe(
+      connectionId,
+    );
+
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-signing-secret" })
+        .props.onValueChange("linear_secret");
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Attach secret").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(nodeText(renderer!.root)).toContain("Signing secret attached.");
+
+    await act(async () => {
+      buttonWithText(renderer!, "Verify").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(nodeText(renderer!.root)).toContain("First delivery received. The connection is ready.");
+
+    await act(async () => {
+      buttonWithText(renderer!, "Disable").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(nodeText(renderer!.root)).toContain(
+      "Delete the webhook in Linear's workspace settings to stop provider deliveries.",
+    );
+  });
+
+  it("shows the workspace preview error for a rejected API key", async () => {
+    testState.linearPreviewError =
+      "Linear rejected the metadata credential. Check the API key and its access.";
+    renderer = await openNewRoutineEditor();
+
+    await act(async () => {
+      buttonWithText(renderer!, "Linear event").props.onClick?.();
+    });
+    await act(async () => {
+      renderer!.root.findByProps({ id: "routine-linear-api-key" }).props.onValueChange("bad_key");
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Check workspace").props.onClick?.();
+    });
+
+    expect(nodeText(renderer!.root)).toContain("Linear rejected the metadata credential.");
+  });
+
+  it("renders Linear filters from connection metadata and requires the event filter", async () => {
+    testState.listData.push(linearRoutineFor("routine-linear"));
+    testState.connectionsData.push(
+      linearConnectionFor("connection-linear", {
+        teamIds: ["team-1"],
+        allTeams: false,
+        status: "verified",
+      }),
+    );
+    testState.linearMetadataData = {
+      workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
+      teams: [
+        { id: "team-1", name: "Engineering", key: "ENG" },
+        { id: "team-2", name: "Design", key: "DES" },
+      ],
+      projects: [
+        { id: "project-eng", name: "Engineering roadmap", teamIds: ["team-1"] },
+        { id: "project-design", name: "Design system", teamIds: ["team-2"] },
+      ],
+      states: [
+        { id: "state-1", name: "In Progress", teamId: "team-1", type: "started" },
+        { id: "state-2", name: "Done", teamId: "team-2", type: "completed" },
+      ],
+      labels: [
+        { id: "label-shared", name: "Bug", teamId: null },
+        { id: "label-eng", name: "Backend", teamId: "team-1" },
+        { id: "label-design", name: "Figma", teamId: "team-2" },
+      ],
+    };
+    renderer = await openRoutineEditor("Linear brief");
+
+    expect(nodeText(renderer.root.findByProps({ id: "routine-linear-team" }))).toContain(
+      "Engineering",
+    );
+    expect(nodeText(renderer.root.findByProps({ id: "routine-linear-team" }))).not.toContain(
+      "Design",
+    );
+    expect(nodeText(renderer.root.findByProps({ id: "routine-linear-project" }))).toContain(
+      "Engineering roadmap",
+    );
+    expect(nodeText(renderer.root.findByProps({ id: "routine-linear-project" }))).toContain(
+      "Design system",
+    );
+
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-event" })
+        .props.onChange({ target: { value: "status_changed" } });
+    });
+
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
+    const stateSelect = renderer.root.findByProps({ id: "routine-linear-state" });
+    expect(nodeText(stateSelect)).toContain("In Progress");
+    expect(nodeText(stateSelect)).toContain("Done");
+    expect(nodeText(renderer.root)).toContain(
+      "Choose the status transition that should start the routine.",
+    );
+
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-state" })
+        .props.onChange({ target: { value: "state-2" } });
+    });
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(false);
+
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-event" })
+        .props.onChange({ target: { value: "label_added" } });
+    });
+    const labelSelect = renderer.root.findByProps({ id: "routine-linear-label" });
+    expect(nodeText(labelSelect)).toContain("Bug");
+    expect(nodeText(labelSelect)).toContain("Backend");
+    expect(nodeText(labelSelect)).toContain("Figma");
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
+
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-label" })
+        .props.onChange({ target: { value: "label-eng" } });
+    });
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(false);
+  });
+
+  it("replaces the Linear pickers with the metadata error when access is revoked", async () => {
+    testState.listData.push(linearRoutineFor("routine-linear-revoked"));
+    testState.connectionsData.push(
+      linearConnectionFor("connection-linear", {
+        status: "verified",
+        metadataAccess: "revoked",
+      }),
+    );
+    testState.linearMetadataError =
+      "Linear metadata access was revoked. Add a new API key for this workspace.";
+    renderer = await openRoutineEditor("Linear brief");
+
+    expect(nodeText(renderer.root)).toContain("Metadata access revoked");
+    expect(nodeText(renderer.root)).toContain(
+      "Linear metadata access was revoked. Add a new API key for this workspace.",
+    );
+    expect(renderer.root.findAllByProps({ id: "routine-linear-event" })).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ id: "routine-linear-team" })).toHaveLength(0);
+  });
+
+  it("labels a Linear routine on the library card", async () => {
+    testState.listData.push(linearRoutineFor("routine-linear"));
+    renderer = await renderRoutinesPage();
+
+    expect(nodeText(renderer.root)).toContain("Linear · Issue created");
   });
 });
 

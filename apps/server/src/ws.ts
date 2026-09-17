@@ -1907,10 +1907,7 @@ const makeWsRpcLayer = (
             withRoutineConnections((connections) =>
               serverEnvironment.getEnvironmentId.pipe(
                 Effect.flatMap((environmentId) =>
-                  connections.linearMetadata({
-                    environmentId,
-                    connectionId: input.connectionId,
-                  }),
+                  connections.linearMetadata({ environmentId, ...input }),
                 ),
               ),
             ),

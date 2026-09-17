@@ -525,6 +525,20 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
     }),
   );
 
+  it.effect("previews workspace metadata from an API key without storing anything", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const store = yield* RoutineStore;
+      const metadata = yield* connections.linearMetadata({
+        environmentId,
+        apiKey: "lin_api_preview",
+      });
+      assert.equal(metadata.workspace.name, "Acme");
+      assert.equal(metadata.teams[0]?.id, "team-1");
+      assert.isNull(yield* store.findConnection(RoutineConnectionId.make("lin_api_preview")));
+    }),
+  );
+
   it.effect("names revoked metadata access and clears it after the next successful read", () =>
     Effect.gen(function* () {
       const connections = yield* RoutineConnections;

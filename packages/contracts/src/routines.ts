@@ -425,7 +425,15 @@ export const RoutineGitHubMetadata = Schema.Struct({
   ),
 });
 export type RoutineGitHubMetadata = typeof RoutineGitHubMetadata.Type;
-export const RoutineLinearMetadataInput = Schema.Struct({ connectionId: RoutineConnectionId });
+/**
+ * Pickers read metadata through a stored connection. Setup may preview a
+ * workspace with the API key before the connection exists; the key is used for
+ * that read only and is never stored by this call.
+ */
+export const RoutineLinearMetadataInput = Schema.Union([
+  Schema.Struct({ connectionId: RoutineConnectionId }),
+  Schema.Struct({ apiKey: TrimmedNonEmptyString.check(Schema.isMaxLength(500)) }),
+]);
 /** Workspace, team, project, workflow-state, and label metadata for Linear pickers. */
 export const RoutineLinearMetadata = Schema.Struct({
   workspace: Schema.Struct({
