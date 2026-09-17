@@ -45,23 +45,29 @@ Fix Critical issues immediately. Fix Important issues before continuing unless t
 
 ```markdown
 ### Strengths
+
 - <Specific evidence-backed strengths, or None>
 
 ### Issues
 
 #### Critical
+
 - File:line: <issue>. Why it matters: <reason>. Suggested fix: <fix>.
 
 #### Important
+
 - File:line: <issue>. Why it matters: <reason>. Suggested fix: <fix>.
 
 #### Minor
+
 - File:line: <issue>. Why it matters: <reason>. Suggested fix: <fix>.
 
 ### Recommendations
+
 - <Process, testing, or follow-up recommendations>
 
 ### Assessment
+
 Ready to continue: Yes | No | With fixes
 Reasoning: <1-2 sentence technical assessment>
 ```

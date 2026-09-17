@@ -129,6 +129,7 @@ For CLI, API, and SDK targets, include copy-pasteable reproduction steps:
 
 ```markdown
 Manual Run Instructions:
+
 1. Build the project: `<command>`.
    Expected: build exits 0.
 2. Run: `<command>`.
