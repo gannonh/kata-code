@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 
 const TARGETS = ["web", "electron", "native", "cli", "tui", "api", "sdk", "mixed"];
 const ALWAYS_VISUAL_TARGETS = ["web", "electron", "native", "tui", "mixed"];
-const COMMAND_KINDS = ["e2e", "contract", "supporting"];
+const COMMAND_KINDS = new Set(["e2e", "contract", "supporting"]);
 const SLICE_RESULTS = ["Pass", "Fail", "Blocked", "Not tested"];
 const CHECKPOINTS = ["starting", "key", "final"];
 
@@ -100,7 +100,7 @@ if (manifest) {
 
   const commands = manifest.commands ?? [];
   for (const command of commands) {
-    if (!COMMAND_KINDS.includes(command.kind)) fail(`invalid command kind: ${command.kind}`);
+    if (!COMMAND_KINDS.has(command.kind)) fail(`invalid command kind: ${command.kind}`);
     if (!command.name) fail("command missing name");
     if (!Array.isArray(command.argv) || command.argv.length === 0)
       fail(`command ${command.name ?? "<unnamed>"} missing argv`);
