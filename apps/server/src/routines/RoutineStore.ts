@@ -39,6 +39,11 @@ import {
   triggerMatchesEvent,
   type GitHubRoutineEventSummary,
 } from "./GitHubRoutineEvents.ts";
+import {
+  formatLinearEventContext,
+  linearTriggerMatchesEvent,
+  type LinearRoutineEventSummary,
+} from "./LinearRoutineEvents.ts";
 
 const decodeRoutine = Schema.decodeUnknownSync(Schema.fromJsonString(Routine));
 const decodeRun = Schema.decodeUnknownSync(Schema.fromJsonString(RoutineRun));
@@ -52,19 +57,22 @@ const DELIVERY_DIGEST_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** Rejected deliveries arrive before signature verification, so bound what is stored. */
 export const MAX_DELIVERY_HEADER_LENGTH = 128;
 const boundedDeliveryHeader = (value: string) => value.slice(0, MAX_DELIVERY_HEADER_LENGTH);
+export type RoutineEventSummary = GitHubRoutineEventSummary | LinearRoutineEventSummary;
 export interface RoutineEventAdmissionInput {
   readonly connectionId: RoutineConnectionId;
   readonly deliveryId: string;
   /** Hex digest of the raw signed body. */
   readonly digest: string;
   readonly eventName: string;
-  /** Repository id declared by the payload; checked against the connection. */
-  readonly repositoryId: number | null;
+  /** Provider resource id declared by the payload; checked against the connection. */
+  readonly providerResourceId: string | number | null;
   /** Null when the event or action is not one routines can run on. */
-  readonly summary: GitHubRoutineEventSummary | null;
+  readonly summary: RoutineEventSummary | null;
+  /** Named diagnostic for a summary-less delivery, when the provider supplies one. */
+  readonly ignoredDetail?: string;
   readonly now: number;
 }
-export type RoutineEventRejectionReason = "disabled" | "wrong-repository";
+export type RoutineEventRejectionReason = "disabled" | "wrong-resource";
 export interface RoutineEventRecorded {
   readonly status: "accepted" | "ignored" | "duplicate";
   readonly runs: ReadonlyArray<RoutineRun>;
@@ -135,7 +143,9 @@ export const makeRoutineStore = Effect.gen(function* () {
     VALUES (${routine.id}, ${routine.environmentId}, ${routine.revision}, ${routine.state}, ${routine.nextDueAt}, ${triggerKind(routine)}, ${encodeRoutine(routine)})
     ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, state=excluded.state, next_due_at=excluded.next_due_at, trigger_kind=excluded.trigger_kind, record=excluded.record`;
   const triggerKind = (routine: Routine) =>
-    isScheduleTrigger(routine.configuration.trigger) ? "schedule" : "github";
+    isScheduleTrigger(routine.configuration.trigger)
+      ? "schedule"
+      : routine.configuration.trigger.kind;
   const recordChange = (
     environmentId: EnvironmentId,
     kind: RoutineSubscriptionEvent["kind"] = "changed",
@@ -169,7 +179,7 @@ export const makeRoutineStore = Effect.gen(function* () {
   ) => sql`INSERT INTO routine_connections (id, environment_id, status, record)
     VALUES (${connection.id}, ${connection.environmentId}, ${connection.status}, ${encodeConnection(connection)})
     ON CONFLICT(id) DO UPDATE SET status=excluded.status, record=excluded.record`;
-  /** A GitHub trigger must name a live connection of this environment for the same repository. */
+  /** An event trigger must name a live connection of this environment for the same resource. */
   const checkTrigger = (environmentId: EnvironmentId, configuration: Routine["configuration"]) =>
     Effect.gen(function* () {
       const trigger = configuration.trigger;
@@ -178,15 +188,43 @@ export const makeRoutineStore = Effect.gen(function* () {
         record: string;
       }>`SELECT record FROM routine_connections WHERE id = ${trigger.connectionId}`;
       const connection = rows[0] ? decodeConnection(rows[0].record) : undefined;
-      if (!connection || connection.environmentId !== environmentId)
-        return yield* failure("validation", "Connect the GitHub repository before saving.");
+      if (trigger.kind === "github") {
+        if (
+          !connection ||
+          connection.environmentId !== environmentId ||
+          connection.provider !== "github"
+        )
+          return yield* failure("validation", "Connect the GitHub repository before saving.");
+        if (connection.status === "disabled")
+          return yield* failure("validation", "This GitHub connection is disabled.");
+        if (connection.repositoryId !== trigger.repositoryId)
+          return yield* failure(
+            "validation",
+            "The selected repository does not match the connection.",
+          );
+        return;
+      }
+      if (
+        !connection ||
+        connection.environmentId !== environmentId ||
+        connection.provider !== "linear"
+      )
+        return yield* failure("validation", "Connect the Linear workspace before saving.");
       if (connection.status === "disabled")
-        return yield* failure("validation", "This GitHub connection is disabled.");
-      if (connection.repositoryId !== trigger.repositoryId)
+        return yield* failure("validation", "This Linear connection is disabled.");
+      if (connection.workspaceId !== trigger.workspaceId)
         return yield* failure(
           "validation",
-          "The selected repository does not match the connection.",
+          "The selected workspace does not match the connection.",
         );
+      // A team-scoped webhook cannot silently expand: a saved team filter must
+      // stay inside the teams this connection was authorized for.
+      if (
+        trigger.teamId !== undefined &&
+        connection.teamIds.length > 0 &&
+        !connection.teamIds.includes(trigger.teamId)
+      )
+        return yield* failure("validation", "Choose a team inside this connection's scope.");
     });
   const checkRevision = (routine: Routine, revision: number) =>
     routine.revision === revision
@@ -565,24 +603,41 @@ export const makeRoutineStore = Effect.gen(function* () {
         } | null = null;
         let detail: string | null = null;
         const ping = input.eventName === "ping";
+        const wrongResource =
+          connection.provider === "github"
+            ? input.providerResourceId !== connection.repositoryId
+            : input.providerResourceId !== connection.workspaceId;
+        const outsideTeamScope =
+          input.summary?.provider === "linear" &&
+          connection.provider === "linear" &&
+          connection.teamIds.length > 0 &&
+          (input.summary.teamId === null || !connection.teamIds.includes(input.summary.teamId));
         if (connection.status === "disabled") {
           rejection = { reason: "disabled", detail: "Connection is disabled." };
-        } else if (input.repositoryId !== connection.repositoryId) {
+        } else if (wrongResource) {
           rejection = {
-            reason: "wrong-repository",
-            detail: "Delivery names a different repository.",
+            reason: "wrong-resource",
+            detail:
+              connection.provider === "github"
+                ? "Delivery names a different repository."
+                : "Delivery names a different workspace.",
           };
         } else if (ping) {
           detail = "GitHub ping received.";
+        } else if (outsideTeamScope) {
+          detail = "Delivery is outside this connection's team scope.";
         } else if (input.summary === null) {
-          detail = `Unsupported event ${input.eventName}.`;
+          detail = input.ignoredDetail ?? `Unsupported event ${input.eventName}.`;
         } else {
           const summary = input.summary;
-          const context = formatEventContext(summary);
+          const context =
+            summary.provider === "github"
+              ? formatEventContext(summary)
+              : formatLinearEventContext(summary);
           const candidates = yield* sql<{
             record: string;
           }>`SELECT record FROM routines WHERE environment_id=${connection.environmentId}
-            AND state='enabled' AND trigger_kind='github' ORDER BY id`;
+            AND state='enabled' AND trigger_kind=${summary.provider} ORDER BY id`;
           for (const row of candidates) {
             const routine = withOwningEnvironment(
               connection.environmentId,
@@ -590,11 +645,15 @@ export const makeRoutineStore = Effect.gen(function* () {
             );
             const trigger = routine.configuration.trigger;
             if (isScheduleTrigger(trigger) || trigger.connectionId !== connection.id) continue;
-            if (!triggerMatchesEvent(trigger, summary)) continue;
+            const matched =
+              summary.provider === "github"
+                ? trigger.kind === "github" && triggerMatchesEvent(trigger, summary)
+                : trigger.kind === "linear" && linearTriggerMatchesEvent(trigger, summary);
+            if (!matched) continue;
             runs.push(
               yield* insertRun(routine, {
-                occurrenceKey: `github:${input.deliveryId}`,
-                source: "github",
+                occurrenceKey: `${summary.provider}:${input.deliveryId}`,
+                source: summary.provider,
                 now: input.now,
                 event: { sourceUrl: summary.url || undefined, eventContext: context },
               }),
@@ -613,9 +672,14 @@ export const makeRoutineStore = Effect.gen(function* () {
         };
         yield* sql`INSERT INTO routine_deliveries (connection_id, delivery_id, digest, status, run_id, received_at, record)
           VALUES (${connection.id}, ${delivery.deliveryId}, ${input.digest}, ${status}, ${delivery.runId}, ${input.now}, ${encodeDelivery(delivery)})`;
+        // Linear has no ping event: a valid delivery of any outcome confirms the
+        // webhook works. GitHub keeps its explicit ping handshake.
+        const verified =
+          connection.status === "pending" &&
+          (connection.provider === "github" ? ping && rejection === null : status !== "rejected");
         yield* writeConnection({
           ...connection,
-          status: ping && !rejection ? "verified" : connection.status,
+          status: verified ? "verified" : connection.status,
           acceptedCount: connection.acceptedCount + (status === "accepted" ? 1 : 0),
           ignoredCount: connection.ignoredCount + (status === "ignored" ? 1 : 0),
           rejectedCount: connection.rejectedCount + (rejection ? 1 : 0),

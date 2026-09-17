@@ -13,6 +13,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
 import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -22,10 +23,13 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { RoutineScheduler } from "./RoutineScheduler.ts";
 import { RoutineStore, RoutineStoreLive } from "./RoutineStore.ts";
+import { linearWebhookSignature } from "./LinearRoutineEvents.ts";
 import {
   ROUTINE_WEBHOOK_MAX_BODY_BYTES,
   isRoutineWebhookPath,
+  linearWebhookRouteLayer,
   routineConnectionSecretName,
+  routineLinearWebhookCallbackPath,
   routineWebhookCallbackPath,
   routineWebhookRouteLayer,
   signGitHubWebhookBody,
@@ -84,13 +88,99 @@ const prOpened = (number: number, repositoryId = 42) =>
     },
   });
 
+const linearConnectionId = RoutineConnectionId.make("connection-linear-webhook");
+const linearSecret = new TextEncoder().encode("linear-webhook-secret");
+const linearConnection: RoutineConnection = {
+  id: linearConnectionId,
+  environmentId,
+  provider: "linear",
+  workspaceId: "workspace-1",
+  workspaceName: "Acme",
+  teamIds: ["team-1"],
+  allTeams: false,
+  metadataAccess: "ok",
+  callbackUrl: `https://env.example${routineLinearWebhookCallbackPath(linearConnectionId)}`,
+  status: "pending",
+  lastDelivery: null,
+  acceptedCount: 0,
+  ignoredCount: 0,
+  rejectedCount: 0,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+const LINEAR_TEST_TIME = 1_800_000_000_000;
+const linearConfiguration = {
+  ...configuration,
+  name: "Linear triage",
+  instruction: "Triage the Linear issue.",
+  trigger: {
+    kind: "linear" as const,
+    connectionId: linearConnectionId,
+    workspaceId: "workspace-1",
+    event: "issue_created" as const,
+    teamId: "team-1",
+  },
+};
+const linearIssue = (input: {
+  readonly deliveryId?: string;
+  readonly event?: string;
+  readonly signature?: string | null;
+  readonly timestamp?: string | null;
+  readonly bodyTimestamp?: number;
+  readonly organizationId?: string;
+  readonly data?: Record<string, unknown>;
+  readonly path?: string;
+}) =>
+  Effect.gen(function* () {
+    const body = encodeJson({
+      action: "create",
+      actor: { id: "user-1", type: "user", name: "Alice" },
+      data: {
+        id: "issue-1",
+        identifier: "KAT-101",
+        title: "Ship the Linear slice",
+        url: "https://linear.app/acme/issue/KAT-101",
+        teamId: "team-1",
+        projectId: "project-1",
+        stateId: "state-todo",
+        labelIds: [],
+        ...input.data,
+      },
+      organizationId: input.organizationId ?? "workspace-1",
+      type: "Issue",
+      webhookId: "webhook-1",
+      webhookTimestamp: input.bodyTimestamp ?? LINEAR_TEST_TIME,
+    });
+    const bytes = new TextEncoder().encode(body);
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      "linear-delivery": input.deliveryId ?? "linear-delivery-1",
+      "linear-event": input.event ?? "Issue",
+    };
+    if (input.signature !== null)
+      headers["linear-signature"] = input.signature ?? linearWebhookSignature(linearSecret, bytes);
+    if (input.timestamp !== null)
+      headers["linear-timestamp"] =
+        input.timestamp ?? String(input.bodyTimestamp ?? LINEAR_TEST_TIME);
+    const response = yield* HttpClient.execute(
+      HttpClientRequest.post(
+        input.path ?? routineLinearWebhookCallbackPath(linearConnectionId),
+      ).pipe(
+        HttpClientRequest.setHeaders(headers),
+        HttpClientRequest.bodyUint8Array(bytes, "application/json"),
+      ),
+    );
+    const json = (yield* response.json) as { ok: boolean; status?: string; runIds?: string[] };
+    return { status: response.status, json };
+  });
+
 const storeLayer = RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory));
 const wakeCount = Ref.makeUnsafe(0);
 const schedulerLayer = Layer.mock(RoutineScheduler)({
   owner: "routine-webhook-test",
   wake: Ref.update(wakeCount, (count) => count + 1),
 });
-const appLayer = HttpRouter.serve(routineWebhookRouteLayer, {
+const appLayer = HttpRouter.serve(Layer.merge(routineWebhookRouteLayer, linearWebhookRouteLayer), {
   disableListenLog: true,
   disableLogger: true,
 }).pipe(
@@ -316,6 +406,149 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
         assert.isTrue(isRoutineWebhookPath(routineWebhookCallbackPath("abc")));
         assert.isFalse(isRoutineWebhookPath("/api/routines"));
         assert.isFalse(isRoutineWebhookPath("/ws"));
+      }),
+    );
+  },
+);
+
+it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
+  "routine Linear webhook callback",
+  (it) => {
+    const seedLinear = Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const existing = yield* store.findConnection(linearConnectionId);
+      if (existing !== null) return;
+      yield* store.saveConnection(linearConnection);
+      yield* secrets.set(routineConnectionSecretName(linearConnectionId), linearSecret);
+      yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-linear-webhook"),
+          expectedRevision: 0,
+          configuration: linearConfiguration,
+        },
+        1_000,
+      );
+    });
+
+    it.effect("records a signed Linear delivery durably, answers 200, and dedupes replays", () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(LINEAR_TEST_TIME);
+        yield* seedLinear;
+        const store = yield* RoutineStore;
+        const routine = yield* store.get(environmentId, RoutineId.make("routine-linear-webhook"));
+        const before = yield* Ref.get(wakeCount);
+        const accepted = yield* linearIssue({ deliveryId: "linear-delivery-1" });
+        assert.equal(accepted.status, 200);
+        assert.equal(accepted.json.status, "accepted");
+        assert.equal(accepted.json.runIds?.length, 1);
+        assert.equal(yield* Ref.get(wakeCount), before + 1);
+        const connection = yield* store.getConnection(environmentId, linearConnectionId);
+        assert.equal(connection.status, "verified");
+        assert.equal(connection.acceptedCount, 1);
+        const history = yield* store.history(environmentId, { id: routine.id });
+        assert.equal(history.runs.length, 1);
+        assert.equal(history.runs[0]!.source, "linear");
+        assert.equal(history.runs[0]!.status, "queued");
+
+        // A provider retry reuses the delivery id; a replayed body with a fresh
+        // header is suppressed by the signed-content digest.
+        const retry = yield* linearIssue({ deliveryId: "linear-delivery-1" });
+        assert.equal(retry.status, 200);
+        assert.equal(retry.json.status, "duplicate");
+        const replay = yield* linearIssue({ deliveryId: "linear-delivery-replay" });
+        assert.equal(replay.json.status, "duplicate");
+        assert.equal((yield* store.history(environmentId, { id: routine.id })).runs.length, 1);
+        assert.equal(yield* Ref.get(wakeCount), before + 1);
+      }),
+    );
+
+    it.effect("rejects forged, stale, mismatched, oversized, and unknown deliveries", () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(LINEAR_TEST_TIME);
+        yield* seedLinear;
+        const store = yield* RoutineStore;
+        const before = (yield* store.getConnection(environmentId, linearConnectionId))
+          .rejectedCount;
+        assert.equal(
+          (yield* linearIssue({ signature: null, deliveryId: "linear-unsigned" })).status,
+          400,
+        );
+        assert.equal(
+          (yield* linearIssue({ signature: "deadbeef", deliveryId: "linear-forged" })).status,
+          401,
+        );
+        const stale = LINEAR_TEST_TIME - 120_000;
+        assert.equal(
+          (yield* linearIssue({
+            bodyTimestamp: stale,
+            timestamp: String(stale),
+            deliveryId: "linear-stale",
+          })).status,
+          401,
+        );
+        assert.equal(
+          (yield* linearIssue({ timestamp: "1", deliveryId: "linear-timestamp-mismatch" })).status,
+          400,
+        );
+        assert.equal(
+          (yield* linearIssue({ event: "Comment", deliveryId: "linear-event-mismatch" })).status,
+          400,
+        );
+        assert.equal(
+          (yield* linearIssue({
+            organizationId: "workspace-2",
+            deliveryId: "linear-wrong-workspace",
+          })).status,
+          403,
+        );
+        const rawPost = (raw: Uint8Array, deliveryId: string) =>
+          HttpClient.execute(
+            HttpClientRequest.post(routineLinearWebhookCallbackPath(linearConnectionId)).pipe(
+              HttpClientRequest.setHeaders({
+                "linear-delivery": deliveryId,
+                "linear-event": "Issue",
+                "linear-signature": linearWebhookSignature(linearSecret, raw),
+              }),
+              HttpClientRequest.bodyUint8Array(raw, "application/json"),
+            ),
+          );
+        const malformed = new TextEncoder().encode("{not json");
+        assert.equal((yield* rawPost(malformed, "linear-malformed")).status, 400);
+        const oversized = new Uint8Array(ROUTINE_WEBHOOK_MAX_BODY_BYTES + 1).fill(0x20);
+        assert.equal((yield* rawPost(oversized, "linear-oversized")).status, 413);
+        assert.equal(
+          (yield* linearIssue({
+            deliveryId: "linear-unknown",
+            path: routineLinearWebhookCallbackPath("connection-unknown"),
+          })).status,
+          404,
+        );
+        const after = yield* store.getConnection(environmentId, linearConnectionId);
+        assert.equal(after.rejectedCount, before + 8);
+        assert.equal(after.lastDelivery?.status, "rejected");
+      }),
+    );
+
+    it.effect("admits nothing for a disabled Linear connection even with a valid signature", () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(LINEAR_TEST_TIME);
+        yield* seedLinear;
+        const store = yield* RoutineStore;
+        yield* store.updateConnection(linearConnectionId, (current) => ({
+          ...current,
+          status: "disabled",
+        }));
+        const before = yield* store.getConnection(environmentId, linearConnectionId);
+        const response = yield* linearIssue({
+          deliveryId: "linear-disabled",
+          data: { id: "issue-disabled", identifier: "KAT-202" },
+        });
+        assert.equal(response.status, 403);
+        const after = yield* store.getConnection(environmentId, linearConnectionId);
+        assert.equal(after.acceptedCount, before.acceptedCount);
+        assert.equal(after.rejectedCount, before.rejectedCount + 1);
       }),
     );
   },

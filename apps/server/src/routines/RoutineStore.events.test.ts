@@ -8,6 +8,7 @@ import {
   RoutineOwnerGeneration,
   RuntimeMode,
   type RoutineConnection,
+  type RoutineDraft,
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -15,6 +16,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { summarizeGitHubEvent } from "./GitHubRoutineEvents.ts";
+import { summarizeLinearEvent } from "./LinearRoutineEvents.ts";
 import { RoutineStore, RoutineStoreLive } from "./RoutineStore.ts";
 
 const environmentId = EnvironmentId.make("routine-events-environment");
@@ -56,7 +58,7 @@ const prOpened = (number: number, deliveryId: string) => ({
   deliveryId,
   digest: `digest-${deliveryId}`,
   eventName: "pull_request",
-  repositoryId: 42,
+  providerResourceId: 42,
   summary: summarizeGitHubEvent("pull_request", {
     action: "opened",
     repository: { id: 42, full_name: "acme/widgets" },
@@ -77,6 +79,67 @@ const storeLayer = Layer.mergeAll(
   RoutineStoreLive.pipe(Layer.provide(SqlitePersistenceMemory)),
   SqlitePersistenceMemory,
 );
+
+const linearConnectionId = RoutineConnectionId.make("connection-linear-events");
+const linearConnection: RoutineConnection = {
+  id: linearConnectionId,
+  environmentId,
+  provider: "linear",
+  workspaceId: "workspace-1",
+  workspaceName: "Acme",
+  teamIds: ["team-1"],
+  allTeams: false,
+  metadataAccess: "ok",
+  callbackUrl: `https://env.example/api/routines/webhooks/linear/${linearConnectionId}`,
+  status: "pending",
+  lastDelivery: null,
+  acceptedCount: 0,
+  ignoredCount: 0,
+  rejectedCount: 0,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+const linearConfiguration = (trigger: RoutineDraft["trigger"]): RoutineDraft => ({
+  ...configuration,
+  name: "Linear triage",
+  instruction: "Triage the Linear issue.",
+  trigger,
+});
+const linearPayload = (
+  action: "create" | "update",
+  data: Record<string, unknown>,
+  updatedFrom?: Record<string, unknown>,
+) => ({
+  action,
+  actor: { id: "user-1", type: "user", name: "Alice" },
+  data: {
+    id: "issue-1",
+    identifier: "KAT-101",
+    title: "Ship the Linear slice",
+    url: "https://linear.app/acme/issue/KAT-101",
+    teamId: "team-1",
+    projectId: "project-1",
+    stateId: "state-todo",
+    labelIds: [],
+    ...data,
+  },
+  organizationId: "workspace-1",
+  type: "Issue",
+  webhookId: "webhook-1",
+  webhookTimestamp: 1_800_000_000_000,
+  ...(updatedFrom === undefined ? {} : { updatedFrom }),
+});
+const linearEvent = (deliveryId: string, payload: unknown) => {
+  const summarized = summarizeLinearEvent(payload);
+  return {
+    deliveryId,
+    digest: `digest-${deliveryId}`,
+    eventName: "Issue",
+    providerResourceId: "workspace-1",
+    summary: summarized.kind === "event" ? summarized.summary : null,
+    ...(summarized.kind === "ignored" ? { ignoredDetail: summarized.detail } : {}),
+  };
+};
 
 it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
   it.effect("resumes exactly one event run after a crash and reports uncertainty", () =>
@@ -277,7 +340,7 @@ it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
         deliveryId: "delivery-unsupported",
         digest: "digest-unsupported",
         eventName: "push",
-        repositoryId: 42,
+        providerResourceId: 42,
         summary: null,
         now: 2_500,
       });
@@ -331,13 +394,13 @@ it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
       const wrongRepository = yield* store.admitEvent({
         connectionId: id,
         ...prOpened(1, "delivery-wrong-repository"),
-        repositoryId: 99,
+        providerResourceId: 99,
         now: 2_000,
       });
       assert.equal(wrongRepository.status, "rejected");
       assert.equal(wrongRepository.runs.length, 0);
       if (wrongRepository.status === "rejected") {
-        assert.equal(wrongRepository.reason, "wrong-repository");
+        assert.equal(wrongRepository.reason, "wrong-resource");
         assert.equal(wrongRepository.detail, "Delivery names a different repository.");
       }
       yield* store.updateConnection(id, (current) => ({ ...current, status: "disabled" }));
@@ -460,5 +523,200 @@ it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
       assert.equal(replay.status, "accepted");
       assert.equal(replay.runs.length, 1);
     }),
+  );
+});
+
+it.layer(storeLayer)("RoutineStore Linear events", (it) => {
+  it.effect(
+    "admits one Linear run per delivery, verifies the connection, and ignores replays",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const id = RoutineConnectionId.make("connection-linear-create");
+        yield* store.saveConnection({ ...linearConnection, id });
+        const routine = yield* store.save(
+          environmentId,
+          {
+            id: RoutineId.make("routine-linear-create"),
+            expectedRevision: 0,
+            configuration: linearConfiguration({
+              kind: "linear",
+              connectionId: id,
+              workspaceId: "workspace-1",
+              event: "issue_created",
+              teamId: "team-1",
+            }),
+          },
+          1_000,
+        );
+        const created = linearEvent("linear-delivery-1", linearPayload("create", {}));
+        const first = yield* store.admitEvent({ connectionId: id, ...created, now: 2_000 });
+        assert.equal(first.status, "accepted");
+        assert.equal(first.runs.length, 1);
+        assert.equal(first.runs[0]!.source, "linear");
+        assert.equal(first.runs[0]!.sourceUrl, "https://linear.app/acme/issue/KAT-101");
+        assert.include(first.runs[0]!.eventContext ?? "", "untrusted");
+        assert.equal(first.runs[0]!.occurrenceKey, "linear:linear-delivery-1");
+
+        const saved = yield* store.getConnection(environmentId, id);
+        assert.equal(saved.status, "verified");
+        assert.equal(saved.acceptedCount, 1);
+
+        // Linear redelivery reuses the delivery id and must not admit again.
+        const redelivered = yield* store.admitEvent({ connectionId: id, ...created, now: 3_000 });
+        assert.equal(redelivered.status, "duplicate");
+        assert.equal(redelivered.runs.length, 0);
+
+        // An update whose final state matches but carries no transition evidence is ignored.
+        const routineId = routine.id;
+        const update = linearEvent(
+          "linear-delivery-2",
+          linearPayload("update", { stateId: "state-done" }, {}),
+        );
+        const ignored = yield* store.admitEvent({ connectionId: id, ...update, now: 4_000 });
+        assert.equal(ignored.status, "ignored");
+        assert.equal(ignored.runs.length, 0);
+        const after = yield* store.getConnection(environmentId, id);
+        assert.equal(after.lastDelivery?.status, "ignored");
+        assert.include(after.lastDelivery?.detail ?? "", "transition");
+        assert.equal((yield* store.history(environmentId, { id: routineId })).runs.length, 1);
+      }),
+  );
+
+  it.effect("matches status transitions and label additions, one run per matching routine", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const id = RoutineConnectionId.make("connection-linear-update");
+      yield* store.saveConnection({ ...linearConnection, id });
+      yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-linear-status"),
+          expectedRevision: 0,
+          configuration: linearConfiguration({
+            kind: "linear",
+            connectionId: id,
+            workspaceId: "workspace-1",
+            event: "status_changed",
+            stateId: "state-done",
+            teamId: "team-1",
+          }),
+        },
+        1_000,
+      );
+      yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-linear-label-bug"),
+          expectedRevision: 0,
+          configuration: linearConfiguration({
+            kind: "linear",
+            connectionId: id,
+            workspaceId: "workspace-1",
+            event: "label_added",
+            labelId: "label-bug",
+          }),
+        },
+        1_100,
+      );
+      yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-linear-label-urgent"),
+          expectedRevision: 0,
+          configuration: linearConfiguration({
+            kind: "linear",
+            connectionId: id,
+            workspaceId: "workspace-1",
+            event: "label_added",
+            labelId: "label-urgent",
+          }),
+        },
+        1_200,
+      );
+
+      const transition = linearEvent(
+        "linear-delivery-transition",
+        linearPayload(
+          "update",
+          { stateId: "state-done", labelIds: ["label-bug", "label-urgent"] },
+          { stateId: "state-todo", labelIds: [] },
+        ),
+      );
+      const admitted = yield* store.admitEvent({ connectionId: id, ...transition, now: 2_000 });
+      assert.equal(admitted.status, "accepted");
+      // One delivery admits at most one run per routine: the status routine and
+      // each matching label routine, and never two runs for the same routine.
+      assert.equal(admitted.runs.length, 3);
+      assert.deepEqual(admitted.runs.map((run) => run.routineId).sort(), [
+        "routine-linear-label-bug",
+        "routine-linear-label-urgent",
+        "routine-linear-status",
+      ]);
+
+      const removal = linearEvent(
+        "linear-delivery-removal",
+        linearPayload("update", { labelIds: [] }, { labelIds: ["label-bug"] }),
+      );
+      const ignored = yield* store.admitEvent({ connectionId: id, ...removal, now: 3_000 });
+      assert.equal(ignored.status, "ignored");
+      assert.equal(ignored.runs.length, 0);
+    }),
+  );
+
+  it.effect(
+    "rejects another workspace and a disabled connection, and ignores out-of-scope teams",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const id = RoutineConnectionId.make("connection-linear-scope");
+        yield* store.saveConnection({ ...linearConnection, id });
+        yield* store.save(
+          environmentId,
+          {
+            id: RoutineId.make("routine-linear-scope"),
+            expectedRevision: 0,
+            configuration: linearConfiguration({
+              kind: "linear",
+              connectionId: id,
+              workspaceId: "workspace-1",
+              event: "issue_created",
+            }),
+          },
+          1_000,
+        );
+        const wrongWorkspace = yield* store.admitEvent({
+          connectionId: id,
+          ...linearEvent("linear-delivery-wrong-workspace", linearPayload("create", {})),
+          providerResourceId: "workspace-2",
+          now: 2_000,
+        });
+        assert.equal(wrongWorkspace.status, "rejected");
+        if (wrongWorkspace.status === "rejected") {
+          assert.equal(wrongWorkspace.reason, "wrong-resource");
+          assert.include(wrongWorkspace.detail, "workspace");
+        }
+        // A team-scoped webhook cannot silently expand: another team is ignored.
+        const otherTeam = yield* store.admitEvent({
+          connectionId: id,
+          ...linearEvent(
+            "linear-delivery-other-team",
+            linearPayload("create", { teamId: "team-2" }),
+          ),
+          now: 2_500,
+        });
+        assert.equal(otherTeam.status, "ignored");
+        assert.equal(otherTeam.runs.length, 0);
+        const afterTeam = yield* store.getConnection(environmentId, id);
+        assert.include(afterTeam.lastDelivery?.detail ?? "", "team");
+        yield* store.updateConnection(id, (current) => ({ ...current, status: "disabled" }));
+        const disabled = yield* store.admitEvent({
+          connectionId: id,
+          ...linearEvent("linear-delivery-disabled", linearPayload("create", {})),
+          now: 3_000,
+        });
+        assert.equal(disabled.status, "rejected");
+        if (disabled.status === "rejected") assert.equal(disabled.reason, "disabled");
+      }),
   );
 });

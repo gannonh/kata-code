@@ -1142,7 +1142,7 @@ it.layer(storeLayer)("RoutineStore", (it) => {
           deliveryId: "delivery-copied-event",
           digest: "digest-copied-event",
           eventName: "pull_request",
-          repositoryId: 42,
+          providerResourceId: 42,
           summary: prOpened(21),
           now: 100_400,
         });
@@ -1186,7 +1186,7 @@ it.layer(storeLayer)("RoutineStore", (it) => {
           deliveryId: "delivery-copied-replay",
           digest: "digest-copied-replay",
           eventName: "pull_request",
-          repositoryId: 42,
+          providerResourceId: 42,
           summary: prOpened(22),
           now: 100_501,
         };

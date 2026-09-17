@@ -110,7 +110,11 @@ import { RoutineStoreLive } from "./routines/RoutineStore.ts";
 import { RoutineConnectionsLive } from "./routines/RoutineConnections.ts";
 import { RoutineDispatcherLive } from "./routines/RoutineDispatcher.ts";
 import { RoutineSchedulerLive } from "./routines/RoutineScheduler.ts";
-import { isRoutineWebhookPath, routineWebhookRouteLayer } from "./routines/RoutineWebhooks.ts";
+import {
+  isRoutineWebhookPath,
+  linearWebhookRouteLayer,
+  routineWebhookRouteLayer,
+} from "./routines/RoutineWebhooks.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as PullRequestReadCache from "./pullRequest/PullRequestReadCache.ts";
@@ -607,6 +611,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     ),
     sandboxBootstrapPairingRouteLayer,
     routineWebhookRouteLayer,
+    linearWebhookRouteLayer,
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
     attachmentUploadRouteLayer,
