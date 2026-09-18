@@ -15,6 +15,7 @@ import {
   pinnedRuntimeCommand,
   pinnedRuntimePaths,
   PinnedRuntimeInstallError,
+  type PinnedRuntimeProgress,
 } from "./pinnedRuntime.ts";
 
 // Every install fetches the release archive, checks it against SHA256SUMS,
@@ -40,7 +41,6 @@ const releaseHttpClient = (checksums: string, requests: string[] = []) =>
   });
 const extractingRunner = (fs: FileSystem.FileSystem, path: Path.Path, commands: string[] = []) =>
   ProcessRunner.ProcessRunner.of({
-    runBytes: () => Effect.die("unused binary process runner"),
     run: (input) =>
       Effect.gen(function* () {
         commands.push(input.command);
@@ -63,6 +63,7 @@ const extractingRunner = (fs: FileSystem.FileSystem, path: Path.Path, commands: 
           stderrInvalidUtf8: false,
         };
       }),
+    runBytes: () => Effect.die("unused binary process runner"),
   });
 
 it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
@@ -114,6 +115,128 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
         assert.equal(Number(legacyStart.code), 0, legacyStart.stderr);
         assert.equal(legacyStart.stdout.trim(), "serve");
       }
+    }),
+  );
+
+  it.effect.each([true, false])(
+    "reports bytes before completion, then verifies and extracts (known size: %s)",
+    (knownSize) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-pinned-progress-" });
+        const firstChunk = yield* Deferred.make<void>();
+        let archiveController: ReadableStreamDefaultController<Uint8Array> | undefined;
+        const checksums = yield* validChecksums;
+        const progress: PinnedRuntimeProgress[] = [];
+        const client = HttpClient.make((request) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              request.url.endsWith("/SHA256SUMS")
+                ? new Response(checksums)
+                : new Response(
+                    new ReadableStream({
+                      start(controller) {
+                        archiveController = controller;
+                        controller.enqueue(archiveBytes.slice(0, 4));
+                      },
+                    }),
+                    { headers: knownSize ? { "content-length": String(archiveBytes.length) } : {} },
+                  ),
+            ),
+          ),
+        );
+        const install = yield* ensurePinnedRuntimeInstalled({
+          baseDir,
+          version,
+          fs,
+          path,
+          platform: "linux",
+          arch: "x64",
+          httpClient: client,
+          runner: extractingRunner(fs, path),
+          validate: () => Effect.void,
+          onProgress: (event) => {
+            progress.push(event);
+            if (event.stage === "download" && event.received === 4) {
+              Deferred.doneUnsafe(firstChunk, Effect.void);
+            }
+          },
+        }).pipe(Effect.forkScoped);
+        yield* Deferred.await(firstChunk);
+        assert.deepEqual(progress.at(-1), {
+          stage: "download",
+          received: 4,
+          total: knownSize ? archiveBytes.length : undefined,
+        });
+        assert.isFalse(progress.some((event) => event.stage === "extract"));
+        assert.isDefined(archiveController);
+        archiveController!.enqueue(archiveBytes.slice(4));
+        archiveController!.close();
+        const installed = yield* Fiber.join(install);
+        assert.deepEqual(progress.slice(-4), [
+          { stage: "download", received: archiveBytes.length, total: archiveBytes.length },
+          { stage: "verify" },
+          { stage: "extract" },
+          { stage: "validate" },
+        ]);
+        assert.equal(yield* fs.readFileString(installed.sentinelPath), `${version}\n`);
+      }),
+  );
+
+  it.effect("cleans up an interrupted download without reporting verification or extraction", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "katacode-pinned-progress-failed-",
+      });
+      const checksums = yield* validChecksums;
+      const progress: PinnedRuntimeProgress[] = [];
+      let cancelled = false;
+      const client = HttpClient.make((request) =>
+        Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            request.url.endsWith("/SHA256SUMS")
+              ? new Response(checksums)
+              : new Response(
+                  new ReadableStream({
+                    start(controller) {
+                      controller.enqueue(archiveBytes.slice(0, 4));
+                    },
+                    cancel() {
+                      cancelled = true;
+                    },
+                  }),
+                ),
+          ),
+        ),
+      );
+      const firstChunk = yield* Deferred.make<void>();
+      const install = yield* ensurePinnedRuntimeInstalled({
+        baseDir,
+        version,
+        fs,
+        path,
+        platform: "linux",
+        arch: "x64",
+        httpClient: client,
+        runner: extractingRunner(fs, path),
+        validate: () => Effect.die("must not validate an interrupted archive"),
+        onProgress: (event) => {
+          progress.push(event);
+          if (event.stage === "download" && event.received === 4)
+            Deferred.doneUnsafe(firstChunk, Effect.void);
+        },
+      }).pipe(Effect.forkScoped);
+      yield* Deferred.await(firstChunk);
+      yield* Fiber.interrupt(install);
+      assert.deepEqual(progress.at(-1), { stage: "download", received: 4, total: undefined });
+      assert.isTrue(progress.every((event) => event.stage === "download"));
+      assert.isTrue(cancelled);
+      assert.deepEqual(yield* fs.readDirectory(path.join(baseDir, "runtime", "versions")), []);
     }),
   );
 
@@ -235,45 +358,6 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
     }),
   );
 
-  it.effect("backfills a cached archive without downloading or replacing it", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const baseDir = yield* fs.makeTempDirectoryScoped({
-        prefix: "katacode-pinned-legacy-cache-",
-      });
-      const cached = pinnedRuntimePaths(path, baseDir, version, "linux");
-      const legacyEntry = path.join(
-        cached.versionDir,
-        "node_modules/@kata-sh/code-cli/dist/bin.mjs",
-      );
-      yield* fs.makeDirectory(cached.versionDir, { recursive: true });
-      yield* fs.writeFileString(cached.entryPath, "cached executable\n");
-      yield* fs.writeFileString(cached.sentinelPath, `${version}\n`);
-      const requests: string[] = [];
-      const commands: string[] = [];
-      yield* ensurePinnedRuntimeInstalled({
-        baseDir,
-        version,
-        fs,
-        path,
-        platform: "linux",
-        arch: "x64",
-        httpClient: releaseHttpClient(yield* validChecksums, requests),
-        runner: extractingRunner(fs, path, commands),
-        validate: () =>
-          fs.exists(legacyEntry).pipe(
-            Effect.flatMap((exists) => (exists ? Effect.void : Effect.die("missing legacy entry"))),
-            Effect.orDie,
-          ),
-      });
-      assert.deepEqual(requests, []);
-      assert.deepEqual(commands, []);
-      assert.equal(yield* fs.readFileString(cached.entryPath), "cached executable\n");
-      assert.equal(yield* fs.readFileString(cached.sentinelPath), `${version}\n`);
-    }),
-  );
-
   it.effect("preserves a completed runtime when validation fails", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -322,8 +406,8 @@ it.layer(NodeServices.layer)("ensurePinnedRuntimeInstalled", (it) => {
       });
       const started = yield* Deferred.make<void>();
       const runner = ProcessRunner.ProcessRunner.of({
-        runBytes: () => Effect.die("unused binary process runner"),
         run: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+        runBytes: () => Effect.die("unused binary process runner"),
       });
       const install = yield* ensurePinnedRuntimeInstalled({
         baseDir,

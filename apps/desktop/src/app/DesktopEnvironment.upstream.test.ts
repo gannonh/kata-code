@@ -39,54 +39,19 @@ const makeEnvironment = (
 ) =>
   DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(makeEnvironmentLayer(overrides, env)));
 
-describe("DesktopEnvironment", () => {
-  it.effect("derives state paths and development identity inside Effect", () =>
+describe("DesktopEnvironment upstream OTLP and client assets", () => {
+  it.effect("parses OTLP headers and protocol from the environment", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(
         {},
         {
           KATACODE_HOME: " /tmp/t3 ",
-          KATACODE_COMMIT_HASH: " 0123456789abcdef ",
-          KATACODE_PORT: "4949",
-          VITE_DEV_SERVER_URL: "http://localhost:5173",
-          KATACODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH: " /remote/server.mjs ",
           KATACODE_OTLP_TRACES_URL: " http://127.0.0.1:4318/v1/traces ",
-          KATACODE_OTLP_EXPORT_INTERVAL_MS: "2500",
           KATACODE_OTLP_HEADERS: "authorization=Basic%20abc%3D%3D,x-tenant=t3",
+          KATACODE_OTLP_PROTOCOL: "http/protobuf",
         },
       );
 
-      assert.equal(environment.isDevelopment, true);
-      assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
-      assert.equal(environment.baseDir, "/tmp/t3");
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.desktopSettingsPath, "/tmp/t3/userdata/desktop-settings.json");
-      assert.equal(environment.clientSettingsPath, "/tmp/t3/userdata/client-settings.json");
-      assert.equal(
-        environment.savedEnvironmentRegistryPath,
-        "/tmp/t3/userdata/saved-environments.json",
-      );
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
-      assert.equal(environment.rootDir, "/repo");
-      assert.equal(environment.appRoot, "/repo");
-      assert.equal(environment.serverRoot, "/repo");
-      assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
-      assert.equal(environment.backendCwd, "/repo");
-      assert.equal(environment.appUserModelId, "com.katacode.dev");
-      assert.equal(environment.linuxWmClass, "katacode-dev");
-      assert.equal(environment.linuxDesktopEntryName, "katacode-dev.desktop");
-      assert.equal(environment.userDataDirName, "katacode-dev");
-      assert.deepEqual(
-        Option.map(environment.devServerUrl, (url) => url.href),
-        Option.some("http://localhost:5173/"),
-      );
-      assert.deepEqual(environment.devRemoteT3ServerEntryPath, Option.some("/remote/server.mjs"));
-      assert.deepEqual(environment.configuredBackendPort, Option.some(4949));
-      assert.deepEqual(environment.commitHashOverride, Option.some("0123456789abcdef"));
-      assert.deepEqual(environment.otlpTracesUrl, Option.some("http://127.0.0.1:4318/v1/traces"));
-      assert.equal(environment.otlpExportIntervalMs, 2500);
       assert.deepEqual(
         environment.otlpHeaders,
         Option.some({
@@ -94,27 +59,18 @@ describe("DesktopEnvironment", () => {
           "x-tenant": "t3",
         }),
       );
+      assert.equal(environment.otlpProtocol, "http/protobuf");
     }),
   );
 
-  it.effect("stores production state under userdata in an explicit home", () =>
+  it.effect("defaults OTLP protocol to http/json", () =>
     Effect.gen(function* () {
-      const environment = yield* makeEnvironment(
-        {},
-        {
-          KATACODE_HOME: "/tmp/t3",
-        },
-      );
-
-      assert.equal(environment.isDevelopment, false);
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
+      const environment = yield* makeEnvironment({}, { KATACODE_HOME: "/tmp/t3" });
+      assert.equal(environment.otlpProtocol, "http/json");
     }),
   );
 
-  it.effect("uses the packaged Windows server sidecar as the backend root", () =>
+  it.effect("exposes packaged Windows client assets next to the server sidecar", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment({
         platform: "win32",
@@ -123,78 +79,9 @@ describe("DesktopEnvironment", () => {
         resourcesPath: "/install/resources",
       });
 
-      assert.equal(environment.appRoot, "/install/resources/app.asar");
-      assert.equal(environment.serverRoot, "/install/resources/server.asar");
-      assert.equal(
-        environment.backendEntryPath,
-        "/install/resources/server.asar/apps/server/dist/bin.mjs",
-      );
       assert.equal(
         environment.clientAssetsDir,
         "/install/resources/server.asar/apps/server/dist/client",
-      );
-    }),
-  );
-
-  it.effect("uses the stable desktop entry as the packaged Linux portal identity", () =>
-    Effect.gen(function* () {
-      const environment = yield* makeEnvironment({
-        platform: "linux",
-        isPackaged: true,
-        appPath: "/tmp/.mount_t3code/resources/app.asar",
-        resourcesPath: "/tmp/.mount_t3code/resources",
-      });
-
-      assert.equal(environment.linuxDesktopEntryName, "t3code.desktop");
-    }),
-  );
-
-  it.effect("keeps implicit development state separate from production state", () =>
-    Effect.gen(function* () {
-      const development = yield* makeEnvironment(
-        {},
-        { VITE_DEV_SERVER_URL: "http://localhost:5173" },
-      );
-      const production = yield* makeEnvironment();
-
-      assert.equal(development.stateDir, "/Users/alice/.katacode/dev");
-      assert.equal(production.stateDir, "/Users/alice/.katacode/userdata");
-      assert.equal(production.linuxWmClass, "katacode");
-      assert.equal(production.linuxDesktopEntryName, "t3code.desktop");
-      assert.equal(production.userDataDirName, "katacode");
-    }),
-  );
-
-  it.effect("uses a configured app user model id override", () =>
-    Effect.gen(function* () {
-      const environment = yield* makeEnvironment(
-        {},
-        {
-          KATACODE_DESKTOP_APP_USER_MODEL_ID: " com.katacode.dev.local ",
-          VITE_DEV_SERVER_URL: "http://localhost:5173",
-        },
-      );
-
-      assert.equal(environment.appUserModelId, "com.katacode.dev.local");
-    }),
-  );
-
-  it.effect("resolves picker defaults without nullish sentinels", () =>
-    Effect.gen(function* () {
-      const environment = yield* makeEnvironment();
-
-      assert.deepEqual(environment.resolvePickFolderDefaultPath(null), Option.none());
-      assert.deepEqual(
-        environment.resolvePickFolderDefaultPath({ initialPath: " " }),
-        Option.none(),
-      );
-      assert.deepEqual(
-        environment.resolvePickFolderDefaultPath({ initialPath: "~" }),
-        Option.some("/Users/alice"),
-      );
-      assert.deepEqual(
-        environment.resolvePickFolderDefaultPath({ initialPath: "~/project" }),
-        Option.some("/Users/alice/project"),
       );
     }),
   );

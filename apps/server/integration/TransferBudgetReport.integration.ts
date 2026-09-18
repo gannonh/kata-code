@@ -265,3 +265,8 @@ export function formatTransferBudgetReport(runs: ReadonlyArray<TransferBudgetRun
 
   return `${lines.join("\n")}\n`;
 }
+
+export function formatTransferBudgetResult(runs: ReadonlyArray<TransferBudgetRun>): string {
+  const violations = transferBudgetViolations(runs);
+  return `${JSON.stringify({ ok: violations.length === 0, violations }, null, 2)}\n`;
+}

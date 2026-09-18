@@ -10,7 +10,7 @@ import {
 } from "@kata-sh/code-contracts";
 import { createServerEnvironmentAtoms } from "@kata-sh/code-client-runtime/state/server";
 import { createEnvironmentServerConfigsAtom } from "@kata-sh/code-client-runtime/state/shell";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@kata-sh/code-shared/keybindings";
+import { mergeWithDefaultKeybindings } from "@kata-sh/code-shared/keybindings";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
@@ -90,9 +90,8 @@ export const primaryServerProvidersAtom = Atom.make(
     get(primaryServerConfigAtom)?.providers ?? EMPTY_SERVER_PROVIDERS,
 ).pipe(Atom.withLabel("web-primary-server-providers"));
 
-export const primaryServerKeybindingsAtom = Atom.make(
-  (get): ServerConfig["keybindings"] =>
-    get(primaryServerConfigAtom)?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS,
+export const primaryServerKeybindingsAtom = Atom.make((get): ServerConfig["keybindings"] =>
+  mergeWithDefaultKeybindings(get(primaryServerConfigAtom)?.keybindings ?? []),
 ).pipe(Atom.withLabel("web-primary-server-keybindings"));
 
 export const primaryServerAvailableEditorsAtom = Atom.make(

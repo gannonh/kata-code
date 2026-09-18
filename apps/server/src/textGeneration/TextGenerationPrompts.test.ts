@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vite-plus/test";
-import * as Schema from "effect/Schema";
-import { RoutineDraftModelOutput } from "@kata-sh/code-contracts";
 
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
-  buildRoutineDraftPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
-import { normalizeCliError, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
+import {
+  normalizeCliError,
+  sanitizeThreadTitle,
+  toJsonSchemaObject,
+} from "./TextGenerationUtils.ts";
 import { TextGenerationError } from "@kata-sh/code-contracts";
 
 describe("buildCommitMessagePrompt", () => {
@@ -68,30 +69,6 @@ describe("buildCommitMessagePrompt", () => {
 
     expect(result.prompt).toContain("Additional instructions:");
     expect(result.prompt).toContain("Use a terse repository-specific subject.");
-  });
-});
-
-describe("buildRoutineDraftPrompt", () => {
-  it("limits generated fields and excludes permission/workspace output", () => {
-    const result = buildRoutineDraftPrompt({
-      message: "Create a weekday summary at 9am",
-      currentDraft: null,
-      history: [],
-      projectId: "project-1",
-      projects: [{ id: "project-1", title: "Kata Code" }],
-      availableModels: [{ instanceId: "codex", model: "gpt-6-astra", name: "GPT-6 Astra" }],
-      generationModelSelection: { instanceId: "codex", model: "gpt-6-astra" },
-    });
-
-    expect(result.prompt).toContain("exactly these keys: draft, assistantMessage");
-    expect(result.prompt).toContain("Do not return runtimeMode, workspace");
-    expect(result.prompt).toContain("project-1: Kata Code");
-    expect(result.prompt).toContain('"instanceId": "codex"');
-    expect(result.prompt).toContain('"model": "gpt-6-astra"');
-    expect(result.prompt).toContain(
-      "Copy modelSelection.instanceId and modelSelection.model verbatim",
-    );
-    expect(result.outputSchema).toBeDefined();
   });
 });
 
@@ -173,6 +150,14 @@ describe("buildBranchNamePrompt", () => {
 });
 
 describe("buildThreadTitlePrompt", () => {
+  it("requires each generated field in the strict response schema", () => {
+    const { outputSchema } = buildThreadTitlePrompt({ message: "Fix this" });
+    expect(toJsonSchemaObject(outputSchema)).toMatchObject({
+      required: ["title", "needsRefinement"],
+      properties: { title: { type: "string" }, needsRefinement: { type: "boolean" } },
+    });
+  });
+
   it("includes the user message without absent attachment metadata", () => {
     const result = buildThreadTitlePrompt({
       message: "Investigate reconnect regressions after session restore",
@@ -181,18 +166,6 @@ describe("buildThreadTitlePrompt", () => {
     expect(result.prompt).toContain("User message:");
     expect(result.prompt).toContain("Investigate reconnect regressions after session restore");
     expect(result.prompt).not.toContain("Attachment metadata:");
-    expect(result.prompt).toContain(
-      "Generate a title that will help the user recognize this Kata Code thread weeks later.",
-    );
-    expect(result.prompt).toContain(
-      "Title the subject and outcome. Discard incidental instructions.",
-    );
-    expect(result.prompt).toContain(
-      "Name the product change, not the mock, plan, report, branch, or PR used to produce it.",
-    );
-    expect(result.prompt).not.toContain(
-      "Title should summarize the user's request, not restate it verbatim.",
-    );
   });
 
   it("includes attachment metadata when attachments are provided", () => {
@@ -281,15 +254,22 @@ describe("sanitizeThreadTitle", () => {
       sanitizeThreadTitle(
         '{"title": "Reconnect failures after restart because the session state does not recover"}',
       ),
-    ).toBe("Reconnect failures after restart because the se...");
+    ).toBe("Reconnect failures after restart because the session state does not recover");
   });
 
-  it("truncates long titles with the shared sidebar-safe limit", () => {
+  it("keeps complete titles for client display truncation", () => {
     expect(
       sanitizeThreadTitle(
         '  "Reconnect failures after restart because the session state does not recover"  ',
       ),
-    ).toBe("Reconnect failures after restart because the se...");
+    ).toBe("Reconnect failures after restart because the session state does not recover");
+  });
+
+  it("caps runaway titles so a paragraph cannot reach the sidebar", () => {
+    const words = Array.from({ length: 40 }, (_, index) => `word${index}`).join(" ");
+    const title = sanitizeThreadTitle(words);
+    expect(title.length).toBeLessThanOrEqual(120);
+    expect(title.endsWith("...")).toBe(true);
   });
 });
 
@@ -348,34 +328,5 @@ describe("normalizeCliError", () => {
 
     expect(result.detail).toBe("Failed to generate a commit message");
     expect(result.message).not.toContain("secret-token");
-  });
-});
-
-describe("decodeStrictRoutineDraftModelOutput", () => {
-  it("rejects permission and workspace fields from provider output", () => {
-    const output = {
-      draft: {
-        name: "Daily brief",
-        instruction: "Summarize changes",
-        projectId: "project-1",
-        modelSelection: { instanceId: "codex", model: "gpt-6-astra" },
-        trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
-        runtimeMode: "full-access",
-        workspace: { kind: "shared", directory: "/tmp" },
-      },
-      assistantMessage: "Drafted a daily brief.",
-    };
-    const decode = Schema.decodeUnknownSync(RoutineDraftModelOutput, {
-      onExcessProperty: "error",
-    });
-    expect(() => decode(output)).toThrow(/excess property|unexpected key/i);
-  });
-
-  it("accepts an explicit clarification envelope", () => {
-    expect(
-      Schema.decodeUnknownSync(RoutineDraftModelOutput, {
-        onExcessProperty: "error",
-      })({ draft: null, assistantMessage: "Which time zone should I use?" }).draft,
-    ).toBeNull();
   });
 });

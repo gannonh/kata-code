@@ -1,9 +1,10 @@
 import Constants from "expo-constants";
-import { Platform } from "react-native";
+import { Linking, Platform } from "react-native";
 
 interface AndroidAgentNotifications {
   configure(deviceId: string, userId: string, scheme: string, ongoingEnabled: boolean): void;
   clear(): void;
+  openLiveUpdateSettings?(): boolean;
 }
 
 type NativeLoader = () => AndroidAgentNotifications | null;
@@ -43,6 +44,16 @@ export function configureAndroidAgentNotifications(
 
 export function clearAndroidAgentNotifications(): void {
   nativeLoader()?.clear?.();
+}
+
+export function supportsAndroidLiveUpdateSettings(): boolean {
+  return Platform.OS === "android" && Number(Platform.Version) >= 36;
+}
+
+export async function openAndroidLiveUpdateSettings(): Promise<void> {
+  if (!nativeLoader()?.openLiveUpdateSettings?.()) {
+    await Linking.openSettings();
+  }
 }
 
 export function __setAndroidNotificationsNativeLoaderForTest(loader: NativeLoader): void {

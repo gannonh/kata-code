@@ -1,19 +1,21 @@
 import {
   ArrowLeftIcon,
-  ChartNoAxesColumnIcon,
   CalendarClockIcon,
-  GitPullRequestIcon,
+  ChartNoAxesColumnIcon,
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback } from "react";
-import { useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
+import { Link, useCanGoBack, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useEnvironments } from "../../state/environments";
 import {
   resolveEnvironmentIdentificationPillLabel,
+  resolveSidebarStageBackdropVariant,
+  resolveSidebarStageFocusRingOffsetClass,
+  SidebarStageBackdrop,
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
 import { Badge } from "../ui/badge";
@@ -30,6 +32,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
+import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -38,6 +41,10 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
 }) {
   const stageLabel = useEnvironmentStageLabel();
   const environmentIdentificationMode = useEnvironmentIdentificationMode();
+  const backdropVariant = resolveSidebarStageBackdropVariant(
+    stageLabel,
+    environmentIdentificationMode === "artwork",
+  );
   const pillLabel =
     environmentIdentificationMode === "pill"
       ? resolveEnvironmentIdentificationPillLabel(stageLabel)
@@ -46,11 +53,20 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   return (
     <SidebarHeader
       className={cn(
-        "@container/sidebar-header h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0 md:px-0",
+        "@container/sidebar-header relative h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0 md:px-0",
         isElectron && "drag-region",
       )}
     >
-      <SidebarTrigger className="md:hidden" />
+      {backdropVariant ? <SidebarStageBackdrop variant={backdropVariant} /> : null}
+      <SidebarTrigger
+        className={cn(
+          "relative z-10 md:hidden",
+          backdropVariant &&
+            "focus-visible:ring-white/90 [&_svg]:stroke-white/90! [&_svg]:opacity-100! [&_svg]:hover:stroke-white! [:hover,[data-pressed]]:bg-white/15",
+          backdropVariant && resolveSidebarStageFocusRingOffsetClass(backdropVariant),
+        )}
+      />
+      <SidebarBrand onBackdrop={backdropVariant !== null} />
       {pillLabel ? (
         <Badge
           className="relative z-10 ml-1 hidden rounded-full px-1.5 text-muted-foreground @[15rem]/sidebar-header:inline-flex"
@@ -64,6 +80,32 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     </SidebarHeader>
   );
 });
+
+function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
+  return (
+    <Link
+      aria-label="Go to threads"
+      className={cn(
+        "relative z-10 ml-[var(--workspace-titlebar-content-left)] hidden h-7 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2 md:flex",
+        onBackdrop ? "text-white" : "text-foreground",
+      )}
+      to="/"
+    >
+      {/* Center the visible capitals, without the font's ascender/descender space. */}
+      <span className="inline-flex min-w-0 items-baseline gap-1 text-sm font-medium tracking-tight">
+        <span className="shrink-0 [text-box:trim-both_cap_alphabetic]">Kata</span>
+        <span
+          className={cn(
+            "truncate [text-box:trim-both_cap_alphabetic]",
+            onBackdrop ? "text-white/70" : "text-muted-foreground",
+          )}
+        >
+          Code
+        </span>
+      </span>
+    </Link>
+  );
+}
 
 function SidebarUtilityItem({
   icon,
@@ -165,7 +207,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           />
           {pullRequestsSupported ? (
             <SidebarUtilityItem
-              icon={<GitPullRequestIcon />}
+              icon={<PullRequestGlyph.pullRequest />}
               label="Pull Requests"
               onClick={handlePullRequestsClick}
             />

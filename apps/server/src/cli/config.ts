@@ -1,5 +1,5 @@
 import * as NetService from "@kata-sh/code-shared/Net";
-import { OtlpHeadersFromString } from "@kata-sh/code-shared/observability";
+import { OtlpHeadersFromString, OtlpProtocol } from "@kata-sh/code-shared/observability";
 import { parsePersistedServerObservabilitySettings } from "@kata-sh/code-shared/serverSettings";
 import { DesktopBackendBootstrap, PortSchema } from "@kata-sh/code-contracts";
 import * as Config from "effect/Config";
@@ -107,6 +107,9 @@ const EnvServerConfig = Config.all({
   otlpHeaders: Config.schema(OtlpHeadersFromString, "KATACODE_OTLP_HEADERS").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
+  ),
+  otlpProtocol: Config.schema(OtlpProtocol, "KATACODE_OTLP_PROTOCOL").pipe(
+    Config.withDefault("http/json"),
   ),
   mode: Config.schema(ServerConfig.RuntimeMode, "KATACODE_MODE").pipe(
     Config.option,
@@ -412,6 +415,7 @@ export const resolveServerConfig = (
       otlpExportIntervalMs: env.otlpExportIntervalMs,
       otlpServiceName: env.otlpServiceName,
       otlpHeaders: env.otlpHeaders,
+      otlpProtocol: env.otlpProtocol,
       mode,
       port,
       cwd,

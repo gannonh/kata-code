@@ -13,7 +13,13 @@
       // Knip loads its preprocessor through a CLI option, not a source import.
       // Worktree setup invokes setup-worktree.ts directly from t3.json.
       // Release verify is the only consumer of @vercel/sandbox.
-      "entry": ["knip-schemas.ts", "setup-worktree.ts", "verify-kata-sandbox-image-vercel.test.ts"],
+      // Native verification runs mobile-native-client.ts directly.
+      "entry": [
+        "knip-schemas.ts",
+        "setup-worktree.ts",
+        "verify-kata-sandbox-image-vercel.test.ts",
+        "mobile-native-client.ts",
+      ],
     },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
@@ -21,6 +27,7 @@
         "src/bin.ts!",
         "src/claude-history-worker.ts!",
         "scripts/cli.ts",
+        "scripts/evaluate-thread-titles.ts",
         "src/provider/testFixtures/*.mjs",
       ],
       // Native msgpack acceleration and the Vite+ web build prerequisite.

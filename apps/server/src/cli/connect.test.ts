@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Console from "effect/Console";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Logger from "effect/Logger";
@@ -14,7 +15,7 @@ import * as BootService from "../cloud/bootService.ts";
 import {
   acquireRelayClientForLink,
   CONNECT_CLI_SESSION_LABEL,
-  formatHeadlessAuthorizationPrompt,
+  formatDeviceAuthorizationPrompt,
   formatRelayClientReady,
   headlessSessionConfig,
   reportCloudDisconnectResults,
@@ -27,13 +28,20 @@ it("uses the Kata Code Connect CLI session label", () => {
 
 it("explains how to complete headless authorization", () => {
   assert.equal(
-    formatHeadlessAuthorizationPrompt("https://example.test/connect"),
+    formatDeviceAuthorizationPrompt({
+      verificationUri: "https://example.test/connect",
+      verificationUriComplete: "https://example.test/connect?user_code=WDJB-MJHT",
+      userCode: "WDJB-MJHT",
+      expiresIn: Duration.minutes(15),
+    }),
     [
       "Headless authorization",
       "Open this URL on a device with a browser:",
-      "  https://example.test/connect",
+      "  https://example.test/connect?user_code=WDJB-MJHT",
       "",
-      "After signing in, return here and enter the code shown in your browser.",
+      "Confirm this code when asked: WDJB-MJHT",
+      "",
+      "Waiting for approval (expires in 15 min). Press Ctrl+C to cancel.",
     ].join("\n"),
   );
 });
