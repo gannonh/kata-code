@@ -36,7 +36,6 @@ import {
   isRoutineEditorScheduleTrigger,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
-  linearWebhookSettingsUrl,
   newRoutineDraftId,
   newRoutineRequestId,
   preferredWorktreeBaseBranch,
@@ -144,6 +143,7 @@ function linearConnection(patch: Partial<LinearRoutineConnection> = {}): LinearR
     workspaceName: "Acme",
     teamIds: [],
     allTeams: true,
+    webhookId: null,
     metadataAccess: "ok",
     callbackUrl: "https://env.example/api/routines/webhooks/linear/connection-1",
     status: "verified",
@@ -616,8 +616,7 @@ describe("Linear event triggers", () => {
     );
   });
 
-  it("links each provider's webhook settings only for its own connections", () => {
-    expect(linearWebhookSettingsUrl()).toBe("https://linear.app/settings/api/webhooks");
+  it("links GitHub webhook settings only for GitHub connections", () => {
     expect(gitHubHookSettingsUrl(linearConnection())).toBeNull();
   });
 

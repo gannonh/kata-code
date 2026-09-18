@@ -446,10 +446,6 @@ export function gitHubHookSettingsUrl(connection: RoutineConnection): string | n
   return `${connection.repositoryUrl}/settings/hooks/${connection.hookId}`;
 }
 
-export function linearWebhookSettingsUrl(): string {
-  return "https://linear.app/settings/api/webhooks";
-}
-
 export const ROUTINE_CONNECTION_STATUS_LABELS: Record<
   RoutineConnection["status"] | "unavailable",
   string
