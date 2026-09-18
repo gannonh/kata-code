@@ -1113,6 +1113,108 @@ const RelayServerGroup = HttpApiGroup.make("server")
   .annotate(OpenApi.Description, "Environment-authenticated activity publication.")
   .middleware(RelayEnvironmentAuth);
 
+/**
+ * A routine connection's Linear identity. The relay owns the OAuth
+ * application, so a connection is identified by the environment that uses it
+ * plus a client-generated connection id.
+ */
+export const RelayLinearConnectionId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
+export type RelayLinearConnectionId = typeof RelayLinearConnectionId.Type;
+
+/**
+ * Signed delivery of an authorized Linear token bundle to the bound
+ * environment. Tokens travel inside the relay proof so the environment can
+ * verify the sender and bind every field to the request nonce.
+ */
+export const RelayCloudLinearOAuthDeliveryProofPayload = Schema.Struct({
+  ...RelaySignedJwtRegisteredClaims,
+  environmentId: EnvironmentId,
+  connectionId: RelayLinearConnectionId,
+  accessToken: Schema.String,
+  refreshToken: Schema.String,
+  expiresAt: Schema.Number,
+  scope: Schema.String,
+  nonce: TrimmedNonEmptyString,
+});
+export type RelayCloudLinearOAuthDeliveryProofPayload =
+  typeof RelayCloudLinearOAuthDeliveryProofPayload.Type;
+
+export const RelayCloudLinearOAuthDeliveryRequest = Schema.Struct({
+  proof: TrimmedNonEmptyString,
+});
+export type RelayCloudLinearOAuthDeliveryRequest = typeof RelayCloudLinearOAuthDeliveryRequest.Type;
+
+export const RelayLinearOAuthStartRequest = Schema.Struct({
+  environmentId: EnvironmentId,
+  connectionId: RelayLinearConnectionId,
+});
+export type RelayLinearOAuthStartRequest = typeof RelayLinearOAuthStartRequest.Type;
+
+export const RelayLinearOAuthStartResponse = Schema.Struct({
+  authorizeUrl: Schema.String,
+});
+export type RelayLinearOAuthStartResponse = typeof RelayLinearOAuthStartResponse.Type;
+
+export const RelayLinearOAuthRevokeRequest = Schema.Struct({
+  connectionId: RelayLinearConnectionId,
+});
+export type RelayLinearOAuthRevokeRequest = typeof RelayLinearOAuthRevokeRequest.Type;
+
+export const RelayLinearOAuthRefreshRequest = Schema.Struct({
+  connectionId: RelayLinearConnectionId,
+});
+export type RelayLinearOAuthRefreshRequest = typeof RelayLinearOAuthRefreshRequest.Type;
+
+export const RelayLinearOAuthRefreshResponse = Schema.Struct({
+  accessToken: Schema.String,
+  expiresAt: Schema.Number,
+  scope: Schema.String,
+});
+export type RelayLinearOAuthRefreshResponse = typeof RelayLinearOAuthRefreshResponse.Type;
+
+export const RelayLinearOAuthStartEndpoint = HttpApiEndpoint.post(
+  "linearOAuthStart",
+  "/v1/linear/oauth/start",
+  {
+    headers: RelayBearerRequestHeaders,
+    payload: RelayLinearOAuthStartRequest,
+    success: RelayLinearOAuthStartResponse,
+    error: RelayAuthAndInternalErrors,
+  },
+).annotate(OpenApi.Summary, "Start a Linear OAuth authorization");
+
+export const RelayLinearOAuthRevokeEndpoint = HttpApiEndpoint.post(
+  "linearOAuthRevoke",
+  "/v1/linear/oauth/revoke",
+  {
+    headers: RelayBearerRequestHeaders,
+    payload: RelayLinearOAuthRevokeRequest,
+    success: RelayOkResponse,
+    error: RelayAuthAndInternalErrors,
+  },
+).annotate(OpenApi.Summary, "Revoke a Linear OAuth authorization");
+
+export const RelayLinearOAuthRefreshEndpoint = HttpApiEndpoint.post(
+  "linearOAuthRefresh",
+  "/v1/environments/:environmentId/linear/oauth/refresh",
+  {
+    params: Schema.Struct({ environmentId: EnvironmentId }),
+    payload: RelayLinearOAuthRefreshRequest,
+    success: RelayLinearOAuthRefreshResponse,
+    error: RelayAuthAndInternalErrors,
+  },
+).annotate(OpenApi.Summary, "Refresh a delivered Linear access token");
+
+const RelayLinearClientGroup = HttpApiGroup.make("linearClient")
+  .add(RelayLinearOAuthStartEndpoint, RelayLinearOAuthRevokeEndpoint)
+  .annotate(OpenApi.Description, "Cloud-user Linear OAuth authorization.")
+  .middleware(RelayClientAuth);
+
+const RelayLinearServerGroup = HttpApiGroup.make("linearServer")
+  .add(RelayLinearOAuthRefreshEndpoint)
+  .annotate(OpenApi.Description, "Environment-authenticated Linear token refresh.")
+  .middleware(RelayEnvironmentAuth);
+
 export const RelayApi = HttpApi.make("RelayApi")
   .add(
     RelayHealthGroup,
@@ -1122,6 +1224,8 @@ export const RelayApi = HttpApi.make("RelayApi")
     RelayTokenGroup,
     RelayDpopClientGroup,
     RelayServerGroup,
+    RelayLinearClientGroup,
+    RelayLinearServerGroup,
   )
   .annotate(OpenApi.Title, "Kata Code Relay API")
   .annotate(OpenApi.Version, "1.0.0")

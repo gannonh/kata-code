@@ -2,7 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 import * as OpenApi from "effect/unstable/httpapi/OpenApi";
 import * as Schema from "effect/Schema";
 
-import { RelayApi, RelayDeviceRegistrationRequest } from "./relay.ts";
+import {
+  RelayApi,
+  RelayCloudLinearOAuthDeliveryRequest,
+  RelayDeviceRegistrationRequest,
+  RelayLinearOAuthRefreshResponse,
+  RelayLinearOAuthStartRequest,
+} from "./relay.ts";
 
 const decodeDevice = Schema.decodeUnknownExit(RelayDeviceRegistrationRequest);
 const device = {
@@ -57,5 +63,28 @@ describe("RelayApi security", () => {
       scheme: "DPoP",
       description: "DPoP-bound access token. Requests must also include the DPoP proof JWT header.",
     });
+  });
+});
+
+describe("Linear OAuth relay contracts", () => {
+  it("binds a start request to an environment and connection", () => {
+    const decode = Schema.decodeUnknownExit(RelayLinearOAuthStartRequest);
+    expect(decode({ environmentId: "environment-1", connectionId: "connection-1" })._tag).toBe(
+      "Success",
+    );
+    expect(decode({ environmentId: "environment-1", connectionId: "" })._tag).toBe("Failure");
+  });
+
+  it("carries a refreshed token bundle", () => {
+    const decode = Schema.decodeUnknownExit(RelayLinearOAuthRefreshResponse);
+    expect(
+      decode({ accessToken: "token", expiresAt: 1_800_000_000_000, scope: "read admin" })._tag,
+    ).toBe("Success");
+  });
+
+  it("accepts a delivery request carrying only the signed proof", () => {
+    const decode = Schema.decodeUnknownExit(RelayCloudLinearOAuthDeliveryRequest);
+    expect(decode({ proof: "signed" })._tag).toBe("Success");
+    expect(decode({})._tag).toBe("Failure");
   });
 });
