@@ -6,8 +6,7 @@ import {
   Routine,
   RoutineConnectionId,
   RoutineDraft,
-  RoutineId,
-  RoutineRequestId,
+  type RoutineId,
   isScheduleTrigger,
   type EnvironmentId,
   type GitHubEventTrigger,
@@ -19,6 +18,8 @@ import {
   type ScheduleTrigger,
 } from "@kata-sh/code-contracts";
 import { useAtomValue } from "@effect/atom-react";
+import * as Cause from "effect/Cause";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { ReactNode } from "react";
 import {
@@ -72,6 +73,8 @@ import {
   isRoutineDraftDirty,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
+  newRoutineDraftId,
+  newRoutineRequestId,
   preferredWorktreeBaseBranch,
   routineDraftBaselineAfterAutomaticChange,
   routineDraftRevisionAfterEdit,
@@ -116,8 +119,6 @@ type EnvironmentRoutineLoad = {
 };
 
 const EMPTY_ROUTINES: readonly RoutineWithOwner[] = [];
-let draftSequence = 0;
-const nextDraftId = () => `routine-draft-${Date.now().toString(36)}-${++draftSequence}`;
 
 const statusLabel: Record<Routine["state"], string> = {
   enabled: "Active",
@@ -160,7 +161,7 @@ function defaultDraft(
       ? worktreeWorkspace(baseBranch)
       : { kind: "shared" as const, directory: project.workspaceRoot };
   return {
-    id: RoutineId.make(nextDraftId()),
+    id: newRoutineDraftId(),
     environmentId,
     expectedRevision: 0,
     configuration: {
@@ -196,10 +197,12 @@ function formatDateInTimezone(value: string, timezone: string): string {
   }
 }
 
+/** RPC command results carry the expected failure inside a cause; unwrap it for its message. */
 function errorMessage(value: unknown): string {
-  if (value instanceof Error && value.message.trim()) return value.message;
-  if (typeof value === "object" && value !== null && "message" in value) {
-    const message = (value as { message?: unknown }).message;
+  const error = Cause.isCause(value) ? Option.getOrNull(Cause.findErrorOption(value)) : value;
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
     if (typeof message === "string" && message.trim()) return message;
   }
   return "The routine request failed. Try again.";
@@ -223,6 +226,7 @@ function RoutineEnvironmentRows({
         status: "ready",
         routines: query.data.map((routine) => ({
           ...routine,
+          environmentId,
           ownerLabel,
           connectionPhase,
         })),
@@ -903,7 +907,7 @@ function RoutineEditor({
       input: {
         id: routine.id,
         expectedRevision: routine.revision,
-        requestId: RoutineRequestId.make(nextDraftId()),
+        requestId: newRoutineRequestId(),
       },
     });
     setBusy(false);

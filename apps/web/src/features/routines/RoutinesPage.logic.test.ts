@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type {
   Routine,
   RoutineConnection,
@@ -30,6 +30,8 @@ import {
   isCompleteGitHubTrigger,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
+  newRoutineDraftId,
+  newRoutineRequestId,
   preferredWorktreeBaseBranch,
   ROUTINE_CANCEL_HINT,
   ROUTINE_CONTROL_CLASS,
@@ -549,5 +551,53 @@ describe("GitHub event triggers", () => {
       "https://github.com/acme/widgets/settings/hooks/1001",
     );
     expect(gitHubHookSettingsUrl(connection({ hookId: null }))).toBeNull();
+  });
+});
+
+describe("routine identity generation", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("gives every new routine draft a distinct id with the draft prefix", () => {
+    const first = newRoutineDraftId();
+    const second = newRoutineDraftId();
+    expect(first).not.toBe(second);
+    expect(first.startsWith("routine-draft-")).toBe(true);
+    expect(second.startsWith("routine-draft-")).toBe(true);
+    const batch = Array.from({ length: 100 }, () => newRoutineDraftId());
+    expect(new Set(batch).size).toBe(batch.length);
+  });
+
+  it("gives every new test-run request a distinct id with the request prefix", () => {
+    const first = newRoutineRequestId();
+    const second = newRoutineRequestId();
+    expect(first).not.toBe(second);
+    expect(first.startsWith("routine-request-")).toBe(true);
+    expect(second.startsWith("routine-request-")).toBe(true);
+    const batch = Array.from({ length: 100 }, () => newRoutineRequestId());
+    expect(new Set(batch).size).toBe(batch.length);
+  });
+
+  it("keeps ids unique and clock-independent when the wall clock is frozen", () => {
+    const frozenNow = 1_800_000_000_000;
+    const legacyTimestamp = frozenNow.toString(36);
+    vi.spyOn(Date, "now").mockReturnValue(frozenNow);
+    const draftIds = Array.from({ length: 100 }, () => newRoutineDraftId());
+    const requestIds = Array.from({ length: 100 }, () => newRoutineRequestId());
+    expect(new Set(draftIds).size).toBe(draftIds.length);
+    expect(new Set(requestIds).size).toBe(requestIds.length);
+    expect(draftIds.some((id) => id.includes(legacyTimestamp))).toBe(false);
+    expect(requestIds.some((id) => id.includes(legacyTimestamp))).toBe(false);
+  });
+
+  it("does not repeat an id across separate module instances at the same instant", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    vi.resetModules();
+    const firstInstance = await import("./RoutinesPage.logic");
+    vi.resetModules();
+    const secondInstance = await import("./RoutinesPage.logic");
+    expect(firstInstance.newRoutineDraftId()).not.toBe(secondInstance.newRoutineDraftId());
+    expect(firstInstance.newRoutineRequestId()).not.toBe(secondInstance.newRoutineRequestId());
   });
 });
