@@ -4,7 +4,7 @@
 
 | Value                  | Commit                                     |
 | ---------------------- | ------------------------------------------ |
-| Kata base              | `7fad04511b62b0897ce8db989cb98f2edd12cc02` |
+| Kata base              | `5b7fa4dc4f251e83d7562c5223d295f005de94ca` (updated from `7fad04511b62b0897ce8db989cb98f2edd12cc02` after origin/main advanced) |
 | Previous upstream pin  | `47ace94962a714a561d7cfbdbaa4c721ef6b0598` |
 | Frozen upstream target | `0150c6a53b409ba3bcb45645709b649cf8708354` |
 | Original upstream root | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f` |
@@ -15,6 +15,8 @@ KAT-3371 landed the previous pin through PR #223 as squash `e96c74aa48e7ae5b56b7
 
 KAT-3377 remains Todo waiting Start and is not this run's Build.
 
+On 2026-09-18 resume, `origin/main` had advanced by KAT-3390 (`fbbf8f276`), KAT-3392 (`fae7dbdb6`), and KAT-3391 (`5b7fa4dc4`). The frozen upstream target stays `0150c6a53b409ba3bcb45645709b649cf8708354` (do not chase `upstream/main` `74796256868916da550ecbe9b5e37d359a8cb321`). Merge `f80e90a1b5cc5db19aa46be9dc838e453b433c03` parents `35d45f93800c85c61d9ad9f7ead1606b6ef853f6` + `5b7fa4dc4f251e83d7562c5223d295f005de94ca`. The only content conflict was `.opencode/skills/build/scripts/user-acceptance/verify-evidence.mjs` (Set vs array membership). Routine files auto-merged identically to origin/main.
+
 ## TAKE
 
 - Take current upstream product changes in CLI installer/update progress, storage cleanup, worktree setup, multi-model new threads, command-palette search (PRs, usage, thread IDs, keybindings), default Tiptap composer, Android Material layouts, usage limits, custom snooze, project cloning, theme picker, pull-request comments/diffs/media, folder-drop, and related tests. Adapt packages, binaries, workflows, and documentation to Kata-owned names and repositories.
@@ -23,6 +25,7 @@ KAT-3377 remains Todo waiting Start and is not this run's Build.
 - Take Clerk catalog `4.6.8` and the matching patch. Keep Kata's `alchemy@2.0.0-beta.76` pin.
 - Take `relay_client_tracing` on `release-desktop.yml` while keeping Kata `dry_run`.
 - Take new tests and current documentation for accepted functionality after applying Kata identity and operator-interface rules.
+- Take origin/main KAT-3390 stale-revision routine save copy, KAT-3392 environment-scoped routine identity, and KAT-3391 offline mutation gating. Keep the integration branch's Set membership checks in `verify-evidence.mjs`.
 
 ## SKIP
 
@@ -43,4 +46,4 @@ Shared contracts, package manifests, the lockfile, workflow ownership, and migra
 
 ## Verification
 
-Build verification uses the checker and inventory archived from the frozen Kata base. Required checks include formatting and lint, typecheck, unused-code checks, CI test partitions, desktop build, preload verification, branding, ancestry, workflow-reference scan, and the preservation checker. Trusted-base `--mode ci` PASS on candidate `36427e288d5e62d286979cf873c3709a0f16af7c` (superseded by later preservation commits). Mandatory live browser, device, provider, Android artwork, and macOS Icon Composer evidence remains `NOT RUN` until exercised against an exact candidate.
+Build verification uses the checker and inventory archived from the current Kata base (`5b7fa4dc4f251e83d7562c5223d295f005de94ca`). Required checks include formatting and lint, typecheck, unused-code checks, CI test partitions, desktop build, preload verification, branding, ancestry, workflow-reference scan, and the preservation checker. Trusted-base `--mode ci` PASS on superseded candidates `36427e288d5e62d286979cf873c3709a0f16af7c`, `cd2a5746fb6756c0db5b55091987517fbe19aefb`, and `35d45f93800c85c61d9ad9f7ead1606b6ef853f6` is invalid after the main merge. Mandatory live browser, device, provider, Android artwork, and macOS Icon Composer evidence remains `NOT RUN` until exercised against an exact candidate.
