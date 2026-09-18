@@ -65,6 +65,8 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+          LINEAR_OAUTH_CLIENT_ID: ${{ secrets.LINEAR_OAUTH_CLIENT_ID }}
+          LINEAR_OAUTH_CLIENT_SECRET: ${{ secrets.LINEAR_OAUTH_CLIENT_SECRET }}
 
       - name: Apply production relay deploy
         if: ${{ !inputs.dry_run }}
@@ -78,6 +80,8 @@ jobs:
           CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
           APNS_PRIVATE_KEY: ${{ secrets.APNS_PRIVATE_KEY }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
+          LINEAR_OAUTH_CLIENT_ID: ${{ secrets.LINEAR_OAUTH_CLIENT_ID }}
+          LINEAR_OAUTH_CLIENT_SECRET: ${{ secrets.LINEAR_OAUTH_CLIENT_SECRET }}
 
       - name: Verify relay public endpoints
         if: ${{ !inputs.dry_run }}

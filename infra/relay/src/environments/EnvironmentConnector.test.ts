@@ -5,6 +5,8 @@ import {
   RelayCloudEnvironmentHealthRequest,
   RelayCloudMintCredentialRequest,
   RelayCloudEnvironmentHealthProofPayload,
+  RelayCloudLinearOAuthDeliveryProofPayload,
+  RelayCloudLinearOAuthDeliveryRequest,
   RelayCloudMintCredentialProofPayload,
   RelayEnvironmentHealthResponse,
   RelayEnvironmentHealthResponseProofPayload,
@@ -53,6 +55,9 @@ const decodeHealthRequestBody = Schema.decodeUnknownSync(
 );
 const decodeMintRequestBody = Schema.decodeUnknownSync(
   Schema.fromJsonString(RelayCloudMintCredentialRequest),
+);
+const decodeLinearOAuthDeliveryRequestBody = Schema.decodeUnknownSync(
+  Schema.fromJsonString(RelayCloudLinearOAuthDeliveryRequest),
 );
 const isEnvironmentConnectNotAuthorized = Schema.is(
   EnvironmentConnector.EnvironmentConnectNotAuthorized,
@@ -689,6 +694,47 @@ describe("EnvironmentConnector", () => {
           wsBaseUrl: "wss://env.example.test/ws",
         },
       });
+    }).pipe(Effect.provide(connectorTestLayer(execute)));
+  });
+
+  it.effect("delivers the authorized Linear token bundle to the linked environment", () => {
+    const seenUrls: Array<string> = [];
+    const seenProofs: Array<RelayCloudLinearOAuthDeliveryProofPayload> = [];
+    const execute = (request: HttpClientRequest.HttpClientRequest) =>
+      Effect.sync(() => {
+        const deliveryRequest = decodeLinearOAuthDeliveryRequestBody(requestBodyText(request));
+        seenUrls.push(request.url);
+        seenProofs.push(decodeRequestProof(deliveryRequest.proof));
+        return HttpClientResponse.fromWeb(request, Response.json({ ok: true }, { status: 200 }));
+      });
+
+    return Effect.gen(function* () {
+      const connector = yield* EnvironmentConnector.EnvironmentConnector;
+      yield* connector.deliverLinearOAuth({
+        userId: "user_123",
+        environmentId: "env-connector-test",
+        connectionId: "connection-1",
+        accessToken: "linear-access-token",
+        refreshToken: "linear-refresh-token",
+        expiresAt: 1_790_000_000_000,
+        scope: "read,admin",
+      });
+
+      expect(seenUrls).toEqual(["https://env.example.test/api/connect/linear-oauth"]);
+      expect(seenProofs[0]).toMatchObject({
+        iss: "https://relay.example.test",
+        aud: "kata-env:env-connector-test",
+        sub: "user_123",
+        environmentId: "env-connector-test",
+        connectionId: "connection-1",
+        accessToken: "linear-access-token",
+        refreshToken: "linear-refresh-token",
+        expiresAt: 1_790_000_000_000,
+        scope: "read,admin",
+      });
+      expect(seenProofs[0]!.nonce.length).toBeGreaterThan(0);
+      expect(seenProofs[0]!.jti.length).toBeGreaterThan(0);
+      expect(seenProofs[0]!.exp).toBeGreaterThan(seenProofs[0]!.iat);
     }).pipe(Effect.provide(connectorTestLayer(execute)));
   });
 

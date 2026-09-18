@@ -60,6 +60,8 @@ export function relayProtectedErrorMessage(error: RelayProtectedError): string {
       return "Relay rejected an expired agent activity publish proof.";
     case "RelayAgentActivityPublishProofInvalidError":
       return `Relay rejected the agent activity publish proof (${error.reason}).`;
+    case "RelayLinearOAuthNotConfiguredError":
+      return "Relay is not configured to broker Linear OAuth.";
     case "RelayInternalError":
       return `Relay encountered an internal error (${error.reason}).`;
   }

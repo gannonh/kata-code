@@ -8,6 +8,7 @@ import {
 import { makeEnvironmentHttpApiClient } from "@kata-sh/code-client-runtime/rpc";
 import {
   RelayCloudEnvironmentHealthProofPayload,
+  RelayCloudLinearOAuthDeliveryProofPayload,
   RelayEnvironmentHealthResponse,
   RelayEnvironmentHealthResponseProofPayload,
   RelayEnvironmentMintResponse,
@@ -22,6 +23,7 @@ import {
   normalizeRelayIssuer,
   RELAY_HEALTH_REQUEST_TYP,
   RELAY_HEALTH_RESPONSE_TYP,
+  RELAY_LINEAR_OAUTH_DELIVERY_TYP,
   RELAY_MINT_REQUEST_TYP,
   RELAY_MINT_RESPONSE_TYP,
   signRelayJwt,
@@ -73,7 +75,7 @@ export class EnvironmentConnectNotAuthorized extends Schema.TaggedError<Environm
   "EnvironmentConnectNotAuthorized",
   {
     environmentId: Schema.String,
-    operation: Schema.Literals(["connect", "status"]),
+    operation: Schema.Literals(["connect", "status", "linear-oauth-delivery"]),
     reason: RelayEnvironmentConnectNotAuthorizedReason,
   },
 ) {
@@ -86,7 +88,7 @@ export class EnvironmentMintRequestFailed extends Schema.TaggedError<Environment
   "EnvironmentMintRequestFailed",
   {
     environmentId: Schema.String,
-    operation: Schema.Literals(["connect", "status"]),
+    operation: Schema.Literals(["connect", "status", "linear-oauth-delivery"]),
     cause: Schema.Defect(),
   },
 ) {
@@ -111,7 +113,7 @@ export class EnvironmentMintResponseInvalid extends Schema.TaggedError<Environme
   "EnvironmentMintResponseInvalid",
   {
     environmentId: Schema.String,
-    operation: Schema.Literals(["connect", "status"]),
+    operation: Schema.Literals(["connect", "status", "linear-oauth-delivery"]),
   },
 ) {
   override get message(): string {
@@ -143,6 +145,15 @@ export class EnvironmentConnector extends Context.Service<
       readonly userId: string;
       readonly environmentId: string;
     }) => Effect.Effect<RelayEnvironmentStatusResponse, EnvironmentConnectorError>;
+    readonly deliverLinearOAuth: (input: {
+      readonly userId: string;
+      readonly environmentId: string;
+      readonly connectionId: string;
+      readonly accessToken: string;
+      readonly refreshToken: string;
+      readonly expiresAt: number;
+      readonly scope: string;
+    }) => Effect.Effect<void, EnvironmentConnectorError>;
   }
 >()("kata-code-relay/environments/EnvironmentConnector") {}
 
@@ -302,7 +313,7 @@ const make = Effect.gen(function* () {
     );
   const resolveManagedEndpoint = Effect.fn("relay.environment_connector.resolve_managed_endpoint")(
     function* (input: {
-      readonly operation: "connect" | "status";
+      readonly operation: "connect" | "status" | "linear-oauth-delivery";
       readonly link: EnvironmentLinks.RelayLinkedEnvironmentRecord;
       readonly allocation: ManagedEndpointAllocations.ManagedEndpointAllocation | null;
     }) {
@@ -670,6 +681,117 @@ const make = Effect.gen(function* () {
         expiresAt: decoded.expiresAt,
       };
     }),
+    deliverLinearOAuth: Effect.fn("relay.environment_connector.deliver_linear_oauth")(
+      function* (input) {
+        yield* Effect.annotateCurrentSpan({
+          "relay.environment_id": input.environmentId,
+          "relay.operation": "linear-oauth-delivery",
+          "relay.linear.connection_id": input.connectionId,
+        });
+        const { link, allocation } = yield* Effect.all(
+          {
+            link: links.getForUser(input),
+            allocation: allocations.get(input),
+          },
+          { concurrency: 2 },
+        );
+        if (!link) {
+          return yield* new EnvironmentConnectNotAuthorized({
+            environmentId: input.environmentId,
+            operation: "linear-oauth-delivery",
+            reason: "environment_link_not_found",
+          });
+        }
+        const endpoint = yield* resolveManagedEndpoint({
+          operation: "linear-oauth-delivery",
+          link,
+          allocation,
+        });
+        const now = yield* DateTime.now;
+        const expiresAt = DateTime.add(now, { minutes: 2 });
+        const nonce = yield* crypto.randomUUIDv4.pipe(
+          Effect.mapError(
+            (cause) =>
+              new EnvironmentMintRequestFailed({
+                environmentId: input.environmentId,
+                operation: "linear-oauth-delivery",
+                cause,
+              }),
+          ),
+        );
+        const payload = {
+          iss: relayIssuer,
+          aud: wireEnvironmentIssuer(link.environmentId),
+          sub: input.userId,
+          jti: yield* crypto.randomUUIDv4.pipe(
+            Effect.mapError(
+              (cause) =>
+                new EnvironmentMintRequestFailed({
+                  environmentId: input.environmentId,
+                  operation: "linear-oauth-delivery",
+                  cause,
+                }),
+            ),
+          ),
+          iat: Math.floor(now.epochMilliseconds / 1_000),
+          exp: Math.floor(expiresAt.epochMilliseconds / 1_000),
+          environmentId: link.environmentId,
+          connectionId: input.connectionId,
+          accessToken: input.accessToken,
+          refreshToken: input.refreshToken,
+          expiresAt: input.expiresAt,
+          scope: input.scope,
+          nonce,
+        } satisfies RelayCloudLinearOAuthDeliveryProofPayload;
+        const proof = yield* signRelayJwt({
+          privateKey: Redacted.value(settings.cloudMintPrivateKey),
+          typ: RELAY_LINEAR_OAUTH_DELIVERY_TYP,
+          payload,
+        }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new EnvironmentMintRequestFailed({
+                environmentId: input.environmentId,
+                operation: "linear-oauth-delivery",
+                cause,
+              }),
+          ),
+        );
+        const environmentClient = yield* makeEnvironmentClient(endpoint.httpBaseUrl);
+        const decoded = yield* environmentClient.connect
+          .linearOAuthDelivery({ payload: { proof } })
+          .pipe(
+            withoutRedirects,
+            Effect.mapError(
+              (cause) =>
+                new EnvironmentMintRequestFailed({
+                  environmentId: input.environmentId,
+                  operation: "linear-oauth-delivery",
+                  cause,
+                }),
+            ),
+            Effect.timeoutOption(Duration.millis(ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS)),
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  Effect.fail(
+                    new EnvironmentMintRequestTimedOut({
+                      environmentId: input.environmentId,
+                      timeoutMs: ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS,
+                    }),
+                  ),
+                onSome: Effect.succeed,
+              }),
+            ),
+          );
+        if (!decoded.ok) {
+          return yield* new EnvironmentMintResponseInvalid({
+            environmentId: input.environmentId,
+            operation: "linear-oauth-delivery",
+          });
+        }
+      },
+    ),
   });
 });
 

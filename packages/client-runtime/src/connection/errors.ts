@@ -67,6 +67,7 @@ function relayProtectedError(error: RelayProtectedError): ConnectionAttemptError
         traceId: error.traceId,
       });
     case "RelayEnvironmentLinkFailedError":
+    case "RelayLinearOAuthNotConfiguredError":
     case "RelayInternalError":
       return new ConnectionTransientError({
         reason: "relay-unavailable",

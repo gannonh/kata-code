@@ -550,6 +550,19 @@ export class RelayInternalError extends Schema.TaggedError<RelayInternalError>()
   }
 }
 
+export class RelayLinearOAuthNotConfiguredError extends Schema.TaggedError<RelayLinearOAuthNotConfiguredError>()(
+  "RelayLinearOAuthNotConfiguredError",
+  {
+    code: Schema.Literal("linear_oauth_not_configured"),
+    traceId: TrimmedNonEmptyString,
+  },
+  { httpApiStatus: 503 },
+) {
+  override get message(): string {
+    return "Relay Linear OAuth is not configured";
+  }
+}
+
 export const RelayProtectedError = Schema.Union([
   RelayAuthInvalidError,
   RelayEnvironmentLinkProofExpiredError,
@@ -562,11 +575,18 @@ export const RelayProtectedError = Schema.Union([
   RelayEnvironmentLinkLimitExceededError,
   RelayAgentActivityPublishProofExpiredError,
   RelayAgentActivityPublishProofInvalidError,
+  RelayLinearOAuthNotConfiguredError,
   RelayInternalError,
 ]);
 export type RelayProtectedError = typeof RelayProtectedError.Type;
 
 const RelayAuthAndInternalErrors = [RelayAuthInvalidError, RelayInternalError] as const;
+
+const RelayLinearOAuthErrors = [
+  RelayAuthInvalidError,
+  RelayLinearOAuthNotConfiguredError,
+  RelayInternalError,
+] as const;
 
 const RelayEnvironmentLinkErrors = [
   RelayAuthInvalidError,
@@ -1179,7 +1199,7 @@ export const RelayLinearOAuthStartEndpoint = HttpApiEndpoint.post(
     headers: RelayBearerRequestHeaders,
     payload: RelayLinearOAuthStartRequest,
     success: RelayLinearOAuthStartResponse,
-    error: RelayAuthAndInternalErrors,
+    error: RelayLinearOAuthErrors,
   },
 ).annotate(OpenApi.Summary, "Start a Linear OAuth authorization");
 
@@ -1201,7 +1221,7 @@ export const RelayLinearOAuthRefreshEndpoint = HttpApiEndpoint.post(
     params: Schema.Struct({ environmentId: EnvironmentId }),
     payload: RelayLinearOAuthRefreshRequest,
     success: RelayLinearOAuthRefreshResponse,
-    error: RelayAuthAndInternalErrors,
+    error: RelayLinearOAuthErrors,
   },
 ).annotate(OpenApi.Summary, "Refresh a delivered Linear access token");
 

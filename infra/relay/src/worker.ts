@@ -21,6 +21,8 @@ import {
   clientApi,
   dpopClientApi,
   healthApi,
+  linearClientApi,
+  linearServerApi,
   metadataApi,
   mobileApi,
   relayClientAuthLayer,
@@ -28,6 +30,7 @@ import {
   relayCors,
   relayDocsRedirectRoute,
   relayEnvironmentAuthLayer,
+  relayLinearOAuthCallbackRoute,
   relayNotFoundRoute,
   serverApi,
   traceRelayHttpRequestWith,
@@ -69,6 +72,9 @@ import * as EnvironmentLinker from "./environments/EnvironmentLinker.ts";
 import * as EnvironmentPublishSignatures from "./environments/EnvironmentPublishSignatures.ts";
 import * as ManagedEndpointProvider from "./environments/ManagedEndpointProvider.ts";
 import * as ManagedTunnelLimits from "./environments/ManagedTunnelLimits.ts";
+import * as LinearOAuth from "./linear/LinearOAuth.ts";
+import * as LinearOAuthStates from "./linear/LinearOAuthStates.ts";
+import * as LinearTokens from "./linear/LinearTokens.ts";
 import * as MobileRegistrations from "./agentActivity/MobileRegistrations.ts";
 
 const webcryptoLayer = Layer.succeed(
@@ -102,6 +108,8 @@ const relayApiLayer = Layer.mergeAll(
   tokenApi,
   dpopClientApi,
   serverApi,
+  linearClientApi,
+  linearServerApi,
 );
 
 const CloudMintKeyPair = Alchemy.KeyPair("CloudMintKeyPair");
@@ -169,6 +177,23 @@ export const ApiLive = Api.make(
     const clerkPublishableKey = yield* Config.string("CLERK_PUBLISHABLE_KEY");
     const clerkJwtAudience = yield* Config.string("CLERK_JWT_AUDIENCE");
 
+    const linearOAuthClientId = Option.getOrUndefined(
+      Option.filter(
+        yield* Config.option(Config.string("LINEAR_OAUTH_CLIENT_ID")),
+        (value) => value.trim().length > 0,
+      ),
+    );
+    const linearOAuthClientSecret = Option.getOrUndefined(
+      Option.filter(
+        yield* Config.option(Config.redacted("LINEAR_OAUTH_CLIENT_SECRET")),
+        (value) => Redacted.value(value).trim().length > 0,
+      ),
+    );
+    const linearOAuth =
+      linearOAuthClientId && linearOAuthClientSecret
+        ? { clientId: linearOAuthClientId, clientSecret: linearOAuthClientSecret }
+        : null;
+
     const cloudMintPrivateKey = yield* cloudMintKeyPair.privateKey;
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
     const hyperdrive = yield* Cloudflare.Hyperdrive.Connect(yield* RelayDb.RelayHyperdrive);
@@ -198,6 +223,7 @@ export const ApiLive = Api.make(
         cloudMintPublicKey: yield* cloudMintPublicKey,
         managedEndpointBaseDomain: yield* managedEndpointZoneName,
         managedEndpointNamespace: stage,
+        linearOAuth,
       });
     });
 
@@ -209,12 +235,15 @@ export const ApiLive = Api.make(
       }).pipe(Effect.map(makeRelayTraceLayer)),
     );
 
-    const runtimeLayer = Layer.empty.pipe(
+    const runtimeFoundationLayer = Layer.empty.pipe(
       Layer.provideMerge(MobileRegistrations.layer),
       Layer.provideMerge(AgentActivityPublisher.layer),
       Layer.provideMerge(EnvironmentConnector.layer),
       Layer.provideMerge(EnvironmentLinker.layer),
       Layer.provideMerge(EnvironmentPublishSignatures.layer),
+      Layer.provideMerge(LinearOAuth.layer),
+      Layer.provideMerge(LinearOAuthStates.layer),
+      Layer.provideMerge(LinearTokens.layer),
       Layer.provideMerge(
         ManagedEndpointProvider.layerCloudflareBindings(
           managedEndpointTunnelBinding,
@@ -223,6 +252,8 @@ export const ApiLive = Api.make(
         ),
       ),
       Layer.provideMerge(DpopProofs.layer),
+    );
+    const runtimeLayer = runtimeFoundationLayer.pipe(
       Layer.provideMerge(ApnsDeliveries.layer),
       Layer.provideMerge(
         FcmDeliveries.layer.pipe(
@@ -341,6 +372,7 @@ export const ApiLive = Api.make(
         ),
         HttpApiScalar.layer(RelayApi, { path: "/docs" }),
         relayDocsRedirectRoute,
+        relayLinearOAuthCallbackRoute.pipe(Layer.provide(runtimeLayer)),
       ).pipe(Layer.provide([Etag.layerWeak, httpPlatformNotSupportedLayer, relayCors])),
       relayNotFoundRoute,
     ).pipe(
