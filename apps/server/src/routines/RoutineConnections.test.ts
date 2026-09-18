@@ -24,6 +24,11 @@ import * as ServerConfig from "../config.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import type * as VcsProcess from "../vcs/VcsProcess.ts";
+import {
+  readLinearOAuthBundle,
+  saveLinearOAuthBundle,
+  type LinearOAuthBundle,
+} from "./LinearOAuth.ts";
 import { summarizeLinearEvent } from "./LinearRoutineEvents.ts";
 import { LinearRoutineMetadata, type LinearMetadataError } from "./LinearRoutineMetadata.ts";
 import {
@@ -164,20 +169,34 @@ const linearMetadataFixture: RoutineLinearMetadata = {
 };
 let linearMetadataRead: () => Effect.Effect<RoutineLinearMetadata, LinearMetadataError> = () =>
   Effect.succeed(linearMetadataFixture);
+let lastLinearMetadataCredential: string | null = null;
 const linearMetadataLayer = Layer.mock(LinearRoutineMetadata)({
-  read: () => linearMetadataRead(),
+  read: (credential) =>
+    Effect.sync(() => {
+      lastLinearMetadataCredential = credential;
+    }).pipe(Effect.andThen(linearMetadataRead())),
+});
+const freshOAuthBundle = (overrides: Partial<LinearOAuthBundle> = {}): LinearOAuthBundle => ({
+  accessToken: "linear-access-token",
+  refreshToken: "linear-refresh-token",
+  expiresAt: 1_800_000_000_000,
+  scope: "read",
+  ...overrides,
 });
 const DEFAULT_AUTHORIZE_URL = "https://linear.app/oauth/authorize?state=abc";
 const successfulStart: LinearOAuthRelayShape["start"] = () =>
   Effect.succeed({ authorizeUrl: DEFAULT_AUTHORIZE_URL });
 let linearOAuthStart: LinearOAuthRelayShape["start"] = successfulStart;
 let lastStartInput: { environmentId: string; connectionId: string } | null = null;
+const unusedRefresh: LinearOAuthRelayShape["refresh"] = () =>
+  Effect.die("LinearOAuthRelay.refresh is not used by this test");
+let linearOAuthRefresh: LinearOAuthRelayShape["refresh"] = unusedRefresh;
 const linearOAuthRelayLayer = Layer.mock(LinearOAuthRelay)({
   start: (input) =>
     Effect.sync(() => {
       lastStartInput = input;
     }).pipe(Effect.andThen(linearOAuthStart(input))),
-  refresh: () => Effect.die("LinearOAuthRelay.refresh is not used in these tests"),
+  refresh: (input) => linearOAuthRefresh(input),
 });
 const layer = RoutineConnectionsLive.pipe(
   Layer.provideMerge(RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory))),
@@ -539,26 +558,80 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
     }),
   );
 
-  it.effect("previews workspace metadata from an API key without storing anything", () =>
+  it.effect(
+    "reads workspace metadata from the stored OAuth bundle without a connection record",
+    () =>
+      Effect.gen(function* () {
+        const connections = yield* RoutineConnections;
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        const store = yield* RoutineStore;
+        const id = RoutineConnectionId.make("connection-linear-metadata-bundle");
+        yield* saveLinearOAuthBundle({
+          secrets,
+          connectionId: id,
+          bundle: freshOAuthBundle({ accessToken: "bundle-access-token" }),
+        });
+        const metadata = yield* connections.linearMetadata({ environmentId, connectionId: id });
+        assert.equal(metadata.workspace.name, "Acme");
+        assert.equal(metadata.teams[0]?.id, "team-1");
+        assert.equal(lastLinearMetadataCredential, "bundle-access-token");
+        assert.isNull(yield* store.findConnection(id));
+      }),
+  );
+
+  it.effect("refreshes a near-expiry bundle through the relay and persists the new token", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const id = RoutineConnectionId.make("connection-linear-metadata-refresh");
+      yield* saveLinearOAuthBundle({
+        secrets,
+        connectionId: id,
+        bundle: freshOAuthBundle({ accessToken: "stale-access-token", expiresAt: 30_000 }),
+      });
+      const refreshes: Array<{ environmentId: string; connectionId: string }> = [];
+      linearOAuthRefresh = (input) => {
+        refreshes.push(input);
+        return Effect.succeed({
+          accessToken: "refreshed-access-token",
+          expiresAt: 1_800_000_000_000,
+          scope: "read",
+        });
+      };
+      const metadata = yield* connections
+        .linearMetadata({ environmentId, connectionId: id })
+        .pipe(Effect.ensuring(Effect.sync(() => (linearOAuthRefresh = unusedRefresh))));
+      assert.equal(metadata.workspace.name, "Acme");
+      assert.deepEqual(refreshes, [{ environmentId, connectionId: id }]);
+      assert.equal(lastLinearMetadataCredential, "refreshed-access-token");
+      const stored = Option.getOrThrow(yield* readLinearOAuthBundle({ secrets, connectionId: id }));
+      assert.equal(stored.accessToken, "refreshed-access-token");
+      assert.equal(stored.refreshToken, "linear-refresh-token");
+    }),
+  );
+
+  it.effect("blocks metadata before Linear is connected", () =>
     Effect.gen(function* () {
       const connections = yield* RoutineConnections;
       const store = yield* RoutineStore;
-      const metadata = yield* connections.linearMetadata({
-        environmentId,
-        apiKey: "lin_api_preview",
-      });
-      assert.equal(metadata.workspace.name, "Acme");
-      assert.equal(metadata.teams[0]?.id, "team-1");
-      assert.isNull(yield* store.findConnection(RoutineConnectionId.make("lin_api_preview")));
+      const id = RoutineConnectionId.make("connection-linear-metadata-missing");
+      const error = yield* connections
+        .linearMetadata({ environmentId, connectionId: id })
+        .pipe(Effect.flip);
+      assert.equal(error.code, "blocked");
+      assert.include(error.message, "Connect Linear before reading workspace metadata.");
+      assert.isNull(yield* store.findConnection(id));
     }),
   );
 
   it.effect("names revoked metadata access and clears it after the next successful read", () =>
     Effect.gen(function* () {
       const connections = yield* RoutineConnections;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
       const store = yield* RoutineStore;
       const id = RoutineConnectionId.make("connection-linear-metadata-revoked");
       yield* connections.create(linearCreate(id));
+      yield* saveLinearOAuthBundle({ secrets, connectionId: id, bundle: freshOAuthBundle() });
       linearMetadataRead = () =>
         Effect.fail({ _tag: "access", message: "Authentication required" });
       const error = yield* connections

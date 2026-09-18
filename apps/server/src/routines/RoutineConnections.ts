@@ -23,6 +23,7 @@ import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
 import * as CloudManagedEndpointRuntime from "../cloud/ManagedEndpointRuntime.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import { ensureFreshLinearOAuthBundle } from "./LinearOAuth.ts";
 import { LinearRoutineMetadata, type LinearMetadataError } from "./LinearRoutineMetadata.ts";
 import {
   routineConnectionMetadataSecretName,
@@ -126,11 +127,10 @@ export interface RoutineConnectionsShape {
   readonly metadata: (input: {
     readonly repository?: string | undefined;
   }) => Effect.Effect<RoutineGitHubMetadata, RoutineError>;
-  readonly linearMetadata: (
-    input:
-      | { readonly environmentId: EnvironmentId; readonly connectionId: RoutineConnectionId }
-      | { readonly environmentId: EnvironmentId; readonly apiKey: string },
-  ) => Effect.Effect<RoutineLinearMetadata, RoutineError>;
+  readonly linearMetadata: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly connectionId: RoutineConnectionId;
+  }) => Effect.Effect<RoutineLinearMetadata, RoutineError>;
 }
 
 export class RoutineConnections extends Context.Service<
@@ -643,31 +643,19 @@ const makeRoutineConnections = Effect.gen(function* () {
   const linearMetadata: RoutineConnectionsShape["linearMetadata"] = Effect.fn(
     "RoutineConnections.linearMetadata",
   )(function* (input) {
-    if ("apiKey" in input) {
-      // Setup preview: the credential is used for this read only and is never
-      // stored or returned.
-      return yield* linearMetadataClient
-        .read(input.apiKey.trim())
-        .pipe(Effect.mapError(linearMetadataFailure));
-    }
-    const connection = yield* owned(input.environmentId, input.connectionId);
-    if (connection.provider !== "linear")
-      return yield* failure("validation", "This connection is not a Linear connection.");
-    const key = yield* secrets
-      .get(routineConnectionMetadataSecretName(connection.id))
-      .pipe(
-        Effect.mapError(() =>
-          failure("persistence", "Could not read the Linear metadata credential."),
-        ),
-      );
-    if (Option.isNone(key))
-      return yield* failure("blocked", "Add a Linear metadata API key to this connection.");
-    const result = yield* linearMetadataClient
-      .read(new TextDecoder().decode(key.value))
-      .pipe(Effect.result);
+    const id = yield* validateConnectionId(input.connectionId);
+    const bundle = yield* ensureFreshLinearOAuthBundle({
+      secrets,
+      relay: linearOAuthRelay,
+      environmentId: input.environmentId,
+      connectionId: id,
+    });
+    const found = yield* store.findConnection(id);
+    const connection = found !== null && found.environmentId === input.environmentId ? found : null;
+    const result = yield* linearMetadataClient.read(bundle.accessToken).pipe(Effect.result);
     const stampMetadataAccess = (metadataAccess: "ok" | "revoked") =>
       store
-        .updateConnection(connection.id, (current) =>
+        .updateConnection(id, (current) =>
           current.provider === "linear"
             ? { ...current, metadataAccess, updatedAt: DateTime.formatIso(DateTime.nowUnsafe()) }
             : current,
@@ -680,7 +668,7 @@ const makeRoutineConnections = Effect.gen(function* () {
     if (result._tag === "Failure") {
       if (result.failure._tag === "access") {
         // Revoked access is a named connection state, not an empty picker.
-        yield* stampMetadataAccess("revoked");
+        if (connection !== null) yield* stampMetadataAccess("revoked");
         return yield* failure(
           "blocked",
           "Linear metadata access was revoked. Disable this connection and create a new one with a working API key.",
@@ -688,7 +676,12 @@ const makeRoutineConnections = Effect.gen(function* () {
       }
       return yield* failure("blocked", result.failure.message);
     }
-    if (connection.metadataAccess === "revoked") yield* stampMetadataAccess("ok");
+    if (
+      connection !== null &&
+      connection.provider === "linear" &&
+      connection.metadataAccess === "revoked"
+    )
+      yield* stampMetadataAccess("ok");
     return result.success;
   });
 
