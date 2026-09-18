@@ -30,7 +30,7 @@ import {
   relayCors,
   relayDocsRedirectRoute,
   relayEnvironmentAuthLayer,
-  relayLinearOAuthCallbackRoute,
+  relayLinearOAuthCallbackHandler,
   relayNotFoundRoute,
   serverApi,
   traceRelayHttpRequestWith,
@@ -372,7 +372,11 @@ export const ApiLive = Api.make(
         ),
         HttpApiScalar.layer(RelayApi, { path: "/docs" }),
         relayDocsRedirectRoute,
-        relayLinearOAuthCallbackRoute.pipe(Layer.provide(runtimeLayer)),
+        HttpRouter.add(
+          "GET",
+          LinearOAuth.LINEAR_OAUTH_CALLBACK_PATH,
+          relayLinearOAuthCallbackHandler.pipe(Effect.provide(runtimeLayer)),
+        ),
       ).pipe(Layer.provide([Etag.layerWeak, httpPlatformNotSupportedLayer, relayCors])),
       relayNotFoundRoute,
     ).pipe(

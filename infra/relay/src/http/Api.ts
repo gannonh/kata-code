@@ -1174,109 +1174,104 @@ function escapeLinearOAuthHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-export const relayLinearOAuthCallbackRoute = HttpRouter.add(
-  "GET",
-  LinearOAuth.LINEAR_OAUTH_CALLBACK_PATH,
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const url = HttpServerRequest.toURL(request);
-    if (Option.isNone(url)) {
-      return linearOAuthCallbackPage(400, "This Linear authorization link is invalid.");
-    }
-    const params = url.value.searchParams;
-    const rejection = params.get("error");
-    if (rejection !== null) {
-      return linearOAuthCallbackPage(
-        400,
-        `Linear rejected the authorization (${safeAuthFailureReason(rejection)}).`,
-      );
-    }
-    const code = params.get("code");
-    const state = params.get("state");
-    if (!code || !state) {
-      return linearOAuthCallbackPage(
-        400,
-        "This Linear authorization link is missing its code or state.",
-      );
-    }
-    const oauth = yield* LinearOAuth.LinearOAuth;
-    const states = yield* LinearOAuthStates.LinearOAuthStates;
-    const tokens = yield* LinearTokens.LinearTokens;
-    const connector = yield* EnvironmentConnector.EnvironmentConnector;
-    const consumed = yield* states.consume({ state, now: yield* DateTime.now }).pipe(Effect.result);
-    if (Result.isFailure(consumed)) {
-      return consumed.failure._tag === "linear_oauth_state_rejected"
-        ? linearOAuthCallbackPage(
-            400,
-            "This Linear authorization link is invalid, expired, or already used.",
-          )
-        : linearOAuthCallbackPage(
-            500,
-            "Could not complete the Linear connection. Please try again.",
-          );
-    }
-    const binding = consumed.success;
-    const exchanged = yield* oauth
-      .exchangeCode({ code, codeVerifier: binding.codeVerifier })
-      .pipe(Effect.result);
-    if (Result.isFailure(exchanged)) {
-      switch (exchanged.failure._tag) {
-        case "linear_oauth_rejected":
-          return linearOAuthCallbackPage(400, "Linear rejected the authorization request.");
-        case "linear_oauth_not_configured":
-          return linearOAuthCallbackPage(
-            503,
-            "Kata Code Connect is not configured to connect to Linear.",
-          );
-        case "linear_oauth_unavailable":
-        case "linear_oauth_invalid_response":
-          return linearOAuthCallbackPage(
-            502,
-            "Could not reach Linear to finish connecting. Please retry.",
-          );
-      }
-    }
-    const bundle = exchanged.success;
-    const stored = yield* tokens
-      .save({
-        userId: binding.userId,
-        environmentId: binding.environmentId,
-        connectionId: binding.connectionId,
-        accessToken: bundle.accessToken,
-        refreshToken: bundle.refreshToken,
-        expiresAt: bundle.expiresAt,
-        scope: bundle.scope,
-      })
-      .pipe(Effect.result);
-    if (Result.isFailure(stored)) {
-      return linearOAuthCallbackPage(
-        500,
-        "Could not store the Linear connection. Please try again.",
-      );
-    }
-    const delivered = yield* connector
-      .deliverLinearOAuth({
-        userId: binding.userId,
-        environmentId: binding.environmentId,
-        connectionId: binding.connectionId,
-        accessToken: bundle.accessToken,
-        refreshToken: bundle.refreshToken,
-        expiresAt: bundle.expiresAt,
-        scope: bundle.scope,
-      })
-      .pipe(Effect.result);
-    if (Result.isFailure(delivered)) {
-      return linearOAuthCallbackPage(
-        502,
-        "Kata Code could not deliver the Linear connection to the environment. Please retry.",
-      );
-    }
+/**
+ * Exported as an effect, not a route: the worker provides the runtime layer
+ * inside the handler so the route layer carries no requirements that a
+ * plain-route `Layer.provide` can silently drop.
+ */
+export const relayLinearOAuthCallbackHandler = Effect.gen(function* () {
+  const request = yield* HttpServerRequest.HttpServerRequest;
+  const url = HttpServerRequest.toURL(request);
+  if (Option.isNone(url)) {
+    return linearOAuthCallbackPage(400, "This Linear authorization link is invalid.");
+  }
+  const params = url.value.searchParams;
+  const rejection = params.get("error");
+  if (rejection !== null) {
     return linearOAuthCallbackPage(
-      200,
-      "Kata Code is connected to Linear. You can close this window.",
+      400,
+      `Linear rejected the authorization (${safeAuthFailureReason(rejection)}).`,
     );
-  }),
-);
+  }
+  const code = params.get("code");
+  const state = params.get("state");
+  if (!code || !state) {
+    return linearOAuthCallbackPage(
+      400,
+      "This Linear authorization link is missing its code or state.",
+    );
+  }
+  const oauth = yield* LinearOAuth.LinearOAuth;
+  const states = yield* LinearOAuthStates.LinearOAuthStates;
+  const tokens = yield* LinearTokens.LinearTokens;
+  const connector = yield* EnvironmentConnector.EnvironmentConnector;
+  const consumed = yield* states.consume({ state, now: yield* DateTime.now }).pipe(Effect.result);
+  if (Result.isFailure(consumed)) {
+    return consumed.failure._tag === "linear_oauth_state_rejected"
+      ? linearOAuthCallbackPage(
+          400,
+          "This Linear authorization link is invalid, expired, or already used.",
+        )
+      : linearOAuthCallbackPage(500, "Could not complete the Linear connection. Please try again.");
+  }
+  const binding = consumed.success;
+  const exchanged = yield* oauth
+    .exchangeCode({ code, codeVerifier: binding.codeVerifier })
+    .pipe(Effect.result);
+  if (Result.isFailure(exchanged)) {
+    switch (exchanged.failure._tag) {
+      case "linear_oauth_rejected":
+        return linearOAuthCallbackPage(400, "Linear rejected the authorization request.");
+      case "linear_oauth_not_configured":
+        return linearOAuthCallbackPage(
+          503,
+          "Kata Code Connect is not configured to connect to Linear.",
+        );
+      case "linear_oauth_unavailable":
+      case "linear_oauth_invalid_response":
+        return linearOAuthCallbackPage(
+          502,
+          "Could not reach Linear to finish connecting. Please retry.",
+        );
+    }
+  }
+  const bundle = exchanged.success;
+  const stored = yield* tokens
+    .save({
+      userId: binding.userId,
+      environmentId: binding.environmentId,
+      connectionId: binding.connectionId,
+      accessToken: bundle.accessToken,
+      refreshToken: bundle.refreshToken,
+      expiresAt: bundle.expiresAt,
+      scope: bundle.scope,
+    })
+    .pipe(Effect.result);
+  if (Result.isFailure(stored)) {
+    return linearOAuthCallbackPage(500, "Could not store the Linear connection. Please try again.");
+  }
+  const delivered = yield* connector
+    .deliverLinearOAuth({
+      userId: binding.userId,
+      environmentId: binding.environmentId,
+      connectionId: binding.connectionId,
+      accessToken: bundle.accessToken,
+      refreshToken: bundle.refreshToken,
+      expiresAt: bundle.expiresAt,
+      scope: bundle.scope,
+    })
+    .pipe(Effect.result);
+  if (Result.isFailure(delivered)) {
+    return linearOAuthCallbackPage(
+      502,
+      "Kata Code could not deliver the Linear connection to the environment. Please retry.",
+    );
+  }
+  return linearOAuthCallbackPage(
+    200,
+    "Kata Code is connected to Linear. You can close this window.",
+  );
+});
 
 class ClerkTokenVerificationFailed extends Schema.TaggedError<ClerkTokenVerificationFailed>()(
   "ClerkTokenVerificationFailed",

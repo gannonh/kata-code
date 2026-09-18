@@ -21,7 +21,7 @@ import {
   RelayLinearOAuthRefreshResponse,
 } from "@kata-sh/code-contracts/relay";
 
-import { linearClientApi, linearServerApi, relayLinearOAuthCallbackRoute } from "./Api.ts";
+import { linearClientApi, linearServerApi, relayLinearOAuthCallbackHandler } from "./Api.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as EnvironmentConnector from "../environments/EnvironmentConnector.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
@@ -256,7 +256,11 @@ function toWebHandler(appLayer: ReturnType<typeof makeApiApp>) {
 const makeCallbackHandler = (services: ReturnType<typeof makeLinearTestServices>) =>
   Effect.sync(() =>
     HttpRouter.toWebHandler(
-      relayLinearOAuthCallbackRoute.pipe(
+      HttpRouter.add(
+        "GET",
+        LinearOAuth.LINEAR_OAUTH_CALLBACK_PATH,
+        relayLinearOAuthCallbackHandler.pipe(Effect.provide(services.layer)),
+      ).pipe(
         HttpRouter.provideRequest(services.layer),
         Layer.provide(services.layer),
         Layer.provide(HttpServer.layerServices),
