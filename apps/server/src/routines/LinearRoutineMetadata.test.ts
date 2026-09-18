@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vite-plus/test";
+import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import {
   makeLinearGraphqlRequest,
@@ -39,98 +40,127 @@ const metadataWith = (result: unknown | LinearMetadataError) =>
         : Effect.succeed(result),
   });
 
-const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect.pipe(Effect.result));
+/** The transport fails with an unknown success value, so flipping it detypes the error. */
+const expectFailure = (effect: Effect.Effect<unknown, LinearMetadataError>) =>
+  Effect.gen(function* () {
+    const result = yield* Effect.result(effect);
+    if (result._tag === "Success") return yield* Effect.die("Expected the request to fail.");
+    return result.failure;
+  });
+
+const decodeBodies = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ query: Schema.String })),
+);
 
 describe("Linear metadata reads", () => {
-  it("maps the GraphQL response to workspace, teams, projects, states, and labels", async () => {
-    const result = await run(metadataWith(response).read("lin_api_key"));
-    expect(result._tag).toBe("Success");
-    if (result._tag !== "Success") return;
-    expect(result.success.workspace).toEqual({ id: "workspace-1", name: "Acme", urlKey: "acme" });
-    expect(result.success.teams).toHaveLength(2);
-    expect(result.success.projects[0]?.teamIds).toEqual(["team-1"]);
-    expect(result.success.states[0]).toEqual({
-      id: "state-1",
-      name: "In Progress",
-      teamId: "team-1",
-      type: "started",
-    });
-    expect(result.success.labels[1]?.teamId).toBeNull();
-  });
+  it.effect("maps the GraphQL response to workspace, teams, projects, states, and labels", () =>
+    Effect.gen(function* () {
+      const result = yield* metadataWith(response).read("lin_oauth_access_token");
+      assert.deepEqual(result.workspace, { id: "workspace-1", name: "Acme", urlKey: "acme" });
+      assert.equal(result.teams.length, 2);
+      assert.deepEqual(result.projects[0]?.teamIds, ["team-1"]);
+      assert.deepEqual(result.states[0], {
+        id: "state-1",
+        name: "In Progress",
+        teamId: "team-1",
+        type: "started",
+      });
+      assert.isNull(result.labels[1]?.teamId);
+    }),
+  );
 
-  it("classifies revoked credentials as access errors", async () => {
-    const result = await run(
-      metadataWith({ _tag: "access", message: "Authentication required" }).read("bad"),
-    );
-    expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: "access" } });
-  });
+  it.effect("classifies revoked credentials as access errors", () =>
+    Effect.gen(function* () {
+      const failure = yield* Effect.flip(
+        metadataWith({ _tag: "access", message: "Authentication required" }).read("bad"),
+      );
+      assert.equal(failure._tag, "access");
+    }),
+  );
 
-  it("rejects an unexpected response shape without inventing resources", async () => {
-    const result = await run(metadataWith({ data: { organization: null } }).read("lin_api_key"));
-    expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: "invalid" } });
-  });
+  it.effect("rejects an unexpected response shape without inventing resources", () =>
+    Effect.gen(function* () {
+      const failure = yield* Effect.flip(
+        metadataWith({ data: { organization: null } }).read("lin_oauth_access_token"),
+      );
+      assert.equal(failure._tag, "invalid");
+    }),
+  );
 });
 
 describe("Linear GraphQL transport", () => {
   const request = (fetchImpl: typeof fetch) =>
     makeLinearGraphqlRequest(fetchImpl)({
-      apiKey: "lin_api_secret",
+      accessToken: "lin_oauth_access_token",
       query: "query X { viewer { id } }",
     });
 
-  it("posts the query with the API key in the Authorization header", async () => {
-    let seen: { url: string; init: RequestInit } | null = null;
-    const fetchImpl: typeof fetch = async (url, init) => {
-      seen = { url: String(url), init: init ?? {} };
-      return new Response(JSON.stringify({ data: { organization: {} } }), { status: 200 });
-    };
-    const result = await run(request(fetchImpl));
-    expect(result._tag).toBe("Success");
-    expect(seen!.url).toBe("https://api.linear.app/graphql");
-    expect((seen!.init.headers as Record<string, string>).authorization).toBe("lin_api_secret");
-    expect(JSON.parse(String(seen!.init.body))).toEqual({
-      query: "query X { viewer { id } }",
-    });
-  });
-
-  it("classifies 401 responses as access errors and keeps the key out of the message", async () => {
-    const fetchImpl: typeof fetch = async () =>
-      new Response(JSON.stringify({ errors: [{ message: "Authentication required" }] }), {
-        status: 401,
-      });
-    const result = await run(request(fetchImpl));
-    expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: "access" } });
-    if (result._tag === "Failure") expect(result.failure.message).not.toContain("lin_api_secret");
-  });
-
-  it("classifies GraphQL authentication errors on a 200 response as access errors", async () => {
-    const fetchImpl: typeof fetch = async () =>
-      new Response(
-        JSON.stringify({
-          errors: [
-            { message: "Authentication required", extensions: { code: "AUTHENTICATION_ERROR" } },
-          ],
-        }),
-        { status: 200 },
+  it.effect("posts the query with the OAuth access token as a Bearer header", () =>
+    Effect.gen(function* () {
+      const seen: Array<{ url: string; init: RequestInit }> = [];
+      const fetchImpl: typeof fetch = async (url, init) => {
+        seen.push({ url: String(url), init: init ?? {} });
+        return new Response(JSON.stringify({ data: { organization: {} } }), { status: 200 });
+      };
+      yield* request(fetchImpl);
+      const captured = seen[0]!;
+      assert.equal(captured.url, "https://api.linear.app/graphql");
+      assert.equal(
+        (captured.init.headers as Record<string, string>).authorization,
+        "Bearer lin_oauth_access_token",
       );
-    const result = await run(request(fetchImpl));
-    expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: "access" } });
-  });
+      assert.equal(decodeBodies(captured.init.body).query, "query X { viewer { id } }");
+    }),
+  );
 
-  it("classifies network failures and 5xx responses as unavailable", async () => {
-    const throwing: typeof fetch = async () => {
-      throw new Error("connect ECONNREFUSED");
-    };
-    const thrown = await run(request(throwing));
-    expect(thrown).toMatchObject({ _tag: "Failure", failure: { _tag: "unavailable" } });
-    const failing: typeof fetch = async () => new Response("nope", { status: 502 });
-    const failed = await run(request(failing));
-    expect(failed).toMatchObject({ _tag: "Failure", failure: { _tag: "unavailable" } });
-  });
+  it.effect(
+    "classifies 401 responses as access errors and keeps the token out of the message",
+    () =>
+      Effect.gen(function* () {
+        const fetchImpl: typeof fetch = async () =>
+          new Response(JSON.stringify({ errors: [{ message: "Authentication required" }] }), {
+            status: 401,
+          });
+        const failure = yield* expectFailure(request(fetchImpl));
+        assert.equal(failure._tag, "access");
+        assert.notInclude(failure.message, "lin_oauth_access_token");
+      }),
+  );
 
-  it("rejects a non-JSON body as an invalid response", async () => {
-    const fetchImpl: typeof fetch = async () => new Response("<html>", { status: 200 });
-    const result = await run(request(fetchImpl));
-    expect(result).toMatchObject({ _tag: "Failure", failure: { _tag: "invalid" } });
-  });
+  it.effect("classifies GraphQL authentication errors on a 200 response as access errors", () =>
+    Effect.gen(function* () {
+      const fetchImpl: typeof fetch = async () =>
+        new Response(
+          JSON.stringify({
+            errors: [
+              { message: "Authentication required", extensions: { code: "AUTHENTICATION_ERROR" } },
+            ],
+          }),
+          { status: 200 },
+        );
+      const failure = yield* expectFailure(request(fetchImpl));
+      assert.equal(failure._tag, "access");
+    }),
+  );
+
+  it.effect("classifies network failures and 5xx responses as unavailable", () =>
+    Effect.gen(function* () {
+      const throwing: typeof fetch = async () => {
+        throw new Error("connect ECONNREFUSED");
+      };
+      const thrown = yield* expectFailure(request(throwing));
+      assert.equal(thrown._tag, "unavailable");
+      const failing: typeof fetch = async () => new Response("nope", { status: 502 });
+      const failed = yield* expectFailure(request(failing));
+      assert.equal(failed._tag, "unavailable");
+    }),
+  );
+
+  it.effect("rejects a non-JSON body as an invalid response", () =>
+    Effect.gen(function* () {
+      const fetchImpl: typeof fetch = async () => new Response("<html>", { status: 200 });
+      const failure = yield* expectFailure(request(fetchImpl));
+      assert.equal(failure._tag, "invalid");
+    }),
+  );
 });

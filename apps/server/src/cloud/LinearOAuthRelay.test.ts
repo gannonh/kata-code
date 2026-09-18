@@ -243,6 +243,37 @@ it.effect("blocks both calls when the environment is not linked to a relay", () 
   }),
 );
 
+it.effect("revoke asks the relay to drop the Linear authorization", () =>
+  Effect.gen(function* () {
+    const { relay, requests } = makeHarness(() => Response.json({ ok: true }));
+
+    yield* relay.revoke({ environmentId: ENVIRONMENT_ID, connectionId: CONNECTION_ID });
+
+    assert.equal(requests.length, 1);
+    const request = requests[0]!;
+    assert.equal(request.method, "POST");
+    assert.equal(request.url, `${RELAY_URL}/v1/linear/oauth/revoke`);
+    assert.equal(request.headers.authorization, `Bearer ${CLIENT_ACCESS_TOKEN}`);
+    assert.deepEqual(requestJson(request), { connectionId: CONNECTION_ID });
+  }),
+);
+
+it.effect("blocks revoke when the environment holds no cloud client credential", () =>
+  Effect.gen(function* () {
+    const { relay, requests } = makeHarness(() => Response.json({ ok: true }), {
+      clientAccessToken: Option.none(),
+    });
+
+    const error = yield* relay
+      .revoke({ environmentId: ENVIRONMENT_ID, connectionId: CONNECTION_ID })
+      .pipe(Effect.flip);
+
+    assert.equal(error.code, "blocked");
+    assert.include(error.message, "katacode connect login");
+    assert.deepEqual(requests, []);
+  }),
+);
+
 it.effect("start asks the relay for a Linear authorize URL", () =>
   Effect.gen(function* () {
     const { relay, requests } = makeHarness(() =>

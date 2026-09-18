@@ -19,12 +19,12 @@ export type LinearMetadataError =
   | { readonly _tag: "invalid"; readonly message: string };
 
 export interface LinearGraphqlRequest {
-  readonly apiKey: string;
+  readonly accessToken: string;
   readonly query: string;
 }
 
 export interface LinearRoutineMetadataShape {
-  readonly read: (apiKey: string) => Effect.Effect<RoutineLinearMetadata, LinearMetadataError>;
+  readonly read: (accessToken: string) => Effect.Effect<RoutineLinearMetadata, LinearMetadataError>;
 }
 
 export class LinearRoutineMetadata extends Context.Service<
@@ -130,8 +130,8 @@ const graphqlErrors = (value: unknown): ReadonlyArray<unknown> => {
 };
 
 /**
- * The transport for one Linear GraphQL request. It never includes the API key
- * in an error message and never logs the request body.
+ * The transport for one Linear GraphQL request. It never includes the access
+ * token in an error message and never logs the request body.
  */
 export function makeLinearGraphqlRequest(fetchImpl: typeof fetch) {
   return (request: LinearGraphqlRequest): Effect.Effect<unknown, LinearMetadataError> =>
@@ -141,7 +141,7 @@ export function makeLinearGraphqlRequest(fetchImpl: typeof fetch) {
           fetchImpl(LINEAR_GRAPHQL_ENDPOINT, {
             method: "POST",
             headers: {
-              authorization: request.apiKey,
+              authorization: `Bearer ${request.accessToken}`,
               "content-type": "application/json",
             },
             body: encodeGraphqlBody({ query: request.query }),
@@ -155,7 +155,9 @@ export function makeLinearGraphqlRequest(fetchImpl: typeof fetch) {
       });
       if (response.status === 401 || response.status === 403)
         return yield* Effect.fail(
-          access("Linear rejected the metadata credential. Check the API key and its access."),
+          access(
+            "Linear rejected the OAuth access token. Disconnect and reconnect Linear, then try again.",
+          ),
         );
       if (response.status >= 500)
         return yield* Effect.fail(unavailable(`Linear returned status ${response.status}.`));
@@ -165,7 +167,9 @@ export function makeLinearGraphqlRequest(fetchImpl: typeof fetch) {
       const errors = graphqlErrors(parsed);
       if (errors.some(isAuthenticationError))
         return yield* Effect.fail(
-          access("Linear rejected the metadata credential. Check the API key and its access."),
+          access(
+            "Linear rejected the OAuth access token. Disconnect and reconnect Linear, then try again.",
+          ),
         );
       if (errors.length > 0)
         return yield* Effect.fail(
@@ -185,10 +189,11 @@ export function makeLinearGraphqlRequest(fetchImpl: typeof fetch) {
 export function makeLinearRoutineMetadata(dependencies: {
   readonly graphql: (request: LinearGraphqlRequest) => Effect.Effect<unknown, LinearMetadataError>;
 }): LinearRoutineMetadataShape {
-  const read: LinearRoutineMetadataShape["read"] = (apiKey) =>
-    dependencies.graphql({ apiKey, query: METADATA_QUERY }).pipe(
+  const decodeMetadata = Schema.decodeUnknownEffect(MetadataJson);
+  const read: LinearRoutineMetadataShape["read"] = (accessToken) =>
+    dependencies.graphql({ accessToken, query: METADATA_QUERY }).pipe(
       Effect.flatMap((raw) =>
-        Schema.decodeUnknownEffect(MetadataJson)(raw).pipe(
+        decodeMetadata(raw).pipe(
           Effect.mapError(() => invalid("Linear returned an unexpected metadata response.")),
         ),
       ),

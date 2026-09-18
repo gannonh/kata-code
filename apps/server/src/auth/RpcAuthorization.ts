@@ -36,7 +36,6 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.routinesConnectionsVerify]: AuthOrchestrationOperateScope,
   [WS_METHODS.routinesConnectionsDisable]: AuthOrchestrationOperateScope,
   [WS_METHODS.routinesConnectionsRotateSecret]: AuthOrchestrationOperateScope,
-  [WS_METHODS.routinesConnectionsAttachSecret]: AuthOrchestrationOperateScope,
   [WS_METHODS.routinesGitHubMetadata]: AuthOrchestrationReadScope,
   [WS_METHODS.routinesLinearMetadata]: AuthOrchestrationReadScope,
   [ORCHESTRATION_WS_METHODS.dispatchCommand]: AuthOrchestrationOperateScope,

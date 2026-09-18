@@ -23,10 +23,10 @@ import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
 import * as CloudManagedEndpointRuntime from "../cloud/ManagedEndpointRuntime.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
-import { ensureFreshLinearOAuthBundle } from "./LinearOAuth.ts";
+import { ensureFreshLinearOAuthBundle, routineLinearOAuthSecretName } from "./LinearOAuth.ts";
 import { LinearRoutineMetadata, type LinearMetadataError } from "./LinearRoutineMetadata.ts";
+import { LinearWebhookAdmin } from "./LinearRoutineWebhooks.ts";
 import {
-  routineConnectionMetadataSecretName,
   routineConnectionSecretName,
   routineLinearWebhookCallbackPath,
   routineWebhookCallbackPath,
@@ -96,12 +96,6 @@ export interface RoutineConnectionsShape {
   readonly create: (
     input: RoutineConnectionCreateInput & { readonly environmentId: EnvironmentId },
   ) => Effect.Effect<RoutineConnection, RoutineError>;
-  /** Linear only: stores the signing secret copied from the webhook's settings page. */
-  readonly attachSecret: (input: {
-    readonly environmentId: EnvironmentId;
-    readonly id: RoutineConnectionId;
-    readonly signingSecret: string;
-  }) => Effect.Effect<RoutineConnection, RoutineError>;
   /** Linear only: asks the relay for the provider URL that starts OAuth authorization. */
   readonly beginAuthorization: (input: {
     readonly environmentId: EnvironmentId;
@@ -151,6 +145,7 @@ const makeRoutineConnections = Effect.gen(function* () {
   const github = yield* GitHubCli.GitHubCli;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const linearMetadataClient = yield* LinearRoutineMetadata;
+  const linearWebhookAdmin = yield* LinearWebhookAdmin;
   const linearOAuthRelay = yield* LinearOAuthRelay;
   const config = yield* ServerConfig.ServerConfig;
   const endpointRuntime = yield* CloudManagedEndpointRuntime.CloudManagedEndpointRuntime;
@@ -217,43 +212,50 @@ const makeRoutineConnections = Effect.gen(function* () {
       );
     });
 
-  const linearMetadataFailure = (error: LinearMetadataError) =>
-    error._tag === "access"
-      ? failure(
-          "blocked",
-          "Linear rejected the metadata credential. Check the API key and its access.",
-        )
-      : failure("blocked", error.message);
+  const linearMetadataFailure = (error: LinearMetadataError) => failure("blocked", error.message);
   const createLinear = Effect.fn("RoutineConnections.createLinear")(function* (input: {
     readonly environmentId: EnvironmentId;
     readonly id: RoutineConnectionId;
-    readonly apiKey: string;
     readonly allTeams: boolean;
     readonly teamIds: ReadonlyArray<string>;
   }) {
+    const bundle = yield* ensureFreshLinearOAuthBundle({
+      secrets,
+      relay: linearOAuthRelay,
+      environmentId: input.environmentId,
+      connectionId: input.id,
+    });
     const baseUrl = yield* callbackBaseUrl;
-    const apiKey = input.apiKey.trim();
     const metadata = yield* linearMetadataClient
-      .read(apiKey)
+      .read(bundle.accessToken)
       .pipe(Effect.mapError(linearMetadataFailure));
-    const workspaceTeams = new Set(metadata.teams.map((team) => team.id));
     const teamIds = input.allTeams ? [] : [...input.teamIds];
-    if (!input.allTeams && teamIds.length === 0)
-      return yield* failure("validation", "Choose at least one team, or connect all public teams.");
+    if (!input.allTeams && teamIds.length !== 1)
+      return yield* failure("validation", "Choose exactly one team, or connect all public teams.");
+    const workspaceTeams = new Set(metadata.teams.map((team) => team.id));
     const unknownTeam = teamIds.find((teamId) => !workspaceTeams.has(teamId));
     if (unknownTeam !== undefined)
       return yield* failure("validation", "A selected team is not in this Linear workspace.");
-    const secretName = routineConnectionMetadataSecretName(input.id);
-    yield* secrets
-      .create(secretName, new TextEncoder().encode(apiKey))
-      .pipe(
-        Effect.mapError((error) =>
-          ServerSecretStore.isSecretAlreadyExistsError(error)
-            ? failure("conflict", "A routine connection with this ID already exists.")
-            : failure("persistence", "Could not store the metadata credential."),
-        ),
-      );
+    const secretName = routineConnectionSecretName(input.id);
+    const createdWebhookId = yield* Ref.make<string | null>(null);
     return yield* Effect.gen(function* () {
+      const callbackUrl = `${baseUrl}${routineLinearWebhookCallbackPath(input.id)}`;
+      const webhook = yield* linearWebhookAdmin.createWebhook({
+        accessToken: bundle.accessToken,
+        callbackUrl,
+        allTeams: input.allTeams,
+        teamId: teamIds[0],
+      });
+      yield* Ref.set(createdWebhookId, webhook.webhookId);
+      yield* secrets
+        .create(secretName, new TextEncoder().encode(webhook.secret))
+        .pipe(
+          Effect.mapError((error) =>
+            ServerSecretStore.isSecretAlreadyExistsError(error)
+              ? failure("conflict", "A routine connection with this ID already exists.")
+              : failure("persistence", "Could not store the signing secret."),
+          ),
+        );
       const now = yield* isoNow;
       const connection: RoutineConnection = {
         id: input.id,
@@ -263,8 +265,9 @@ const makeRoutineConnections = Effect.gen(function* () {
         workspaceName: metadata.workspace.name,
         teamIds,
         allTeams: input.allTeams,
+        webhookId: webhook.webhookId,
         metadataAccess: "ok",
-        callbackUrl: `${baseUrl}${routineLinearWebhookCallbackPath(input.id)}`,
+        callbackUrl,
         status: "pending",
         lastDelivery: null,
         acceptedCount: 0,
@@ -276,7 +279,8 @@ const makeRoutineConnections = Effect.gen(function* () {
       yield* store.saveConnection(connection);
       return connection;
     }).pipe(
-      // A failed setup releases the reserved credential so the id can be retried.
+      // A failed setup releases the reserved secret and removes the created
+      // webhook so the id can be retried instead of delivering to nothing.
       Effect.onError(() =>
         Effect.gen(function* () {
           const persisted = yield* store
@@ -285,12 +289,25 @@ const makeRoutineConnections = Effect.gen(function* () {
           if (persisted !== null) return;
           yield* secrets.remove(secretName).pipe(
             Effect.catch((error) =>
-              Effect.logWarning("routine Linear metadata credential cleanup failed", {
+              Effect.logWarning("routine Linear signing secret cleanup failed", {
                 connectionId: input.id,
                 detail: error.message,
               }),
             ),
           );
+          const webhookId = yield* Ref.get(createdWebhookId);
+          if (webhookId === null) return;
+          yield* linearWebhookAdmin
+            .deleteWebhook({ accessToken: bundle.accessToken, webhookId })
+            .pipe(
+              Effect.catch((error) =>
+                Effect.logWarning("routine Linear webhook cleanup failed", {
+                  connectionId: input.id,
+                  webhookId,
+                  detail: error.message,
+                }),
+              ),
+            );
         }),
       ),
     );
@@ -417,33 +434,6 @@ const makeRoutineConnections = Effect.gen(function* () {
     },
   );
 
-  const attachSecret: RoutineConnectionsShape["attachSecret"] = Effect.fn(
-    "RoutineConnections.attachSecret",
-  )(function* (input) {
-    const id = yield* validateConnectionId(input.id);
-    const current = yield* owned(input.environmentId, id);
-    if (current.provider !== "linear")
-      return yield* failure("validation", "Only Linear connections attach a signing secret.");
-    if (current.status === "disabled")
-      return yield* failure(
-        "blocked",
-        "This Linear connection is disabled. Create a new connection instead.",
-      );
-    const value = input.signingSecret.trim();
-    if (value.length === 0)
-      return yield* failure(
-        "validation",
-        "Paste the signing secret from the Linear webhook's settings page.",
-      );
-    yield* secrets
-      .set(routineConnectionSecretName(current.id), new TextEncoder().encode(value))
-      .pipe(Effect.mapError(() => failure("persistence", "Could not store the signing secret.")));
-    return yield* store.updateConnection(current.id, (connection) => ({
-      ...connection,
-      updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
-    }));
-  });
-
   const beginAuthorization: RoutineConnectionsShape["beginAuthorization"] = Effect.fn(
     "RoutineConnections.beginAuthorization",
   )(function* (input) {
@@ -484,7 +474,7 @@ const makeRoutineConnections = Effect.gen(function* () {
         if (Option.isNone(secret))
           return yield* failure(
             "blocked",
-            "Paste the signing secret from the Linear webhook's settings page, then verify again.",
+            "This Linear connection has no signing secret. Disable it and create a new connection.",
           );
         return yield* awaitStatus(input.environmentId, id, PING_WAIT_MS);
       }
@@ -508,22 +498,65 @@ const makeRoutineConnections = Effect.gen(function* () {
           Effect.mapError(() => failure("persistence", "Could not remove the signing secret.")),
         );
       if (current.provider === "linear") {
-        // The administrator created the webhook in Linear's settings, so Kata
-        // cannot remove it. Disconnect explains the provider-side removal while
-        // revoking local acceptance by deleting both stored secrets.
-        yield* secrets.remove(routineConnectionMetadataSecretName(current.id)).pipe(
+        // The provider-side delete and revoke are best effort; local
+        // acceptance already ended with the signing secret above.
+        if (current.webhookId !== null) {
+          const bundle = yield* ensureFreshLinearOAuthBundle({
+            secrets,
+            relay: linearOAuthRelay,
+            environmentId: input.environmentId,
+            connectionId: current.id,
+          }).pipe(Effect.result);
+          if (bundle._tag === "Success") {
+            yield* linearWebhookAdmin
+              .deleteWebhook({
+                accessToken: bundle.success.accessToken,
+                webhookId: current.webhookId,
+              })
+              .pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("routine Linear webhook could not be deleted", {
+                    connectionId: current.id,
+                    webhookId: current.webhookId,
+                    detail: error.message,
+                  }),
+                ),
+              );
+          } else {
+            yield* Effect.logWarning("routine Linear webhook delete skipped", {
+              connectionId: current.id,
+              detail: bundle.failure.message,
+            });
+          }
+        }
+        yield* linearOAuthRelay
+          .revoke({ environmentId: input.environmentId, connectionId: current.id })
+          .pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("routine Linear authorization could not be revoked", {
+                connectionId: current.id,
+                detail: error.message,
+              }),
+            ),
+          );
+        yield* secrets.remove(routineLinearOAuthSecretName(current.id)).pipe(
           Effect.catch((error) =>
-            Effect.logWarning("routine Linear metadata credential cleanup failed", {
+            Effect.logWarning("routine Linear OAuth bundle cleanup failed", {
               connectionId: current.id,
               detail: error.message,
             }),
           ),
         );
-        return yield* store.updateConnection(current.id, (connection) => ({
-          ...connection,
-          status: "disabled",
-          updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
-        }));
+        return yield* store.updateConnection(current.id, (connection) =>
+          connection.provider === "linear"
+            ? {
+                ...connection,
+                status: "disabled",
+                webhookId: null,
+                updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
+              }
+            : connection,
+        );
       }
       const updated = yield* store.updateConnection(current.id, (connection) =>
         connection.provider === "github"
@@ -564,7 +597,7 @@ const makeRoutineConnections = Effect.gen(function* () {
     if (current.provider === "linear")
       return yield* failure(
         "blocked",
-        "Rotate the signing secret in Linear's webhook settings, then attach the new value.",
+        "Linear owns this webhook's signing secret. Disable this connection and create a new one.",
       );
     if (current.status === "disabled" || current.hookId === null)
       return yield* failure("blocked", "Reconnect the repository before rotating its secret.");
@@ -688,7 +721,6 @@ const makeRoutineConnections = Effect.gen(function* () {
   return {
     list,
     create,
-    attachSecret,
     beginAuthorization,
     verify,
     disable,

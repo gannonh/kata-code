@@ -268,7 +268,6 @@ import {
   RoutineConnectionCreateInput,
   RoutineConnectionInput,
   RoutineConnectionList,
-  RoutineConnectionSecretInput,
   RoutineDraftGenerationInput,
   RoutineDraftGenerationResult,
   RoutineError,
@@ -305,7 +304,6 @@ export const WS_METHODS = {
   routinesConnectionsVerify: "routines.connections.verify",
   routinesConnectionsDisable: "routines.connections.disable",
   routinesConnectionsRotateSecret: "routines.connections.rotateSecret",
-  routinesConnectionsAttachSecret: "routines.connections.attachSecret",
   routinesGitHubMetadata: "routines.github.metadata",
   routinesLinearMetadata: "routines.linear.metadata",
 
@@ -563,12 +561,6 @@ const WsRoutinesConnectionsDisableRpc = Rpc.make(WS_METHODS.routinesConnectionsD
 
 const WsRoutinesConnectionsRotateSecretRpc = Rpc.make(WS_METHODS.routinesConnectionsRotateSecret, {
   payload: RoutineConnectionInput,
-  success: RoutineConnection,
-  error: RoutineRpcError,
-});
-
-const WsRoutinesConnectionsAttachSecretRpc = Rpc.make(WS_METHODS.routinesConnectionsAttachSecret, {
-  payload: RoutineConnectionSecretInput,
   success: RoutineConnection,
   error: RoutineRpcError,
 });
@@ -1491,7 +1483,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsRoutinesConnectionsVerifyRpc,
   WsRoutinesConnectionsDisableRpc,
   WsRoutinesConnectionsRotateSecretRpc,
-  WsRoutinesConnectionsAttachSecretRpc,
   WsRoutinesGitHubMetadataRpc,
   WsRoutinesLinearMetadataRpc,
   WsServerProbeRpc,

@@ -19,6 +19,7 @@ const environmentId = EnvironmentId.make("linear-oauth-environment");
 const relayWith = (refresh: LinearOAuthRelayShape["refresh"]): LinearOAuthRelayShape => ({
   start: () => Effect.die("LinearOAuthRelay.start is not used in these tests"),
   refresh,
+  revoke: () => Effect.die("LinearOAuthRelay.revoke is not used in these tests"),
 });
 
 const secretsLayer = ServerSecretStore.layer.pipe(

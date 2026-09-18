@@ -364,9 +364,8 @@ export const GitHubRoutineConnection = Schema.Struct({
 });
 export type GitHubRoutineConnection = typeof GitHubRoutineConnection.Type;
 /**
- * A Linear workspace webhook owned by this environment. The administrator
- * creates the webhook in Linear; this record stores only its identity and
- * scope. Both the signing secret and the metadata read credential live in the
+ * A Linear workspace webhook created by the server through the delivered
+ * OAuth access token. The signing secret and the OAuth bundle live in the
  * server secret store and never appear on this record.
  */
 export const LinearRoutineConnection = Schema.Struct({
@@ -377,6 +376,7 @@ export const LinearRoutineConnection = Schema.Struct({
   /** Teams the connected webhook may deliver for; empty means all public teams. */
   teamIds: Schema.Array(TrimmedNonEmptyString),
   allTeams: Schema.Boolean,
+  webhookId: Schema.NullOr(TrimmedNonEmptyString),
   metadataAccess: Schema.Literals(["ok", "revoked"]),
 });
 export type LinearRoutineConnection = typeof LinearRoutineConnection.Type;
@@ -391,8 +391,6 @@ export const RoutineGitHubConnectionCreateInput = Schema.Struct({
 export const RoutineLinearConnectionCreateInput = Schema.Struct({
   provider: Schema.Literal("linear"),
   id: RoutineConnectionId,
-  /** Least-privilege metadata read credential. Stored only on the server. */
-  apiKey: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
   allTeams: Schema.Boolean,
   teamIds: Schema.Array(TrimmedNonEmptyString),
 });
@@ -406,11 +404,6 @@ export const RoutineConnectionAuthorization = Schema.Struct({
   authorizeUrl: TrimmedNonEmptyString,
 });
 export type RoutineConnectionAuthorization = typeof RoutineConnectionAuthorization.Type;
-/** The webhook signing secret the administrator copies from Linear's settings. */
-export const RoutineConnectionSecretInput = Schema.Struct({
-  id: RoutineConnectionId,
-  signingSecret: TrimmedNonEmptyString.check(Schema.isMaxLength(500)),
-});
 export const RoutineGitHubMetadataInput = Schema.Struct({
   repository: Schema.optional(TrimmedNonEmptyString),
 });

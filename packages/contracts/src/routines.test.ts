@@ -382,9 +382,11 @@ describe("routine connection records", () => {
       workspaceName: "Acme",
       teamIds: ["team-1"],
       allTeams: false,
+      webhookId: "webhook-uuid",
       metadataAccess: "ok",
     });
     expect(linear.provider).toBe("linear");
+    if (linear.provider === "linear") expect(linear.webhookId).toBe("webhook-uuid");
     const github = decodeConnection({
       ...base,
       provider: "github",
@@ -434,7 +436,6 @@ describe("routine connection records", () => {
     const linear = decodeCreateInput({
       provider: "linear",
       id: "connection-linear",
-      apiKey: "lin_api_example",
       allTeams: true,
       teamIds: [],
     });

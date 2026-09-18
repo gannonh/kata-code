@@ -89,6 +89,7 @@ const linearConnection: RoutineConnection = {
   workspaceName: "Acme",
   teamIds: ["team-1"],
   allTeams: false,
+  webhookId: "webhook-1",
   metadataAccess: "ok",
   callbackUrl: `https://env.example/api/routines/webhooks/linear/${linearConnectionId}`,
   status: "pending",

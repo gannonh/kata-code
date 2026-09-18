@@ -1889,22 +1889,6 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "routines" },
           ),
-        [WS_METHODS.routinesConnectionsAttachSecret]: (input) =>
-          observeRpcEffect(
-            WS_METHODS.routinesConnectionsAttachSecret,
-            withRoutineConnections((connections) =>
-              serverEnvironment.getEnvironmentId.pipe(
-                Effect.flatMap((environmentId) =>
-                  connections.attachSecret({
-                    environmentId,
-                    id: input.id,
-                    signingSecret: input.signingSecret,
-                  }),
-                ),
-              ),
-            ),
-            { "rpc.aggregate": "routines" },
-          ),
         [WS_METHODS.routinesGitHubMetadata]: (input) =>
           observeRpcEffect(
             WS_METHODS.routinesGitHubMetadata,

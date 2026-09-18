@@ -34,10 +34,6 @@ export function isRoutineWebhookPath(url: string): boolean {
 export const routineConnectionSecretName = (connectionId: string) =>
   `routine-connection-${connectionId}`;
 
-/** Linear's metadata read credential is a second, separate secret per connection. */
-export const routineConnectionMetadataSecretName = (connectionId: string) =>
-  `routine-connection-metadata-${connectionId}`;
-
 export const routineWebhookCallbackPath = (connectionId: string) =>
   `${ROUTINE_WEBHOOK_ROUTE_PREFIX}/github/${encodeURIComponent(connectionId)}`;
 

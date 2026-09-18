@@ -26,18 +26,19 @@ import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import type * as VcsProcess from "../vcs/VcsProcess.ts";
 import {
   readLinearOAuthBundle,
+  routineLinearOAuthSecretName,
   saveLinearOAuthBundle,
   type LinearOAuthBundle,
 } from "./LinearOAuth.ts";
 import { summarizeLinearEvent } from "./LinearRoutineEvents.ts";
 import { LinearRoutineMetadata, type LinearMetadataError } from "./LinearRoutineMetadata.ts";
+import { LinearWebhookAdmin, type LinearWebhookAdminShape } from "./LinearRoutineWebhooks.ts";
 import {
   RoutineConnections,
   RoutineConnectionsLive,
   parseRepositoryName,
 } from "./RoutineConnections.ts";
 import {
-  routineConnectionMetadataSecretName,
   routineConnectionSecretName,
   routineLinearWebhookCallbackPath,
 } from "./RoutineWebhooks.ts";
@@ -191,12 +192,33 @@ let lastStartInput: { environmentId: string; connectionId: string } | null = nul
 const unusedRefresh: LinearOAuthRelayShape["refresh"] = () =>
   Effect.die("LinearOAuthRelay.refresh is not used by this test");
 let linearOAuthRefresh: LinearOAuthRelayShape["refresh"] = unusedRefresh;
+const revokeCalls: Array<{ environmentId: string; connectionId: string }> = [];
 const linearOAuthRelayLayer = Layer.mock(LinearOAuthRelay)({
   start: (input) =>
     Effect.sync(() => {
       lastStartInput = input;
     }).pipe(Effect.andThen(linearOAuthStart(input))),
   refresh: (input) => linearOAuthRefresh(input),
+  revoke: (input) =>
+    Effect.sync(() => {
+      revokeCalls.push(input);
+    }),
+});
+type WebhookCreateInput = Parameters<LinearWebhookAdminShape["createWebhook"]>[0];
+const webhookCreates: Array<WebhookCreateInput> = [];
+const webhookDeletes: Array<{ accessToken: string; webhookId: string }> = [];
+let webhookCreateStatus: "ok" | "failure" = "ok";
+const linearWebhookAdminLayer = Layer.mock(LinearWebhookAdmin)({
+  createWebhook: (input) => {
+    webhookCreates.push(input);
+    return webhookCreateStatus === "ok"
+      ? Effect.succeed({ webhookId: "linear-webhook-1", secret: "linear-signing-secret" })
+      : Effect.fail(new RoutineError({ code: "blocked", message: "Linear refused the webhook." }));
+  },
+  deleteWebhook: (input) =>
+    Effect.sync(() => {
+      webhookDeletes.push(input);
+    }),
 });
 const layer = RoutineConnectionsLive.pipe(
   Layer.provideMerge(RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory))),
@@ -204,6 +226,7 @@ const layer = RoutineConnectionsLive.pipe(
   Layer.provide(githubLayer),
   Layer.provide(endpointRuntimeLayer),
   Layer.provide(linearMetadataLayer),
+  Layer.provide(linearWebhookAdminLayer),
   Layer.provide(linearOAuthRelayLayer),
   Layer.provideMerge(configLayer),
   Layer.provide(NodeServices.layer),
@@ -461,12 +484,24 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
     environmentId,
     provider: "linear" as const,
     id,
-    apiKey: "lin_api_secret",
     allTeams: false,
     teamIds,
   });
+  const storeBundle = (id: RoutineConnectionId, accessToken = "bundle-access-token") =>
+    Effect.gen(function* () {
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      yield* secrets.set(
+        CLOUD_MANAGED_ENDPOINT_URL,
+        new TextEncoder().encode("https://env.example/"),
+      );
+      yield* saveLinearOAuthBundle({
+        secrets,
+        connectionId: id,
+        bundle: freshOAuthBundle({ accessToken }),
+      });
+    });
 
-  it.effect("creates a Linear connection from validated metadata and attaches its secret", () =>
+  it.effect("creates the Linear webhook from the stored OAuth bundle and stores its secret", () =>
     Effect.gen(function* () {
       const connections = yield* RoutineConnections;
       const secrets = yield* ServerSecretStore.ServerSecretStore;
@@ -476,27 +511,24 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
         new TextEncoder().encode("https://env.example/"),
       );
       const id = RoutineConnectionId.make("connection-linear-create");
+      yield* storeBundle(id);
       const connection = yield* connections.create(linearCreate(id));
       assert.equal(connection.provider, "linear");
       if (connection.provider !== "linear") return;
       assert.equal(connection.workspaceId, "workspace-1");
       assert.equal(connection.workspaceName, "Acme");
       assert.deepEqual(connection.teamIds, ["team-1"]);
+      assert.equal(connection.webhookId, "linear-webhook-1");
       assert.equal(connection.status, "pending");
-      assert.equal(
-        connection.callbackUrl,
-        `https://env.example${routineLinearWebhookCallbackPath(id)}`,
-      );
-      assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionSecretName(id))));
-      const storedKey = yield* secrets.get(routineConnectionMetadataSecretName(id));
-      assert.equal(new TextDecoder().decode(Option.getOrThrow(storedKey)), "lin_api_secret");
-
-      const attached = yield* connections.attachSecret({
-        environmentId,
-        id,
-        signingSecret: "linear-signing-secret",
+      const callbackUrl = `https://env.example${routineLinearWebhookCallbackPath(id)}`;
+      assert.equal(connection.callbackUrl, callbackUrl);
+      assert.deepEqual(webhookCreates.at(-1), {
+        accessToken: "bundle-access-token",
+        callbackUrl,
+        allTeams: false,
+        teamId: "team-1",
       });
-      assert.equal(attached.provider, "linear");
+      assert.equal(lastLinearMetadataCredential, "bundle-access-token");
       const storedSecret = yield* secrets.get(routineConnectionSecretName(id));
       assert.equal(
         new TextDecoder().decode(Option.getOrThrow(storedSecret)),
@@ -526,11 +558,68 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
     }),
   );
 
+  it.effect("connects all public teams when asked and records the empty team scope", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const id = RoutineConnectionId.make("connection-linear-all-teams");
+      yield* storeBundle(id);
+      const connection = yield* connections.create({
+        ...linearCreate(id, []),
+        allTeams: true,
+      });
+      assert.equal(connection.provider, "linear");
+      if (connection.provider !== "linear") return;
+      assert.deepEqual(connection.teamIds, []);
+      assert.equal(connection.allTeams, true);
+      assert.deepEqual(webhookCreates.at(-1), {
+        accessToken: "bundle-access-token",
+        callbackUrl: `https://env.example${routineLinearWebhookCallbackPath(id)}`,
+        allTeams: true,
+        teamId: undefined,
+      });
+    }),
+  );
+
+  it.effect("requires exactly one team when not connecting all public teams", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const none = RoutineConnectionId.make("connection-linear-no-team");
+      yield* storeBundle(none);
+      const noneError = yield* connections.create(linearCreate(none, [])).pipe(Effect.flip);
+      assert.equal(noneError.code, "validation");
+      assert.include(noneError.message, "exactly one team");
+
+      const many = RoutineConnectionId.make("connection-linear-many-teams");
+      yield* storeBundle(many);
+      const manyError = yield* connections
+        .create(linearCreate(many, ["team-1", "team-1"]))
+        .pipe(Effect.flip);
+      assert.equal(manyError.code, "validation");
+      assert.include(manyError.message, "exactly one team");
+    }),
+  );
+
+  it.effect("blocks creation before Linear is connected and saves nothing", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const store = yield* RoutineStore;
+      const id = RoutineConnectionId.make("connection-linear-not-connected");
+      const error = yield* connections.create(linearCreate(id)).pipe(Effect.flip);
+      assert.equal(error.code, "blocked");
+      assert.include(error.message, "Connect Linear before reading workspace metadata.");
+      assert.isNull(yield* store.findConnection(id));
+      assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionSecretName(id))));
+    }),
+  );
+
   it.effect("rejects a revoked credential and unknown teams without saving a connection", () =>
     Effect.gen(function* () {
       const connections = yield* RoutineConnections;
       const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const store = yield* RoutineStore;
       const revoked = RoutineConnectionId.make("connection-linear-revoked");
+      yield* storeBundle(revoked, "revoked-access-token");
       linearMetadataRead = () =>
         Effect.fail({ _tag: "access", message: "Authentication required" });
       const accessError = yield* connections
@@ -542,20 +631,47 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
           ),
         );
       assert.equal(accessError.code, "blocked");
-      assert.include(accessError.message, "access");
-      assert.isTrue(
-        Option.isNone(yield* secrets.get(routineConnectionMetadataSecretName(revoked))),
-      );
+      assert.isNull(yield* store.findConnection(revoked));
+      assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionSecretName(revoked))));
 
       const unknown = RoutineConnectionId.make("connection-linear-unknown-team");
+      yield* storeBundle(unknown);
       const teamError = yield* connections
         .create(linearCreate(unknown, ["team-missing"]))
         .pipe(Effect.flip);
       assert.equal(teamError.code, "validation");
-      assert.isTrue(
-        Option.isNone(yield* secrets.get(routineConnectionMetadataSecretName(unknown))),
-      );
+      assert.isNull(yield* store.findConnection(unknown));
+      assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionSecretName(unknown))));
     }),
+  );
+
+  it.effect(
+    "releases the signing secret and deletes the webhook when the connection cannot be saved",
+    () =>
+      Effect.gen(function* () {
+        const connections = yield* RoutineConnections;
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        const sql = yield* SqlClient.SqlClient;
+        const id = RoutineConnectionId.make("connection-linear-cleanup");
+        yield* storeBundle(id);
+        const deletesBefore = webhookDeletes.length;
+        yield* sql`CREATE TEMP TRIGGER fail_linear_connection_save BEFORE INSERT ON routine_connections
+        WHEN NEW.id='connection-linear-cleanup'
+        BEGIN SELECT RAISE(FAIL, 'simulated save failure'); END`;
+        const failed = yield* connections
+          .create(linearCreate(id))
+          .pipe(
+            Effect.flip,
+            Effect.ensuring(sql`DROP TRIGGER fail_linear_connection_save`.pipe(Effect.orDie)),
+          );
+        assert.equal(failed.code, "persistence");
+        assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionSecretName(id))));
+        assert.equal(webhookDeletes.length, deletesBefore + 1);
+        assert.deepEqual(webhookDeletes.at(-1), {
+          accessToken: "bundle-access-token",
+          webhookId: "linear-webhook-1",
+        });
+      }),
   );
 
   it.effect(
@@ -627,11 +743,10 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
   it.effect("names revoked metadata access and clears it after the next successful read", () =>
     Effect.gen(function* () {
       const connections = yield* RoutineConnections;
-      const secrets = yield* ServerSecretStore.ServerSecretStore;
       const store = yield* RoutineStore;
       const id = RoutineConnectionId.make("connection-linear-metadata-revoked");
+      yield* storeBundle(id);
       yield* connections.create(linearCreate(id));
-      yield* saveLinearOAuthBundle({ secrets, connectionId: id, bundle: freshOAuthBundle() });
       linearMetadataRead = () =>
         Effect.fail({ _tag: "access", message: "Authentication required" });
       const error = yield* connections
@@ -654,24 +769,28 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
   );
 
   it.effect(
-    "disabling a Linear connection removes both secrets and keeps the provider webhook",
+    "disabling a Linear connection deletes the webhook, revokes, and removes both secrets",
     () =>
       Effect.gen(function* () {
         const connections = yield* RoutineConnections;
         const secrets = yield* ServerSecretStore.ServerSecretStore;
         const id = RoutineConnectionId.make("connection-linear-disable");
+        yield* storeBundle(id);
         yield* connections.create(linearCreate(id));
-        yield* connections.attachSecret({
-          environmentId,
-          id,
-          signingSecret: "linear-signing-secret",
-        });
-        const callsBefore = calls.length;
+        const deletesBefore = webhookDeletes.length;
+        const revokesBefore = revokeCalls.length;
         const disabled = yield* connections.disable({ environmentId, id });
         assert.equal(disabled.status, "disabled");
+        assert.equal(disabled.provider === "linear" ? disabled.webhookId : "webhook", null);
         assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionSecretName(id))));
-        assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionMetadataSecretName(id))));
-        assert.equal(calls.length, callsBefore);
+        assert.isTrue(Option.isNone(yield* secrets.get(routineLinearOAuthSecretName(id))));
+        assert.equal(webhookDeletes.length, deletesBefore + 1);
+        assert.deepEqual(webhookDeletes.at(-1), {
+          accessToken: "bundle-access-token",
+          webhookId: "linear-webhook-1",
+        });
+        assert.equal(revokeCalls.length, revokesBefore + 1);
+        assert.deepEqual(revokeCalls.at(-1), { environmentId, connectionId: id });
       }),
   );
 

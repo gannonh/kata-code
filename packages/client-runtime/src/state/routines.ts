@@ -141,12 +141,6 @@ export function createRoutineEnvironmentAtoms<R, E>(
     concurrency: connectionConcurrency,
   });
 
-  const attachConnectionSecret = createEnvironmentRpcCommand(runtime, {
-    label: "environment-data:routines:connections:attach-secret",
-    tag: WS_METHODS.routinesConnectionsAttachSecret,
-    concurrency: connectionConcurrency,
-  });
-
   return {
     changes,
     list,
@@ -162,7 +156,6 @@ export function createRoutineEnvironmentAtoms<R, E>(
     linearMetadata,
     createConnection,
     beginConnectionAuthorization,
-    attachConnectionSecret,
     verifyConnection,
     disableConnection,
     rotateConnectionSecret,

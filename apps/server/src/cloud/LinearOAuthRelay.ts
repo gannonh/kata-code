@@ -32,6 +32,11 @@ export interface LinearOAuthRelayShape {
     { readonly accessToken: string; readonly expiresAt: number; readonly scope: string },
     RoutineError
   >;
+  /** Client-authenticated: revokes the stored Linear authorization. */
+  readonly revoke: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly connectionId: string;
+  }) => Effect.Effect<void, RoutineError>;
 }
 
 export interface LinearOAuthRelayDependencies {
@@ -59,13 +64,13 @@ const isRelayAuthInvalidError = Schema.is(RelayAuthInvalidError);
 const isRelayLinearOAuthNotConfiguredError = Schema.is(RelayLinearOAuthNotConfiguredError);
 
 const relayFailure =
-  (action: "authorize" | "refresh") =>
+  (action: "authorize" | "refresh" | "revoke") =>
   (cause: unknown): RoutineError => {
     if (isRelayAuthInvalidError(cause)) {
       return blocked(
-        action === "authorize"
-          ? "Kata Code Connect rejected this machine's cloud authorization. Run `katacode connect login`, then try again."
-          : "Kata Code Connect rejected this environment's relay credential. Relink this environment, then try again.",
+        action === "refresh"
+          ? "Kata Code Connect rejected this environment's relay credential. Relink this environment, then try again."
+          : "Kata Code Connect rejected this machine's cloud authorization. Run `katacode connect login`, then try again.",
       );
     }
     if (isRelayLinearOAuthNotConfiguredError(cause)) {
@@ -76,7 +81,9 @@ const relayFailure =
     return blocked(
       action === "authorize"
         ? "Could not reach Kata Code Connect to authorize Linear. Check this machine's network connection, then try again."
-        : "Could not reach Kata Code Connect to refresh the Linear token. Check this machine's network connection, then try again.",
+        : action === "refresh"
+          ? "Could not reach Kata Code Connect to refresh the Linear token. Check this machine's network connection, then try again."
+          : "Could not reach Kata Code Connect to revoke the Linear authorization. Check this machine's network connection, then try again.",
     );
   };
 
@@ -167,7 +174,28 @@ export function makeLinearOAuthRelay(
     },
   );
 
-  return { start, refresh };
+  const revoke: LinearOAuthRelayShape["revoke"] = Effect.fn("LinearOAuthRelay.revoke")(
+    function* (input) {
+      const relayUrl = yield* requireRelayUrl(dependencies.relayUrl);
+      const accessToken = yield* requireValue(
+        dependencies.clientAccessToken,
+        MISSING_CLIENT_CREDENTIAL,
+      );
+      const client = yield* makeRelayClient({
+        httpClient: dependencies.httpClient,
+        relayUrl,
+        authorization: null,
+      });
+      yield* client.linearClient
+        .linearOAuthRevoke({
+          headers: { authorization: `Bearer ${accessToken}` },
+          payload: { connectionId: input.connectionId },
+        })
+        .pipe(Effect.mapError(relayFailure("revoke")));
+    },
+  );
+
+  return { start, refresh, revoke };
 }
 
 const readSecretString = (
