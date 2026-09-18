@@ -77,6 +77,7 @@ describe("RPC authorization scopes", () => {
     }
     for (const method of [
       WS_METHODS.routinesConnectionsCreate,
+      WS_METHODS.routinesConnectionsBeginAuthorization,
       WS_METHODS.routinesConnectionsVerify,
       WS_METHODS.routinesConnectionsDisable,
       WS_METHODS.routinesConnectionsRotateSecret,

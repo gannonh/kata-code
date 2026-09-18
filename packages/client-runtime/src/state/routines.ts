@@ -117,6 +117,12 @@ export function createRoutineEnvironmentAtoms<R, E>(
     concurrency: connectionConcurrency,
   });
 
+  const beginConnectionAuthorization = createEnvironmentRpcCommand(runtime, {
+    label: "environment-data:routines:connections:begin-authorization",
+    tag: WS_METHODS.routinesConnectionsBeginAuthorization,
+    concurrency: connectionConcurrency,
+  });
+
   const verifyConnection = createEnvironmentRpcCommand(runtime, {
     label: "environment-data:routines:connections:verify",
     tag: WS_METHODS.routinesConnectionsVerify,
@@ -155,6 +161,7 @@ export function createRoutineEnvironmentAtoms<R, E>(
     gitHubMetadata,
     linearMetadata,
     createConnection,
+    beginConnectionAuthorization,
     attachConnectionSecret,
     verifyConnection,
     disableConnection,

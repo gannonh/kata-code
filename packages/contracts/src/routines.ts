@@ -402,6 +402,10 @@ export const RoutineConnectionCreateInput = Schema.Union([
 ]);
 export type RoutineConnectionCreateInput = typeof RoutineConnectionCreateInput.Type;
 export const RoutineConnectionInput = Schema.Struct({ id: RoutineConnectionId });
+export const RoutineConnectionAuthorization = Schema.Struct({
+  authorizeUrl: TrimmedNonEmptyString,
+});
+export type RoutineConnectionAuthorization = typeof RoutineConnectionAuthorization.Type;
 /** The webhook signing secret the administrator copies from Linear's settings. */
 export const RoutineConnectionSecretInput = Schema.Struct({
   id: RoutineConnectionId,

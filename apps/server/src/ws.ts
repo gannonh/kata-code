@@ -1841,6 +1841,18 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "routines" },
           ),
+        [WS_METHODS.routinesConnectionsBeginAuthorization]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsBeginAuthorization,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) =>
+                  connections.beginAuthorization({ environmentId, id: input.id }),
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
         [WS_METHODS.routinesConnectionsVerify]: (input) =>
           observeRpcEffect(
             WS_METHODS.routinesConnectionsVerify,

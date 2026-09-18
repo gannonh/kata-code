@@ -140,6 +140,7 @@ import { shouldRetryCloudLink } from "./cloud/relayResponse.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
+import { LinearOAuthRelayLive } from "./cloud/LinearOAuthRelay.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as DesktopAppUpdate from "./desktopUpdate/DesktopAppUpdate.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
@@ -561,6 +562,7 @@ const RuntimeCoreDependenciesLive = RoutineSchedulerLive.pipe(
       Layer.provide(RoutineStoreLayerLive),
       Layer.provide(GitHubCli.layer.pipe(Layer.provide(VcsProcess.layer))),
       Layer.provide(LinearRoutineMetadataLive),
+      Layer.provide(LinearOAuthRelayLive),
     ),
   ),
   Layer.provideMerge(RoutineStoreLayerLive),

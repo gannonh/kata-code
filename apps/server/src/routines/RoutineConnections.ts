@@ -18,6 +18,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { LinearOAuthRelay } from "../cloud/LinearOAuthRelay.ts";
 import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
 import * as CloudManagedEndpointRuntime from "../cloud/ManagedEndpointRuntime.ts";
@@ -100,6 +101,11 @@ export interface RoutineConnectionsShape {
     readonly id: RoutineConnectionId;
     readonly signingSecret: string;
   }) => Effect.Effect<RoutineConnection, RoutineError>;
+  /** Linear only: asks the relay for the provider URL that starts OAuth authorization. */
+  readonly beginAuthorization: (input: {
+    readonly environmentId: EnvironmentId;
+    readonly id: RoutineConnectionId;
+  }) => Effect.Effect<{ readonly authorizeUrl: string }, RoutineError>;
   /**
    * GitHub waits for the provider ping, asking GitHub to resend it once if it
    * has not arrived. Linear has no ping event, so it waits for the first
@@ -145,6 +151,7 @@ const makeRoutineConnections = Effect.gen(function* () {
   const github = yield* GitHubCli.GitHubCli;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const linearMetadataClient = yield* LinearRoutineMetadata;
+  const linearOAuthRelay = yield* LinearOAuthRelay;
   const config = yield* ServerConfig.ServerConfig;
   const endpointRuntime = yield* CloudManagedEndpointRuntime.CloudManagedEndpointRuntime;
   const cwd = config.cwd;
@@ -437,6 +444,16 @@ const makeRoutineConnections = Effect.gen(function* () {
     }));
   });
 
+  const beginAuthorization: RoutineConnectionsShape["beginAuthorization"] = Effect.fn(
+    "RoutineConnections.beginAuthorization",
+  )(function* (input) {
+    const id = yield* validateConnectionId(input.id);
+    return yield* linearOAuthRelay.start({
+      environmentId: input.environmentId,
+      connectionId: id,
+    });
+  });
+
   const awaitStatus = (environmentId: EnvironmentId, id: RoutineConnectionId, budgetMs: number) =>
     Effect.gen(function* () {
       const started = yield* Clock.currentTimeMillis;
@@ -679,6 +696,7 @@ const makeRoutineConnections = Effect.gen(function* () {
     list,
     create,
     attachSecret,
+    beginAuthorization,
     verify,
     disable,
     rotateSecret,

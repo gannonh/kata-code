@@ -17,6 +17,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { LinearOAuthRelay, type LinearOAuthRelayShape } from "../cloud/LinearOAuthRelay.ts";
 import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
 import * as CloudManagedEndpointRuntime from "../cloud/ManagedEndpointRuntime.ts";
 import * as ServerConfig from "../config.ts";
@@ -166,12 +167,25 @@ let linearMetadataRead: () => Effect.Effect<RoutineLinearMetadata, LinearMetadat
 const linearMetadataLayer = Layer.mock(LinearRoutineMetadata)({
   read: () => linearMetadataRead(),
 });
+const DEFAULT_AUTHORIZE_URL = "https://linear.app/oauth/authorize?state=abc";
+const successfulStart: LinearOAuthRelayShape["start"] = () =>
+  Effect.succeed({ authorizeUrl: DEFAULT_AUTHORIZE_URL });
+let linearOAuthStart: LinearOAuthRelayShape["start"] = successfulStart;
+let lastStartInput: { environmentId: string; connectionId: string } | null = null;
+const linearOAuthRelayLayer = Layer.mock(LinearOAuthRelay)({
+  start: (input) =>
+    Effect.sync(() => {
+      lastStartInput = input;
+    }).pipe(Effect.andThen(linearOAuthStart(input))),
+  refresh: () => Effect.die("LinearOAuthRelay.refresh is not used in these tests"),
+});
 const layer = RoutineConnectionsLive.pipe(
   Layer.provideMerge(RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory))),
   Layer.provideMerge(secretsLayer),
   Layer.provide(githubLayer),
   Layer.provide(endpointRuntimeLayer),
   Layer.provide(linearMetadataLayer),
+  Layer.provide(linearOAuthRelayLayer),
   Layer.provideMerge(configLayer),
   Layer.provide(NodeServices.layer),
 );
@@ -586,5 +600,55 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
         assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionMetadataSecretName(id))));
         assert.equal(calls.length, callsBefore);
       }),
+  );
+
+  it.effect("begins a Linear authorization through the relay for this environment", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const id = RoutineConnectionId.make("connection-linear-begin");
+      const authorization = yield* connections.beginAuthorization({ environmentId, id });
+      assert.deepEqual(authorization, { authorizeUrl: DEFAULT_AUTHORIZE_URL });
+      assert.deepEqual(lastStartInput, { environmentId, connectionId: id });
+    }),
+  );
+
+  it.effect("rejects a path-like connection id before asking the relay", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      lastStartInput = null;
+      const error = yield* connections
+        .beginAuthorization({
+          environmentId,
+          id: "../escape" as RoutineConnectionId,
+        })
+        .pipe(Effect.flip);
+      assert.equal(error.code, "validation");
+      assert.isNull(lastStartInput);
+    }),
+  );
+
+  it.effect("surfaces a relay failure as a RoutineError", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      linearOAuthStart = () =>
+        Effect.fail(
+          new RoutineError({
+            code: "blocked",
+            message: "Could not reach Kata Code Connect to authorize Linear.",
+          }),
+        );
+      const error = yield* connections
+        .beginAuthorization({
+          environmentId,
+          id: RoutineConnectionId.make("connection-linear-begin-failure"),
+        })
+        .pipe(
+          Effect.flip,
+          Effect.ensuring(Effect.sync(() => (linearOAuthStart = successfulStart))),
+        );
+      assert.instanceOf(error, RoutineError);
+      assert.equal(error.code, "blocked");
+      assert.include(error.message, "Could not reach Kata Code Connect");
+    }),
   );
 });

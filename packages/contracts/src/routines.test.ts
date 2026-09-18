@@ -12,6 +12,7 @@ import {
   RoutineDraftGenerationResult,
   RoutineError,
   RoutineConnection,
+  RoutineConnectionAuthorization,
   RoutineConnectionCreateInput,
   RoutineLinearMetadata,
   RoutineRun,
@@ -438,5 +439,15 @@ describe("routine connection records", () => {
       teamIds: [],
     });
     expect(linear.provider).toBe("linear");
+  });
+
+  it("decodes a Linear authorization URL and rejects a blank one", () => {
+    const decodeAuthorization = Schema.decodeUnknownSync(RoutineConnectionAuthorization);
+    expect(
+      decodeAuthorization({ authorizeUrl: "https://linear.app/oauth/authorize?state=abc" })
+        .authorizeUrl,
+    ).toBe("https://linear.app/oauth/authorize?state=abc");
+    expect(() => decodeAuthorization({ authorizeUrl: " " })).toThrow();
+    expect(() => decodeAuthorization({})).toThrow();
   });
 });

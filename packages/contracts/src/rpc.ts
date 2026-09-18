@@ -264,6 +264,7 @@ import {
   Routine,
   RoutineChangeInput,
   RoutineConnection,
+  RoutineConnectionAuthorization,
   RoutineConnectionCreateInput,
   RoutineConnectionInput,
   RoutineConnectionList,
@@ -299,6 +300,7 @@ export const WS_METHODS = {
   routinesSubscribe: "routines.subscribe",
   routinesDraft: "routines.draft",
   routinesConnectionsList: "routines.connections.list",
+  routinesConnectionsBeginAuthorization: "routines.connections.beginAuthorization",
   routinesConnectionsCreate: "routines.connections.create",
   routinesConnectionsVerify: "routines.connections.verify",
   routinesConnectionsDisable: "routines.connections.disable",
@@ -537,6 +539,15 @@ const WsRoutinesConnectionsCreateRpc = Rpc.make(WS_METHODS.routinesConnectionsCr
   success: RoutineConnection,
   error: RoutineRpcError,
 });
+
+const WsRoutinesConnectionsBeginAuthorizationRpc = Rpc.make(
+  WS_METHODS.routinesConnectionsBeginAuthorization,
+  {
+    payload: RoutineConnectionInput,
+    success: RoutineConnectionAuthorization,
+    error: RoutineRpcError,
+  },
+);
 
 const WsRoutinesConnectionsVerifyRpc = Rpc.make(WS_METHODS.routinesConnectionsVerify, {
   payload: RoutineConnectionInput,
@@ -1476,6 +1487,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsRoutinesDraftRpc,
   WsRoutinesConnectionsListRpc,
   WsRoutinesConnectionsCreateRpc,
+  WsRoutinesConnectionsBeginAuthorizationRpc,
   WsRoutinesConnectionsVerifyRpc,
   WsRoutinesConnectionsDisableRpc,
   WsRoutinesConnectionsRotateSecretRpc,
