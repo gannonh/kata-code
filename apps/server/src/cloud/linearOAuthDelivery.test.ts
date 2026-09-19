@@ -21,16 +21,15 @@ import { environmentAuthenticatedAuthLayer } from "../auth/http.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import { readLinearOAuthBundle, routineLinearOAuthSecretName } from "../routines/LinearOAuth.ts";
+import { readLinearAccessToken, routineLinearOAuthSecretName } from "../routines/LinearOAuth.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
-import { CLOUD_MINT_PUBLIC_KEY, RELAY_ISSUER_SECRET } from "./config.ts";
+import { CLOUD_LINKED_USER_ID, CLOUD_MINT_PUBLIC_KEY, RELAY_ISSUER_SECRET } from "./config.ts";
 import { connectHttpApiLayer } from "./http.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
 
 const environmentId = EnvironmentId.make("environment-linear-oauth");
 const connectionId = "connection-linear-oauth";
 const accessToken = "linear-access-token-secret";
-const refreshToken = "linear-refresh-token-secret";
 const tokenExpiresAt = 1_800_000_000_000;
 const scope = "read issues:create";
 
@@ -80,6 +79,7 @@ const seedCloudSecrets = (publicKey: string) =>
     const secrets = yield* ServerSecretStore.ServerSecretStore;
     yield* secrets.set(CLOUD_MINT_PUBLIC_KEY, new TextEncoder().encode(publicKey));
     yield* secrets.set(RELAY_ISSUER_SECRET, new TextEncoder().encode("https://relay.example.test"));
+    yield* secrets.set(CLOUD_LINKED_USER_ID, new TextEncoder().encode("user_123"));
   });
 
 const makeDeliveryProof = (input: {
@@ -91,19 +91,18 @@ const makeDeliveryProof = (input: {
   readonly jwtExpiresAt: string;
   readonly issuer?: string;
   readonly audience?: string;
+  readonly subject?: string;
+  readonly connectionId?: string;
 }) => {
   const nowSeconds = Math.floor(DateTime.makeUnsafe(input.issuedAt).epochMilliseconds / 1_000);
   const payload = {
     iss: input.issuer ?? "https://relay.example.test",
     aud: input.audience ?? wireEnvironmentIssuer(environmentId),
-    sub: "user_123",
+    sub: input.subject ?? "user_123",
     jti: input.jti,
     environmentId: input.environmentId,
-    connectionId,
-    accessToken,
-    refreshToken,
-    expiresAt: tokenExpiresAt,
-    scope,
+    connectionId: input.connectionId ?? connectionId,
+    token: { accessToken, expiresAt: tokenExpiresAt, scope },
     nonce: input.nonce,
     iat: nowSeconds,
     exp: Math.floor(DateTime.makeUnsafe(input.jwtExpiresAt).epochMilliseconds / 1_000),
@@ -118,7 +117,15 @@ const makeDeliveryProof = (input: {
   };
 };
 
-const proofFor = (privateKey: string, options?: { readonly environmentId?: EnvironmentId }) =>
+const proofFor = (
+  privateKey: string,
+  options?: {
+    readonly environmentId?: EnvironmentId;
+    readonly subject?: string;
+    readonly connectionId?: string;
+    readonly lifetimeMinutes?: number;
+  },
+) =>
   Effect.gen(function* () {
     const now = yield* DateTime.now;
     const unique = NodeCrypto.randomUUID();
@@ -128,7 +135,11 @@ const proofFor = (privateKey: string, options?: { readonly environmentId?: Envir
       jti: `linear-oauth-jti-${unique}`,
       nonce: `linear-oauth-nonce-${unique}`,
       issuedAt: DateTime.formatIso(now),
-      jwtExpiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
+      jwtExpiresAt: DateTime.formatIso(
+        DateTime.add(now, { minutes: options?.lifetimeMinutes ?? 5 }),
+      ),
+      ...(options?.subject ? { subject: options.subject } : {}),
+      ...(options?.connectionId ? { connectionId: options.connectionId } : {}),
     });
   });
 
@@ -149,7 +160,7 @@ const postProof = (proof: string) =>
 it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
   "linear oauth delivery",
   (it) => {
-    it.effect("stores a signed bundle and answers ok", () =>
+    it.effect("stores the delivered access token and answers ok", () =>
       Effect.gen(function* () {
         const keyPair = generateCloudKeyPair();
         yield* seedCloudSecrets(keyPair.publicKey);
@@ -162,10 +173,9 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
         const secrets = yield* ServerSecretStore.ServerSecretStore;
         const stored = yield* secrets.get(routineLinearOAuthSecretName(connectionId));
         assert.isTrue(Option.isSome(stored));
-        const bundle = yield* readLinearOAuthBundle({ secrets, connectionId });
-        assert.deepEqual(Option.getOrNull(bundle), {
+        const token = yield* readLinearAccessToken({ secrets, connectionId });
+        assert.deepEqual(Option.getOrNull(token), {
           accessToken,
-          refreshToken,
           expiresAt: tokenExpiresAt,
           scope,
         });
@@ -184,7 +194,6 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
 
         assert.equal(response.status, 401);
         assert.notInclude(encodeJson(response.body), accessToken);
-        assert.notInclude(encodeJson(response.body), refreshToken);
       }),
     );
 
@@ -200,7 +209,6 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
         assert.equal(first.status, 200);
         assert.equal(replay.status, 409);
         assert.notInclude(encodeJson(replay.body), accessToken);
-        assert.notInclude(encodeJson(replay.body), refreshToken);
       }),
     );
 
@@ -215,7 +223,55 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
 
         assert.equal(response.status, 401);
         assert.notInclude(encodeJson(response.body), accessToken);
-        assert.notInclude(encodeJson(response.body), refreshToken);
+      }),
+    );
+    it.effect("rejects a proof issued for a user who did not install this environment", () =>
+      Effect.gen(function* () {
+        const keyPair = generateCloudKeyPair();
+        yield* seedCloudSecrets(keyPair.publicKey);
+        const request = yield* proofFor(keyPair.privateKey, {
+          subject: "user_other",
+          connectionId: "connection-other-user",
+        });
+
+        const response = yield* postProof(request.proof);
+
+        assert.equal(response.status, 401);
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        const stored = yield* secrets.get(routineLinearOAuthSecretName("connection-other-user"));
+        assert.isTrue(Option.isNone(stored));
+      }),
+    );
+
+    it.effect("rejects a proof that outlives the cloud proof lifetime", () =>
+      Effect.gen(function* () {
+        const keyPair = generateCloudKeyPair();
+        yield* seedCloudSecrets(keyPair.publicKey);
+        const request = yield* proofFor(keyPair.privateKey, { lifetimeMinutes: 60 });
+
+        const response = yield* postProof(request.proof);
+
+        assert.equal(response.status, 401);
+      }),
+    );
+
+    it.effect("rejects a connection id that would leave the secret directory", () =>
+      Effect.gen(function* () {
+        const keyPair = generateCloudKeyPair();
+        yield* seedCloudSecrets(keyPair.publicKey);
+        const request = yield* proofFor(keyPair.privateKey, {
+          connectionId: "x/../relay-issuer",
+        });
+
+        const response = yield* postProof(request.proof);
+
+        assert.equal(response.status, 401);
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        const issuer = yield* secrets.get(RELAY_ISSUER_SECRET);
+        assert.equal(
+          new TextDecoder().decode(Option.getOrThrow(issuer)),
+          "https://relay.example.test",
+        );
       }),
     );
   },
