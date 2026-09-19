@@ -343,7 +343,7 @@ describe("relay Linear OAuth client API", () => {
         "https://relay.example.test/v1/oauth/linear/callback",
       );
       expect(url.searchParams.get("response_type")).toBe("code");
-      expect(url.searchParams.get("scope")).toBe("read,admin");
+      expect(url.searchParams.get("scope")).toBe("read,write,admin");
       expect(url.searchParams.get("actor")).toBe("user");
       expect(url.searchParams.get("code_challenge_method")).toBe("S256");
       expect(url.searchParams.get("code_challenge")?.length).toBeGreaterThan(20);

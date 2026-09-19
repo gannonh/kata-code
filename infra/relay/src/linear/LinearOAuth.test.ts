@@ -55,7 +55,7 @@ describe("LinearOAuth", () => {
         "https://relay.example.com/v1/linear/oauth/callback",
       );
       expect(url.searchParams.get("scope")).toBe(LINEAR_OAUTH_SCOPES);
-      expect(url.searchParams.get("scope")).toBe("read,admin");
+      expect(url.searchParams.get("scope")).toBe("read,write,admin");
       expect(url.searchParams.get("actor")).toBe("user");
       expect(url.searchParams.get("prompt")).toBe("consent");
       expect(url.searchParams.get("state")).toBe("state-token");
