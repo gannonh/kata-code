@@ -911,12 +911,12 @@ describe("RoutinesPage Linear trigger setup", () => {
       }),
     );
     testState.linearMetadataError =
-      "Linear metadata access was revoked. Disable this connection and create a new one with a working API key.";
+      "Linear metadata access was revoked. Disable this connection and connect Linear again.";
     renderer = await openRoutineEditor("Linear brief");
 
     expect(nodeText(renderer.root)).toContain("Metadata access revoked");
     expect(nodeText(renderer.root)).toContain(
-      "Linear metadata access was revoked. Disable this connection and create a new one with a working API key.",
+      "Linear metadata access was revoked. Disable this connection and connect Linear again.",
     );
     expect(renderer.root.findAllByProps({ id: "routine-linear-event" })).toHaveLength(0);
     expect(renderer.root.findAllByProps({ id: "routine-linear-team" })).toHaveLength(0);

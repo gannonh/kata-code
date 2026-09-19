@@ -704,7 +704,7 @@ const makeRoutineConnections = Effect.gen(function* () {
         if (connection !== null) yield* stampMetadataAccess("revoked");
         return yield* failure(
           "blocked",
-          "Linear metadata access was revoked. Disable this connection and create a new one with a working API key.",
+          "Linear metadata access was revoked. Disable this connection and connect Linear again.",
         );
       }
       return yield* failure("blocked", result.failure.message);
