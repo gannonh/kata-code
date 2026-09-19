@@ -37,7 +37,7 @@ Preconditions:
 - **Chat cancel and stale response.** Start a request, click the chat `Cancel`, and verify the in-flight request is interrupted and the unsaved draft is discarded. Start another request, edit `Instruction` while it is pending, and verify the response shows `Review generated changes` instead of replacing the edit. Apply it only after reviewing.
 - **Preview.** In the editor, change `IANA timezone` to `America/Los_Angeles`. Three `Next runs` rows remain visible and include a local offset.
 - **Model options.** Choose a model with options, then choose its effort (for example `Max`). Save and reopen the editor. The selected option remains visible.
-- **Test.** Click `Test run`. The message `Test run admitted` appears. Wait for `Recent runs` to show `Succeeded`; a link named `open the conversation` opens the confirmed thread.
+- **Test.** Click `Test run`. The message `Test run admitted` appears. Wait for `Recent runs` to show `Succeeded`; use the history-row link named `Open conversation` to open the confirmed thread. The transient test status may also show a lowercase `open the conversation` link when its local response has already observed confirmation; do not require that timing-dependent link.
 - **History refresh.** Keep the editor open while the test completes. `Recent runs` updates without reopening the editor.
 - **Conflict.** Open the same routine in two paired clients, save from the first, then save the stale second draft. The second editor shows a conflict message and the first saved configuration remains intact.
 - **Pause and resume.** Click `Pause`, verify the card says `Paused`, then click `Resume` and verify it says `Active`.

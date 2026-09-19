@@ -181,7 +181,13 @@ kill_tree() {
 
 listener_pid_on_port() {
   local port="$1"
-  lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -n 1
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -n 1
+    return
+  fi
+  if command -v ss >/dev/null 2>&1; then
+    ss -H -ltnp "sport = :$port" 2>/dev/null | sed -nE 's/.*pid=([0-9]+).*/\1/p' | head -n 1
+  fi
 }
 
 # Vite binds `localhost`, which is often ::1 on macOS. Probe both names.
