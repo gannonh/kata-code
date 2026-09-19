@@ -14,6 +14,7 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import * as HttpApiError from "effect/unstable/httpapi/HttpApiError";
 
+import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as LinearOAuth from "../linear/LinearOAuth.ts";
 import * as LinearOAuthBroker from "../linear/LinearOAuthBroker.ts";
 import { mapErrorTags, mapRelayCommonApiErrors, safeAuthFailureReason } from "./Api.ts";
@@ -73,33 +74,66 @@ export const linearServerApi = HttpApiBuilder.group(
   "linearServer",
   Effect.fnUntraced(function* (handlers) {
     const broker = yield* LinearOAuthBroker.LinearOAuthBroker;
-    return handlers.handle(
-      "linearOAuthRefresh",
-      Effect.fn("relay.api.linearServer.linearOAuthRefresh")(
-        function* (args) {
-          const principal = yield* RelayEnvironmentPrincipal;
-          if (principal.environmentId !== args.params.environmentId) {
-            return yield* new HttpApiError.Unauthorized({});
-          }
-          return yield* broker.refresh({
-            environmentId: args.params.environmentId,
-            connectionId: args.payload.connectionId,
-          });
-        },
-        mapErrorTags({
-          LinearOAuthNotConfigured: notConfigured,
-          LinearOAuthConnectionNotFound: notAuthorized,
-          LinearOAuthRequestFailed: (error, traceId) =>
-            error.reason === "rejected"
-              ? new RelayLinearOAuthReauthorizationRequiredError({
-                  code: "linear_oauth_reauthorization_required",
-                  traceId,
-                })
-              : upstreamUnavailable(error, traceId),
-        }),
-        mapRelayCommonApiErrors("not_authorized"),
-      ),
-    );
+    const links = yield* EnvironmentLinks.EnvironmentLinks;
+    return handlers
+      .handle(
+        "linearOAuthStart",
+        Effect.fn("relay.api.linearServer.linearOAuthStart")(
+          function* (args) {
+            const principal = yield* RelayEnvironmentPrincipal;
+            if (principal.environmentId !== args.params.environmentId) {
+              return yield* new HttpApiError.Unauthorized({});
+            }
+            const users = yield* links.listUsersForEnvironmentPublicKey({
+              environmentId: args.params.environmentId,
+              environmentPublicKey: principal.environmentPublicKey,
+            });
+            if (users.length !== 1) {
+              return yield* new HttpApiError.Unauthorized({});
+            }
+            return {
+              authorizeUrl: yield* broker.begin({
+                userId: users[0]!,
+                environmentId: args.params.environmentId,
+                connectionId: args.payload.connectionId,
+              }),
+            };
+          },
+          mapErrorTags({
+            LinearOAuthNotConfigured: notConfigured,
+            LinearOAuthEnvironmentNotLinked: notAuthorized,
+            PlatformError: internalError,
+          }),
+          mapRelayCommonApiErrors("not_authorized"),
+        ),
+      )
+      .handle(
+        "linearOAuthRefresh",
+        Effect.fn("relay.api.linearServer.linearOAuthRefresh")(
+          function* (args) {
+            const principal = yield* RelayEnvironmentPrincipal;
+            if (principal.environmentId !== args.params.environmentId) {
+              return yield* new HttpApiError.Unauthorized({});
+            }
+            return yield* broker.refresh({
+              environmentId: args.params.environmentId,
+              connectionId: args.payload.connectionId,
+            });
+          },
+          mapErrorTags({
+            LinearOAuthNotConfigured: notConfigured,
+            LinearOAuthConnectionNotFound: notAuthorized,
+            LinearOAuthRequestFailed: (error, traceId) =>
+              error.reason === "rejected"
+                ? new RelayLinearOAuthReauthorizationRequiredError({
+                    code: "linear_oauth_reauthorization_required",
+                    traceId,
+                  })
+                : upstreamUnavailable(error, traceId),
+          }),
+          mapRelayCommonApiErrors("not_authorized"),
+        ),
+      );
   }),
 );
 

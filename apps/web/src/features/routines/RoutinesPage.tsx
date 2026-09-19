@@ -1,5 +1,6 @@
 import {
   GITHUB_ROUTINE_EVENT_LABELS,
+  LINEAR_ROUTINE_EVENT_LABELS,
   ModelSelection,
   ProviderInstanceId,
   type ProviderOptionSelection,
@@ -10,8 +11,11 @@ import {
   isScheduleTrigger,
   type EnvironmentId,
   type GitHubEventTrigger,
+  type GitHubRoutineConnection,
   type GitHubRoutineEvent,
-  type RoutineConnection,
+  type LinearEventTrigger,
+  type LinearRoutineConnection,
+  type LinearRoutineEvent,
   type RoutineRun,
   type RuntimeMode,
   type ServerProvider,
@@ -36,6 +40,7 @@ import {
   RotateCcwIcon,
   SaveIcon,
   Settings2Icon,
+  SquareKanbanIcon,
   Trash2Icon,
   WebhookIcon,
 } from "lucide-react";
@@ -62,40 +67,50 @@ import { requestConfirmDialog } from "../../confirmDialog";
 import {
   canSaveRoutineDraft,
   confirmDialogAccepted,
+  defaultGitHubTrigger,
   defaultGitHubTriggerDraft,
+  defaultLinearTrigger,
+  defaultLinearTriggerDraft,
   DELETE_ROUTINE_MESSAGE,
   DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
   firstEnabledProviderModel,
+  formatRoutineTrigger,
+  gitHubHookSettingsUrl,
+  GITHUB_REDELIVERY_NOTE,
   isCompleteGitHubTrigger,
+  isCompleteLinearTrigger,
   isRoutineEditorDraftComplete,
   isRoutineEditorScheduleTrigger,
   isRoutineDraftDirty,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
+  LINEAR_PROVIDER_REMOVAL_NOTE,
+  LINEAR_RETRY_NOTE,
+  linearTriggerConnectionId,
   newRoutineDraftId,
   newRoutineRequestId,
   preferredWorktreeBaseBranch,
+  routineConnectionStatusLabel,
   routineDraftBaselineAfterAutomaticChange,
   routineDraftRevisionAfterEdit,
   ROUTINE_CANCEL_HINT,
+  ROUTINE_CONNECTION_STATUS_LABELS,
   ROUTINE_CONTROL_CLASS,
+  ROUTINE_DELIVERY_STATUS_LABELS,
   ROUTINE_EDITOR_COLUMN_CLASS,
   ROUTINE_EDITOR_FIELDS_CLASS,
   ROUTINE_PERMISSION_MODE_LABELS,
   ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS,
-  routinesLibraryEmptyKind,
-  defaultGitHubTrigger,
-  formatRoutineTrigger,
-  GITHUB_REDELIVERY_NOTE,
-  gitHubHookSettingsUrl,
-  ROUTINE_CONNECTION_STATUS_LABELS,
-  ROUTINE_DELIVERY_STATUS_LABELS,
   routineTriggerKind,
+  routinesLibraryEmptyKind,
   selectableConnections,
+  withApplicableLinearTriggerFilters,
   withApplicableTriggerFilters,
   type RoutineEditorDraft,
   type RoutineEditorGitHubTrigger,
+  type RoutineEditorLinearTrigger,
+  type RoutineTriggerKind,
 } from "./RoutinesPage.logic";
 import { RoutineChat } from "./RoutineChat";
 
@@ -277,7 +292,9 @@ function RoutineCard({
     >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-background/75 text-muted-foreground ring-1 ring-border/50">
-          {isScheduleTrigger(routine.configuration.trigger) ? (
+          {routine.configuration.trigger.kind === "linear" ? (
+            <SquareKanbanIcon className="size-4" />
+          ) : isScheduleTrigger(routine.configuration.trigger) ? (
             <Clock3Icon className="size-4" />
           ) : (
             <WebhookIcon className="size-4" />
@@ -331,6 +348,29 @@ type GitHubTriggerPatch = {
   readonly issueLabelId?: number | undefined;
 };
 
+/**
+ * `isRoutineEditorDraftComplete` accepts any scoped Linear trigger, but the
+ * saved contract requires the filter each event acts on.
+ */
+function linearTriggerFiltersComplete(trigger: RoutineEditorDraft["trigger"]): boolean {
+  if (trigger.kind !== "linear") return true;
+  if (trigger.event === "status_changed") return "stateId" in trigger;
+  if (trigger.event === "label_added") return "labelId" in trigger;
+  return true;
+}
+
+/** A key set to `undefined` clears that filter; an absent key leaves it alone. */
+type LinearTriggerPatch = {
+  readonly kind?: "linear";
+  readonly connectionId?: LinearEventTrigger["connectionId"];
+  readonly workspaceId?: LinearEventTrigger["workspaceId"];
+  readonly event?: LinearEventTrigger["event"];
+  readonly teamId?: string | undefined;
+  readonly projectId?: string | undefined;
+  readonly stateId?: string | undefined;
+  readonly labelId?: string | undefined;
+};
+
 function GitHubTriggerFields({
   environmentId,
   trigger,
@@ -343,12 +383,12 @@ function GitHubTriggerFields({
 }: {
   readonly environmentId: EnvironmentId;
   readonly trigger: RoutineEditorGitHubTrigger;
-  readonly connections: readonly RoutineConnection[];
-  readonly selectedConnection: RoutineConnection | undefined;
+  readonly connections: readonly GitHubRoutineConnection[];
+  readonly selectedConnection: GitHubRoutineConnection | undefined;
   readonly offline: boolean;
   readonly busy: boolean;
   readonly onTriggerChange: (patch: GitHubTriggerPatch) => void;
-  readonly onConnectionCreated: (connection: RoutineConnection) => void;
+  readonly onConnectionCreated: (connection: GitHubRoutineConnection) => void;
 }) {
   const createConnection = useAtomCommand(routineEnvironment.createConnection, {
     reportFailure: false,
@@ -385,11 +425,16 @@ function GitHubTriggerFields({
     const id = RoutineConnectionId.make(`connection-${Date.now().toString(36)}`);
     const created = await createConnection({
       environmentId,
-      input: { id, repository: name },
+      input: { provider: "github", id, repository: name },
     });
     if (created._tag === "Failure") {
       setSetupBusy(false);
       setSetupMessage(errorMessage(created.cause));
+      return;
+    }
+    if (created.value.provider !== "github") {
+      setSetupBusy(false);
+      setSetupMessage("The environment did not return a GitHub connection.");
       return;
     }
     onConnectionCreated(created.value);
@@ -659,6 +704,466 @@ function GitHubTriggerFields({
   );
 }
 
+/** The server names a missing OAuth bundle with this message; the UI shows it as waiting. */
+const LINEAR_AUTHORIZATION_REQUIRED_MESSAGE = "Connect Linear before reading workspace metadata.";
+
+function LinearTriggerFields({
+  environmentId,
+  trigger,
+  connections,
+  selectedConnection,
+  offline,
+  busy,
+  onTriggerChange,
+  onConnectionCreated,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly trigger: RoutineEditorLinearTrigger;
+  readonly connections: readonly LinearRoutineConnection[];
+  readonly selectedConnection: LinearRoutineConnection | undefined;
+  readonly offline: boolean;
+  readonly busy: boolean;
+  readonly onTriggerChange: (patch: LinearTriggerPatch) => void;
+  readonly onConnectionCreated: (connection: LinearRoutineConnection) => void;
+}) {
+  const beginConnectionAuthorization = useAtomCommand(
+    routineEnvironment.beginConnectionAuthorization,
+    { reportFailure: false },
+  );
+  const createConnection = useAtomCommand(routineEnvironment.createConnection, {
+    reportFailure: false,
+  });
+  const verifyConnection = useAtomCommand(routineEnvironment.verifyConnection, {
+    reportFailure: false,
+  });
+  const disableConnection = useAtomCommand(routineEnvironment.disableConnection, {
+    reportFailure: false,
+  });
+  const [pendingConnectionId, setPendingConnectionId] = useState<RoutineConnectionId | null>(null);
+  const [allTeams, setAllTeams] = useState(true);
+  const [teamId, setTeamId] = useState("");
+  const [createdConnection, setCreatedConnection] = useState<LinearRoutineConnection | null>(null);
+  const [setupMessage, setSetupMessage] = useState<string | null>(null);
+  const [setupBusy, setSetupBusy] = useState(false);
+  const [showSetup, setShowSetup] = useState(connections.length === 0);
+  const authorizationMetadata = useEnvironmentQuery(
+    pendingConnectionId === null
+      ? null
+      : routineEnvironment.linearMetadata({
+          environmentId,
+          input: { connectionId: pendingConnectionId },
+        }),
+  );
+  const metadata = useEnvironmentQuery(
+    selectedConnection
+      ? routineEnvironment.linearMetadata({
+          environmentId,
+          input: { connectionId: selectedConnection.id },
+        })
+      : null,
+  );
+  const disabled = offline || busy || setupBusy;
+  const connection = createdConnection ?? selectedConnection;
+  const stateId = "stateId" in trigger ? trigger.stateId : undefined;
+  const labelId = "labelId" in trigger ? trigger.labelId : undefined;
+  const connectionTeamIds = connection?.teamIds ?? [];
+  const connectionTeams =
+    connectionTeamIds.length === 0
+      ? (metadata.data?.teams ?? [])
+      : (metadata.data?.teams ?? []).filter((team) => connectionTeamIds.includes(team.id));
+  const availableProjects =
+    trigger.teamId === undefined
+      ? (metadata.data?.projects ?? [])
+      : (metadata.data?.projects ?? []).filter((project) =>
+          project.teamIds.includes(trigger.teamId!),
+        );
+  const availableStates =
+    trigger.teamId === undefined
+      ? (metadata.data?.states ?? [])
+      : (metadata.data?.states ?? []).filter((state) => state.teamId === trigger.teamId);
+  const availableLabels = (metadata.data?.labels ?? []).filter(
+    (label) =>
+      label.teamId === null || trigger.teamId === undefined || label.teamId === trigger.teamId,
+  );
+
+  const startAuthorization = async () => {
+    if (disabled) return;
+    setSetupBusy(true);
+    setSetupMessage(null);
+    const id = RoutineConnectionId.make("connection-" + Date.now().toString(36));
+    const result = await beginConnectionAuthorization({ environmentId, input: { id } });
+    setSetupBusy(false);
+    if (result._tag === "Failure") {
+      setSetupMessage(errorMessage(result.cause));
+      return;
+    }
+    window.open(result.value.authorizeUrl, "_blank", "noopener,noreferrer");
+    setPendingConnectionId(id);
+    setSetupMessage("Authorize Kata Code in the Linear window, then check the connection.");
+  };
+
+  const runCreateConnection = async () => {
+    if (disabled || pendingConnectionId === null) return;
+    if (!allTeams && teamId.length === 0) return;
+    setSetupBusy(true);
+    setSetupMessage("Creating the Linear webhook…");
+    const result = await createConnection({
+      environmentId,
+      input: {
+        provider: "linear",
+        id: pendingConnectionId,
+        allTeams,
+        teamIds: allTeams ? [] : [teamId],
+      },
+    });
+    setSetupBusy(false);
+    if (result._tag === "Failure") {
+      setSetupMessage(errorMessage(result.cause));
+      return;
+    }
+    if (result.value.provider !== "linear") {
+      setSetupMessage("The environment did not return a Linear connection.");
+      return;
+    }
+    setCreatedConnection(result.value);
+    onConnectionCreated(result.value);
+    setSetupMessage("Webhook created. Verify the first delivery when Linear sends one.");
+  };
+
+  const runVerify = async () => {
+    if (!connection || disabled) return;
+    setSetupBusy(true);
+    setSetupMessage(null);
+    const result = await verifyConnection({ environmentId, input: { id: connection.id } });
+    setSetupBusy(false);
+    if (result._tag === "Failure") {
+      setSetupMessage(errorMessage(result.cause));
+      return;
+    }
+    setSetupMessage(
+      result.value.status === "verified"
+        ? "First delivery received. The connection is ready."
+        : "No Linear delivery arrived yet. Create or update an issue in the connected workspace.",
+    );
+  };
+
+  const runDisable = async () => {
+    if (!connection || disabled) return;
+    setSetupBusy(true);
+    setSetupMessage(null);
+    const result = await disableConnection({ environmentId, input: { id: connection.id } });
+    setSetupBusy(false);
+    setSetupMessage(
+      result._tag === "Failure" ? errorMessage(result.cause) : LINEAR_PROVIDER_REMOVAL_NOTE,
+    );
+  };
+
+  const lastDelivery = connection?.lastDelivery ?? null;
+
+  return (
+    <div className="grid gap-2" data-testid="routine-linear-trigger">
+      <div className="grid gap-1.5">
+        <FieldLabel htmlFor="routine-linear-connection">Workspace connection</FieldLabel>
+        <select
+          id="routine-linear-connection"
+          className={ROUTINE_CONTROL_CLASS}
+          value={connection?.id ?? ""}
+          disabled={disabled}
+          onChange={(event) => {
+            const next = connections.find((candidate) => candidate.id === event.target.value);
+            if (next) onTriggerChange(defaultLinearTrigger(next));
+          }}
+        >
+          {connections.length === 0 ? <option value="">No connected workspace</option> : null}
+          {connections.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>
+              {candidate.workspaceName} · {routineConnectionStatusLabel(candidate)}
+            </option>
+          ))}
+        </select>
+        <Button
+          size="sm"
+          variant="outline"
+          className="justify-self-start"
+          onClick={() => setShowSetup((value) => !value)}
+          disabled={disabled}
+        >
+          <PlusIcon className="size-3.5" /> Connect a workspace
+        </Button>
+      </div>
+      {showSetup ? (
+        <div className="grid gap-2 rounded-lg border border-border/50 bg-background/60 p-3">
+          <Button
+            size="sm"
+            variant="outline"
+            className="justify-self-start"
+            onClick={() => void startAuthorization()}
+            disabled={disabled}
+          >
+            <SquareKanbanIcon className="size-3.5" /> Connect Linear
+          </Button>
+          {pendingConnectionId !== null && authorizationMetadata.data === null ? (
+            <>
+              {authorizationMetadata.error !== null &&
+              authorizationMetadata.error !== LINEAR_AUTHORIZATION_REQUIRED_MESSAGE ? (
+                <p className="text-xs text-destructive" role="status">
+                  {authorizationMetadata.error}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground" role="status">
+                  Waiting for authorization…
+                </p>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="justify-self-start"
+                onClick={() => authorizationMetadata.refresh()}
+                disabled={disabled}
+              >
+                Check authorization
+              </Button>
+            </>
+          ) : null}
+          {authorizationMetadata.data !== null && createdConnection === null ? (
+            <div className="grid gap-1 text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {authorizationMetadata.data.workspace.name}
+              </span>
+              <label className="flex items-center gap-2">
+                <input
+                  id="routine-linear-all-teams"
+                  type="checkbox"
+                  checked={allTeams}
+                  disabled={disabled}
+                  onChange={(event) => setAllTeams(event.target.checked)}
+                />
+                All public teams
+              </label>
+              {allTeams ? null : (
+                <select
+                  id="routine-linear-team-scope"
+                  className={ROUTINE_CONTROL_CLASS}
+                  value={teamId}
+                  disabled={disabled}
+                  onChange={(event) => setTeamId(event.target.value)}
+                >
+                  <option value="">Choose a team</option>
+                  {authorizationMetadata.data.teams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <Button
+                size="sm"
+                className="justify-self-start"
+                onClick={() => void runCreateConnection()}
+                disabled={disabled || (!allTeams && teamId.length === 0)}
+              >
+                <WebhookIcon className="size-3.5" /> Create webhook
+              </Button>
+            </div>
+          ) : null}
+          {connection ? (
+            <div className="grid gap-1.5 text-xs text-muted-foreground">
+              <span className="break-all">Callback: {connection.callbackUrl}</span>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void runVerify()}
+                  disabled={disabled || connection.status === "disabled"}
+                >
+                  <RotateCcwIcon className="size-3.5" /> Verify
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void runDisable()}
+                  disabled={disabled || connection.status === "disabled"}
+                >
+                  <Trash2Icon className="size-3.5 text-destructive" /> Disable
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+      {setupMessage ? (
+        <p className="text-xs text-muted-foreground" role="status">
+          {setupMessage}
+        </p>
+      ) : null}
+      {connection ? (
+        <div
+          className="grid gap-1 rounded-lg border border-border/50 bg-background/60 p-3 text-xs"
+          data-testid="routine-linear-connection-diagnostics"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium">{connection.workspaceName}</span>
+            <Badge variant="outline" size="sm">
+              {routineConnectionStatusLabel(connection)}
+            </Badge>
+          </div>
+          <span className="break-all text-muted-foreground">
+            Callback: {connection.callbackUrl}
+          </span>
+          {connection.webhookId !== null ? (
+            <span className="break-all text-muted-foreground">Webhook: {connection.webhookId}</span>
+          ) : null}
+          <span className="text-muted-foreground">
+            Accepted {connection.acceptedCount} · Ignored {connection.ignoredCount} · Rejected{" "}
+            {connection.rejectedCount}
+          </span>
+          <span className="text-muted-foreground">
+            Last delivery:{" "}
+            {lastDelivery
+              ? `${ROUTINE_DELIVERY_STATUS_LABELS[lastDelivery.status]} · ${lastDelivery.event} · ${new Date(lastDelivery.receivedAt).toLocaleString()}${lastDelivery.detail ? ` · ${lastDelivery.detail}` : ""}`
+              : "none yet"}
+          </span>
+          <span className="text-muted-foreground">{LINEAR_RETRY_NOTE}</span>
+          {connection.status === "disabled" ? (
+            <span className="text-muted-foreground">{LINEAR_PROVIDER_REMOVAL_NOTE}</span>
+          ) : null}
+          {connection.metadataAccess === "revoked" ? (
+            <span className="text-destructive">
+              Metadata access revoked. Disable this connection and connect Linear again to restore
+              the team, project, status, and label pickers.
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+      {metadata.error !== null ? (
+        <p className="text-xs text-destructive">{metadata.error}</p>
+      ) : (
+        <>
+          <div className="grid gap-1.5">
+            <FieldLabel htmlFor="routine-linear-event">Event</FieldLabel>
+            <select
+              id="routine-linear-event"
+              className={ROUTINE_CONTROL_CLASS}
+              value={trigger.event}
+              disabled={disabled}
+              onChange={(event) =>
+                onTriggerChange({ event: event.target.value as LinearRoutineEvent })
+              }
+            >
+              {(Object.entries(LINEAR_ROUTINE_EVENT_LABELS) as [LinearRoutineEvent, string][]).map(
+                ([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ),
+              )}
+            </select>
+          </div>
+          <div className="grid gap-1.5">
+            <FieldLabel htmlFor="routine-linear-team">Team</FieldLabel>
+            <select
+              id="routine-linear-team"
+              className={ROUTINE_CONTROL_CLASS}
+              value={trigger.teamId ?? ""}
+              disabled={disabled}
+              onChange={(event) => {
+                const value = event.target.value;
+                onTriggerChange({
+                  teamId: value === "" ? undefined : value,
+                  projectId: undefined,
+                  stateId: undefined,
+                  labelId: undefined,
+                });
+              }}
+            >
+              <option value="">All teams in this connection</option>
+              {connectionTeams.map((team) => (
+                <option key={team.id} value={team.id}>
+                  {team.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-1.5">
+            <FieldLabel htmlFor="routine-linear-project">Project</FieldLabel>
+            <select
+              id="routine-linear-project"
+              className={ROUTINE_CONTROL_CLASS}
+              value={trigger.projectId ?? ""}
+              disabled={disabled}
+              onChange={(event) =>
+                onTriggerChange({
+                  projectId: event.target.value === "" ? undefined : event.target.value,
+                })
+              }
+            >
+              <option value="">All projects</option>
+              {availableProjects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {trigger.event === "status_changed" ? (
+            <div className="grid gap-1.5">
+              <FieldLabel htmlFor="routine-linear-state">Status</FieldLabel>
+              <select
+                id="routine-linear-state"
+                className={ROUTINE_CONTROL_CLASS}
+                value={stateId ?? ""}
+                disabled={disabled}
+                onChange={(event) => onTriggerChange({ stateId: event.target.value })}
+              >
+                <option value="">Choose a status</option>
+                {availableStates.map((state) => (
+                  <option key={state.id} value={state.id}>
+                    {state.name}
+                  </option>
+                ))}
+              </select>
+              {stateId === undefined ? (
+                <p className="text-xs text-warning-foreground">
+                  Choose the status transition that should start the routine.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {trigger.event === "label_added" ? (
+            <div className="grid gap-1.5">
+              <FieldLabel htmlFor="routine-linear-label">Label</FieldLabel>
+              <select
+                id="routine-linear-label"
+                className={ROUTINE_CONTROL_CLASS}
+                value={labelId ?? ""}
+                disabled={disabled}
+                onChange={(event) => onTriggerChange({ labelId: event.target.value })}
+              >
+                <option value="">Choose a label</option>
+                {availableLabels.map((label) => (
+                  <option key={label.id} value={label.id}>
+                    {label.name}
+                  </option>
+                ))}
+              </select>
+              {labelId === undefined ? (
+                <p className="text-xs text-warning-foreground">
+                  Choose the label whose addition should start the routine.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          <p className="text-xs text-muted-foreground">
+            Filters use Linear&apos;s stable ids, so renamed teams, projects, statuses, and labels
+            keep matching. Event text is passed to the routine as untrusted context under the saved
+            instruction.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function RoutineEditor({
   draft,
   routine,
@@ -751,13 +1256,32 @@ function RoutineEditor({
     setConfiguration({ trigger: { ...configuration.trigger, ...patch } as ScheduleTrigger });
   };
   const setGitHubTrigger = (patch: GitHubTriggerPatch) => {
-    if (isRoutineEditorScheduleTrigger(configuration.trigger)) return;
+    if (configuration.trigger.kind !== "github") return;
     setConfiguration({
       trigger: withApplicableTriggerFilters({
         ...configuration.trigger,
         ...patch,
       }),
     });
+  };
+  const setLinearTrigger = (patch: LinearTriggerPatch) => {
+    if (configuration.trigger.kind !== "linear") return;
+    const previousConnectionId = linearTriggerConnectionId(configuration.trigger);
+    const next = {
+      ...configuration.trigger,
+      ...patch,
+    } as RoutineEditorLinearTrigger;
+    const connectionId = linearTriggerConnectionId(next);
+    if (connectionId !== previousConnectionId) {
+      const connection = linearConnections.find((candidate) => candidate.id === connectionId);
+      if (connection) {
+        setConfiguration({
+          trigger: withApplicableLinearTriggerFilters(defaultLinearTrigger(connection)),
+        });
+        return;
+      }
+    }
+    setConfiguration({ trigger: withApplicableLinearTriggerFilters(next) });
   };
   const triggerKind = routineTriggerKind(configuration.trigger);
   const scheduleFields: ScheduleTrigger = isRoutineEditorScheduleTrigger(configuration.trigger)
@@ -768,15 +1292,34 @@ function RoutineEditor({
       ? routine.configuration.trigger.connectionId
       : null;
   const availableConnections = selectableConnections(connections.data ?? [], savedConnectionId);
+  const githubConnections = availableConnections.filter(
+    (connection): connection is GitHubRoutineConnection => connection.provider === "github",
+  );
+  const linearConnections = availableConnections.filter(
+    (connection): connection is LinearRoutineConnection => connection.provider === "linear",
+  );
+  const allConnections = connections.data ?? [];
   const selectedGitHubTrigger = isCompleteGitHubTrigger(configuration.trigger)
     ? configuration.trigger
     : undefined;
-  const selectedConnection = selectedGitHubTrigger
-    ? (connections.data ?? []).find(
-        (candidate) => candidate.id === selectedGitHubTrigger.connectionId,
+  const selectedGitHubConnection = selectedGitHubTrigger
+    ? allConnections.find(
+        (candidate): candidate is GitHubRoutineConnection =>
+          candidate.provider === "github" && candidate.id === selectedGitHubTrigger.connectionId,
       )
     : undefined;
-  const switchTriggerKind = (kind: "schedule" | "github") => {
+  const selectedLinearTrigger = isCompleteLinearTrigger(configuration.trigger)
+    ? configuration.trigger
+    : undefined;
+  const selectedLinearConnection = selectedLinearTrigger
+    ? allConnections.find(
+        (candidate): candidate is LinearRoutineConnection =>
+          candidate.provider === "linear" && candidate.id === selectedLinearTrigger.connectionId,
+      )
+    : undefined;
+  const selectedConnection =
+    triggerKind === "linear" ? selectedLinearConnection : selectedGitHubConnection;
+  const switchTriggerKind = (kind: RoutineTriggerKind) => {
     if (kind === triggerKind) return;
     if (kind === "schedule") {
       setConfiguration({ trigger: scheduleTrigger });
@@ -784,9 +1327,16 @@ function RoutineEditor({
     }
     if (isRoutineEditorScheduleTrigger(configuration.trigger))
       setScheduleTrigger(configuration.trigger);
-    const first = availableConnections[0];
+    if (kind === "github") {
+      const first = githubConnections[0];
+      setConfiguration({
+        trigger: first ? defaultGitHubTrigger(first) : defaultGitHubTriggerDraft(),
+      });
+      return;
+    }
+    const first = linearConnections[0];
     setConfiguration({
-      trigger: first ? defaultGitHubTrigger(first) : defaultGitHubTriggerDraft(),
+      trigger: first ? defaultLinearTrigger(first) : defaultLinearTriggerDraft(),
     });
   };
   const project = projects.find((candidate) => candidate.id === configuration.projectId);
@@ -830,7 +1380,9 @@ function RoutineEditor({
       }),
     });
   };
-  const hasCompleteTrigger = isRoutineEditorDraftComplete(configuration);
+  const hasCompleteTrigger =
+    isRoutineEditorDraftComplete(configuration) &&
+    linearTriggerFiltersComplete(configuration.trigger);
   const canSave =
     canSaveRoutineDraft({
       name: configuration.name,
@@ -1192,18 +1744,41 @@ function RoutineEditor({
               >
                 <WebhookIcon className="size-3.5" /> GitHub event
               </Button>
+              <Button
+                size="sm"
+                className="min-w-0 shrink"
+                variant={triggerKind === "linear" ? "default" : "outline"}
+                aria-pressed={triggerKind === "linear"}
+                onClick={() => switchTriggerKind("linear")}
+              >
+                <SquareKanbanIcon className="size-3.5" /> Linear event
+              </Button>
             </div>
-            {triggerKind === "github" && !isRoutineEditorScheduleTrigger(configuration.trigger) ? (
+            {configuration.trigger.kind === "github" ? (
               <GitHubTriggerFields
                 environmentId={draft.environmentId}
                 trigger={configuration.trigger}
-                connections={availableConnections}
-                selectedConnection={selectedConnection}
+                connections={githubConnections}
+                selectedConnection={selectedGitHubConnection}
                 offline={offline}
                 busy={busy}
                 onTriggerChange={setGitHubTrigger}
                 onConnectionCreated={(connection) =>
                   setConfiguration({ trigger: defaultGitHubTrigger(connection) })
+                }
+              />
+            ) : null}
+            {configuration.trigger.kind === "linear" ? (
+              <LinearTriggerFields
+                environmentId={draft.environmentId}
+                trigger={configuration.trigger}
+                connections={linearConnections}
+                selectedConnection={selectedLinearConnection}
+                offline={offline}
+                busy={busy}
+                onTriggerChange={setLinearTrigger}
+                onConnectionCreated={(connection) =>
+                  setConfiguration({ trigger: defaultLinearTrigger(connection) })
                 }
               />
             ) : null}
@@ -1416,7 +1991,8 @@ function RoutineEditor({
                       target="_blank"
                       rel="noreferrer"
                     >
-                      <WebhookIcon className="size-3" /> Open on GitHub
+                      <WebhookIcon className="size-3" />{" "}
+                      {run.source === "linear" ? "Open in Linear" : "Open on GitHub"}
                     </a>
                   ) : null}
                   {run.conversation.kind === "confirmed" ? (

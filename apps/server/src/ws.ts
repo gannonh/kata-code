@@ -76,7 +76,11 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@kata-sh/code-contracts";
-import { previewRoutineSchedule, RoutineError } from "@kata-sh/code-contracts";
+import {
+  previewRoutineSchedule,
+  RoutineError,
+  type LinearRoutineConnection,
+} from "@kata-sh/code-contracts";
 import { resolveServerBackgroundActivitySettings } from "@kata-sh/code-shared/backgroundActivitySettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -646,6 +650,34 @@ const makeWsRpcLayer = (
               })),
             );
         }),
+        eventSources: Effect.gen(function* () {
+          const connections = yield* Effect.serviceOption(RoutineConnections.RoutineConnections);
+          if (Option.isNone(connections)) return [];
+          const environmentId = yield* serverEnvironment.getEnvironmentId;
+          const list = yield* connections.value.list(environmentId);
+          const linear = list.filter(
+            (connection): connection is LinearRoutineConnection =>
+              connection.provider === "linear" && connection.status !== "disabled",
+          );
+          return yield* Effect.forEach(
+            linear,
+            (connection) =>
+              connections.value.linearMetadata({ environmentId, connectionId: connection.id }).pipe(
+                Effect.map((metadata) => ({
+                  connectionId: connection.id,
+                  provider: "linear" as const,
+                  workspaceId: connection.workspaceId,
+                  workspaceName: connection.workspaceName,
+                  teams: metadata.teams,
+                  projects: metadata.projects,
+                  states: metadata.states,
+                  labels: metadata.labels,
+                })),
+                Effect.orElseSucceed(() => null),
+              ),
+            { concurrency: "unbounded" },
+          ).pipe(Effect.map((sources) => sources.filter((source) => source !== null)));
+        }),
         generate: (input) =>
           makeTextGenerationFromRegistry(providerInstances)
             .generateRoutineDraft(input)
@@ -678,7 +710,7 @@ const makeWsRpcLayer = (
             Effect.fail(
               new RoutineError({
                 code: "blocked",
-                message: "GitHub connections are unavailable in this server runtime.",
+                message: "Routine connections are unavailable in this server runtime.",
               }),
             ),
           onSome: run,
@@ -1804,8 +1836,18 @@ const makeWsRpcLayer = (
             WS_METHODS.routinesConnectionsCreate,
             withRoutineConnections((connections) =>
               serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) => connections.create({ environmentId, ...input })),
+              ),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesConnectionsBeginAuthorization]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesConnectionsBeginAuthorization,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
                 Effect.flatMap((environmentId) =>
-                  connections.create({ environmentId, id: input.id, repository: input.repository }),
+                  connections.beginAuthorization({ environmentId, id: input.id }),
                 ),
               ),
             ),
@@ -1852,6 +1894,21 @@ const makeWsRpcLayer = (
             WS_METHODS.routinesGitHubMetadata,
             withRoutineConnections((connections) =>
               connections.metadata({ repository: input.repository }),
+            ),
+            { "rpc.aggregate": "routines" },
+          ),
+        [WS_METHODS.routinesLinearMetadata]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.routinesLinearMetadata,
+            withRoutineConnections((connections) =>
+              serverEnvironment.getEnvironmentId.pipe(
+                Effect.flatMap((environmentId) =>
+                  connections.linearMetadata({
+                    environmentId,
+                    connectionId: input.connectionId,
+                  }),
+                ),
+              ),
             ),
             { "rpc.aggregate": "routines" },
           ),
