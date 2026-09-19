@@ -16,7 +16,6 @@ export interface LinearOAuthTokenRecord {
   readonly refreshToken: string;
   readonly expiresAt: number;
   readonly scope: string;
-  readonly updatedAt: string;
 }
 
 export class LinearTokenSavePersistenceError extends Schema.TaggedError<LinearTokenSavePersistenceError>()(
@@ -31,7 +30,6 @@ export class LinearTokenSavePersistenceError extends Schema.TaggedError<LinearTo
 export class LinearTokenLookupPersistenceError extends Schema.TaggedError<LinearTokenLookupPersistenceError>()(
   "LinearTokenLookupPersistenceError",
   {
-    userId: Schema.optional(Schema.String),
     environmentId: Schema.String,
     connectionId: Schema.String,
     cause: Schema.Defect(),
@@ -45,7 +43,7 @@ export class LinearTokenLookupPersistenceError extends Schema.TaggedError<Linear
 export class LinearTokenDeletePersistenceError extends Schema.TaggedError<LinearTokenDeletePersistenceError>()(
   "LinearTokenDeletePersistenceError",
   {
-    operation: Schema.Literals(["connection", "user-connection", "environment"]),
+    operation: Schema.Literals(["connection", "environment"]),
     cause: Schema.Defect(),
   },
 ) {
@@ -54,24 +52,18 @@ export class LinearTokenDeletePersistenceError extends Schema.TaggedError<Linear
   }
 }
 
+/**
+ * One bundle per (environment, connection). `userId` records the cloud user
+ * who authorized it; deletes are scoped to that owner and return the removed
+ * bundles so the caller can revoke them at Linear.
+ */
 export class LinearTokens extends Context.Service<
   LinearTokens,
   {
-    readonly save: (input: {
-      readonly userId: string;
-      readonly environmentId: string;
-      readonly connectionId: string;
-      readonly accessToken: string;
-      readonly refreshToken: string;
-      readonly expiresAt: number;
-      readonly scope: string;
-    }) => Effect.Effect<void, LinearTokenSavePersistenceError>;
+    readonly save: (
+      input: LinearOAuthTokenRecord,
+    ) => Effect.Effect<void, LinearTokenSavePersistenceError>;
     readonly get: (input: {
-      readonly userId: string;
-      readonly environmentId: string;
-      readonly connectionId: string;
-    }) => Effect.Effect<LinearOAuthTokenRecord | null, LinearTokenLookupPersistenceError>;
-    readonly getForEnvironment: (input: {
       readonly environmentId: string;
       readonly connectionId: string;
     }) => Effect.Effect<LinearOAuthTokenRecord | null, LinearTokenLookupPersistenceError>;
@@ -79,14 +71,11 @@ export class LinearTokens extends Context.Service<
       readonly userId: string;
       readonly environmentId: string;
       readonly connectionId: string;
-    }) => Effect.Effect<boolean, LinearTokenDeletePersistenceError>;
-    readonly deleteForUserConnection: (input: {
-      readonly userId: string;
-      readonly connectionId: string;
-    }) => Effect.Effect<boolean, LinearTokenDeletePersistenceError>;
+    }) => Effect.Effect<LinearOAuthTokenRecord | null, LinearTokenDeletePersistenceError>;
     readonly deleteForEnvironment: (input: {
+      readonly userId: string;
       readonly environmentId: string;
-    }) => Effect.Effect<number, LinearTokenDeletePersistenceError>;
+    }) => Effect.Effect<ReadonlyArray<LinearOAuthTokenRecord>, LinearTokenDeletePersistenceError>;
   }
 >()("kata-code-relay/linear/LinearTokens") {}
 
@@ -98,19 +87,7 @@ const tokenBundleColumns = {
   refreshToken: relayLinearOAuthTokens.refreshToken,
   expiresAt: relayLinearOAuthTokens.expiresAt,
   scope: relayLinearOAuthTokens.scope,
-  updatedAt: relayLinearOAuthTokens.updatedAt,
 } as const;
-
-const connectionKey = (input: {
-  readonly userId: string;
-  readonly environmentId: string;
-  readonly connectionId: string;
-}) =>
-  and(
-    eq(relayLinearOAuthTokens.userId, input.userId),
-    eq(relayLinearOAuthTokens.environmentId, input.environmentId),
-    eq(relayLinearOAuthTokens.connectionId, input.connectionId),
-  );
 
 const make = Effect.gen(function* () {
   const db = yield* RelayDb.RelayDb;
@@ -119,58 +96,30 @@ const make = Effect.gen(function* () {
     save: Effect.fn("relay.linear_tokens.save")(function* (input) {
       yield* Effect.annotateCurrentSpan({ "relay.environment_id": input.environmentId });
       const now = DateTime.formatIso(yield* DateTime.now);
+      const bundle = {
+        userId: input.userId,
+        accessToken: input.accessToken,
+        refreshToken: input.refreshToken,
+        expiresAt: input.expiresAt,
+        scope: input.scope,
+        updatedAt: now,
+      };
       yield* db
         .insert(relayLinearOAuthTokens)
         .values({
-          userId: input.userId,
+          ...bundle,
           environmentId: input.environmentId,
           connectionId: input.connectionId,
-          accessToken: input.accessToken,
-          refreshToken: input.refreshToken,
-          expiresAt: input.expiresAt,
-          scope: input.scope,
           createdAt: now,
-          updatedAt: now,
         })
         .onConflictDoUpdate({
-          target: [
-            relayLinearOAuthTokens.userId,
-            relayLinearOAuthTokens.environmentId,
-            relayLinearOAuthTokens.connectionId,
-          ],
-          set: {
-            accessToken: input.accessToken,
-            refreshToken: input.refreshToken,
-            expiresAt: input.expiresAt,
-            scope: input.scope,
-            updatedAt: now,
-          },
+          target: [relayLinearOAuthTokens.environmentId, relayLinearOAuthTokens.connectionId],
+          set: bundle,
         })
         .pipe(Effect.mapError((cause) => new LinearTokenSavePersistenceError({ cause })));
     }),
 
     get: Effect.fn("relay.linear_tokens.get")(function* (input) {
-      yield* Effect.annotateCurrentSpan({ "relay.environment_id": input.environmentId });
-      const rows = yield* db
-        .select(tokenBundleColumns)
-        .from(relayLinearOAuthTokens)
-        .where(connectionKey(input))
-        .limit(1)
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new LinearTokenLookupPersistenceError({
-                userId: input.userId,
-                environmentId: input.environmentId,
-                connectionId: input.connectionId,
-                cause,
-              }),
-          ),
-        );
-      return rows[0] ?? null;
-    }),
-
-    getForEnvironment: Effect.fn("relay.linear_tokens.get_for_environment")(function* (input) {
       yield* Effect.annotateCurrentSpan({ "relay.environment_id": input.environmentId });
       const rows = yield* db
         .select(tokenBundleColumns)
@@ -199,64 +148,39 @@ const make = Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ "relay.environment_id": input.environmentId });
       const rows = yield* db
         .delete(relayLinearOAuthTokens)
-        .where(connectionKey(input))
-        .returning({ connectionId: relayLinearOAuthTokens.connectionId })
+        .where(
+          and(
+            eq(relayLinearOAuthTokens.userId, input.userId),
+            eq(relayLinearOAuthTokens.environmentId, input.environmentId),
+            eq(relayLinearOAuthTokens.connectionId, input.connectionId),
+          ),
+        )
+        .returning(tokenBundleColumns)
         .pipe(
           Effect.mapError(
-            (cause) =>
-              new LinearTokenDeletePersistenceError({
-                operation: "connection",
-                cause,
-              }),
+            (cause) => new LinearTokenDeletePersistenceError({ operation: "connection", cause }),
           ),
         );
-      return rows.length > 0;
+      return rows[0] ?? null;
     }),
-
-    deleteForUserConnection: Effect.fn("relay.linear_tokens.delete_for_user_connection")(
-      function* (input) {
-        yield* Effect.annotateCurrentSpan({
-          "relay.linear.connection_id": input.connectionId,
-        });
-        const rows = yield* db
-          .delete(relayLinearOAuthTokens)
-          .where(
-            and(
-              eq(relayLinearOAuthTokens.userId, input.userId),
-              eq(relayLinearOAuthTokens.connectionId, input.connectionId),
-            ),
-          )
-          .returning({ connectionId: relayLinearOAuthTokens.connectionId })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new LinearTokenDeletePersistenceError({
-                  operation: "user-connection",
-                  cause,
-                }),
-            ),
-          );
-        return rows.length > 0;
-      },
-    ),
 
     deleteForEnvironment: Effect.fn("relay.linear_tokens.delete_for_environment")(
       function* (input) {
         yield* Effect.annotateCurrentSpan({ "relay.environment_id": input.environmentId });
-        const rows = yield* db
+        return yield* db
           .delete(relayLinearOAuthTokens)
-          .where(eq(relayLinearOAuthTokens.environmentId, input.environmentId))
-          .returning({ connectionId: relayLinearOAuthTokens.connectionId })
+          .where(
+            and(
+              eq(relayLinearOAuthTokens.userId, input.userId),
+              eq(relayLinearOAuthTokens.environmentId, input.environmentId),
+            ),
+          )
+          .returning(tokenBundleColumns)
           .pipe(
             Effect.mapError(
-              (cause) =>
-                new LinearTokenDeletePersistenceError({
-                  operation: "environment",
-                  cause,
-                }),
+              (cause) => new LinearTokenDeletePersistenceError({ operation: "environment", cause }),
             ),
           );
-        return rows.length;
       },
     ),
   });

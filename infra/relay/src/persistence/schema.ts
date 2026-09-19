@@ -4,6 +4,7 @@ import type {
   RelayAgentAwarenessPreferences,
 } from "@kata-sh/code-contracts/relay";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -199,15 +200,12 @@ export const relayLinearOAuthStates = pgTable(
     environmentId: varchar("environment_id", { length: 191 }).notNull(),
     connectionId: varchar("connection_id", { length: 128 }).notNull(),
     codeVerifier: text("code_verifier").notNull(),
-    expiresAt: integer("expires_at").notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
     consumedAt: varchar("consumed_at", { length: 64 }),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
     updatedAt: varchar("updated_at", { length: 64 }).notNull(),
   },
-  (table) => [
-    index("idx_relay_linear_oauth_states_expires_at").on(table.expiresAt),
-    index("idx_relay_linear_oauth_states_connection").on(table.environmentId, table.connectionId),
-  ],
+  (table) => [index("idx_relay_linear_oauth_states_expires_at").on(table.expiresAt)],
 );
 
 export const relayLinearOAuthTokens = pgTable(
@@ -218,13 +216,10 @@ export const relayLinearOAuthTokens = pgTable(
     connectionId: varchar("connection_id", { length: 128 }).notNull(),
     accessToken: text("access_token").notNull(),
     refreshToken: text("refresh_token").notNull(),
-    expiresAt: integer("expires_at").notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
     scope: text("scope").notNull(),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
     updatedAt: varchar("updated_at", { length: 64 }).notNull(),
   },
-  (table) => [
-    primaryKey({ columns: [table.userId, table.environmentId, table.connectionId] }),
-    index("idx_relay_linear_oauth_tokens_environment").on(table.environmentId),
-  ],
+  (table) => [primaryKey({ columns: [table.environmentId, table.connectionId] })],
 );

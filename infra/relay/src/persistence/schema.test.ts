@@ -22,6 +22,11 @@ const linearOAuthMigration = NodeFS.readFileSync(
   "utf8",
 );
 
+const linearOAuthTokenKeysMigration = NodeFS.readFileSync(
+  new URL("20260919144745_linear_oauth_token_keys/migration.sql", postgresMigrationsDir),
+  "utf8",
+);
+
 const productionAppliedArchiveMigrations = [
   {
     file: "20260712150134_environment_link_leases/migration.sql",
@@ -64,8 +69,21 @@ describe("relay persisted schema reconciliation", () => {
     expect(linearOAuthMigration).toContain('CREATE TABLE "relay_linear_oauth_tokens"');
     expect(linearOAuthMigration).toContain('"access_token" text NOT NULL');
     expect(linearOAuthMigration).toContain('"refresh_token" text NOT NULL');
-    expect(linearOAuthMigration).toContain(
-      'CONSTRAINT "relay_linear_oauth_tokens_pkey" PRIMARY KEY("user_id","environment_id","connection_id")',
+  });
+
+  it("stores Linear OAuth expiries as epoch milliseconds, which overflow a 32-bit integer", () => {
+    expect(relayLinearOAuthStates.expiresAt.getSQLType()).toBe("bigint");
+    expect(relayLinearOAuthTokens.expiresAt.getSQLType()).toBe("bigint");
+    for (const table of ["relay_linear_oauth_states", "relay_linear_oauth_tokens"]) {
+      expect(linearOAuthTokenKeysMigration).toContain(
+        `ALTER TABLE "${table}" ALTER COLUMN "expires_at" SET DATA TYPE bigint`,
+      );
+    }
+  });
+
+  it("keys Linear OAuth tokens by environment and connection", () => {
+    expect(linearOAuthTokenKeysMigration).toContain(
+      'ALTER TABLE "relay_linear_oauth_tokens" ADD PRIMARY KEY ("environment_id","connection_id")',
     );
   });
 

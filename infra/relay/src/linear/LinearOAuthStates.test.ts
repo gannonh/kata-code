@@ -169,7 +169,7 @@ describe("LinearOAuthStates", () => {
       const states = yield* LinearOAuthStates.LinearOAuthStates;
       const error = yield* Effect.flip(states.consume({ state: "expired-state", now: NOW }));
 
-      expect(error._tag).toBe("linear_oauth_state_rejected");
+      expect(error._tag).toBe("LinearOAuthStateRejected");
       expect(error).toMatchObject({ reason: "expired" });
       expect(error.message).not.toContain("expired-state");
       expect(error.message).not.toContain("code-verifier");
@@ -187,7 +187,7 @@ describe("LinearOAuthStates", () => {
       const error = yield* Effect.flip(states.consume({ state: "used-state", now: NOW }));
 
       expect(error).toMatchObject({
-        _tag: "linear_oauth_state_rejected",
+        _tag: "LinearOAuthStateRejected",
         reason: "already_consumed",
       });
       expect(error.message).not.toContain("used-state");
@@ -205,7 +205,7 @@ describe("LinearOAuthStates", () => {
       const error = yield* Effect.flip(states.consume({ state: "unknown-state", now: NOW }));
 
       expect(error).toMatchObject({
-        _tag: "linear_oauth_state_rejected",
+        _tag: "LinearOAuthStateRejected",
         reason: "unknown",
       });
       expect(error.message).not.toContain("unknown-state");
@@ -238,6 +238,31 @@ describe("LinearOAuthStates", () => {
       });
       expect(error.cause).toBe(cause);
       expect(error.message).not.toContain("sensitive-code-verifier");
+    }).pipe(Effect.provide(provider(fakeDb)));
+  });
+
+  it.effect("prunes expired states so no PKCE verifier outlives its state", () => {
+    const whereConditions: Array<unknown> = [];
+    const fakeDb = {
+      delete: (table: unknown) => {
+        expect(table).toBe(relayLinearOAuthStates);
+        return {
+          where: (condition: unknown) => {
+            whereConditions.push(condition);
+            return Effect.succeed([]);
+          },
+        };
+      },
+    };
+
+    return Effect.gen(function* () {
+      const states = yield* LinearOAuthStates.LinearOAuthStates;
+      const now = yield* DateTime.now;
+      yield* states.pruneExpired;
+
+      const query = new PgDialect().sqlToQuery(whereConditions[0] as never);
+      expect(query.sql).toContain('"relay_linear_oauth_states"."expires_at" < $1');
+      expect(query.params).toEqual([now.epochMilliseconds]);
     }).pipe(Effect.provide(provider(fakeDb)));
   });
 });

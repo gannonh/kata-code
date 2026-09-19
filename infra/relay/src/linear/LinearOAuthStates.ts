@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 
 import * as RelayDb from "../db.ts";
 import { relayLinearOAuthStates } from "../persistence/schema.ts";
@@ -20,7 +20,7 @@ export interface LinearOAuthStateBinding {
 }
 
 export class LinearOAuthStateRejected extends Schema.TaggedError<LinearOAuthStateRejected>()(
-  "linear_oauth_state_rejected",
+  "LinearOAuthStateRejected",
   {
     reason: Schema.Literals(["unknown", "expired", "already_consumed"]),
   },
@@ -54,6 +54,15 @@ export class LinearOAuthStateConsumePersistenceError extends Schema.TaggedError<
   }
 }
 
+export class LinearOAuthStatePrunePersistenceError extends Schema.TaggedError<LinearOAuthStatePrunePersistenceError>()(
+  "LinearOAuthStatePrunePersistenceError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to prune expired Linear OAuth authorization states";
+  }
+}
+
 export class LinearOAuthStates extends Context.Service<
   LinearOAuthStates,
   {
@@ -71,6 +80,8 @@ export class LinearOAuthStates extends Context.Service<
       LinearOAuthStateBinding,
       LinearOAuthStateRejected | LinearOAuthStateConsumePersistenceError
     >;
+    /** Removes expired rows, consumed or not, so no PKCE verifier outlives its state. */
+    readonly pruneExpired: Effect.Effect<void, LinearOAuthStatePrunePersistenceError>;
   }
 >()("kata-code-relay/linear/LinearOAuthStates") {}
 
@@ -172,6 +183,14 @@ const make = Effect.gen(function* () {
         reason: consumed.length > 0 ? "already_consumed" : "unknown",
       });
     }),
+
+    pruneExpired: Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      yield* db
+        .delete(relayLinearOAuthStates)
+        .where(lt(relayLinearOAuthStates.expiresAt, now.epochMilliseconds))
+        .pipe(Effect.mapError((cause) => new LinearOAuthStatePrunePersistenceError({ cause })));
+    }).pipe(Effect.withSpan("relay.linear_oauth_states.prune_expired")),
   });
 });
 
