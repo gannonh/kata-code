@@ -86,7 +86,7 @@ it.effect("refresh trades the relay-held refresh token for a fresh access token"
   }),
 );
 
-it.effect("maps a rejected client authorization to blocked without leaking the credential", () =>
+it.effect("maps a rejected environment credential to blocked without leaking it for start", () =>
   Effect.gen(function* () {
     const { relay } = makeHarness(() =>
       Response.json(
@@ -106,8 +106,8 @@ it.effect("maps a rejected client authorization to blocked without leaking the c
 
     assert.instanceOf(error, RoutineError);
     assert.equal(error.code, "blocked");
-    assert.include(error.message, "katacode connect login");
-    assert.notInclude(error.message, CLIENT_ACCESS_TOKEN);
+    assert.include(error.message, "Relink this environment");
+    assert.notInclude(error.message, ENVIRONMENT_CREDENTIAL);
     assert.notInclude(error.message, "trace-start");
   }),
 );
@@ -191,11 +191,11 @@ it.effect("maps a malformed refresh response to blocked without leaking its body
   }),
 );
 
-it.effect("blocks start when the environment holds no cloud client credential", () =>
+it.effect("blocks start when the environment holds no relay credential", () =>
   Effect.gen(function* () {
     const { relay, requests } = makeHarness(
       () => Response.json({ authorizeUrl: "https://linear.app/oauth/authorize" }),
-      { clientAccessToken: Option.none() },
+      { environmentCredential: Option.none() },
     );
 
     const error = yield* relay
@@ -203,7 +203,7 @@ it.effect("blocks start when the environment holds no cloud client credential", 
       .pipe(Effect.flip);
 
     assert.equal(error.code, "blocked");
-    assert.include(error.message, "katacode connect login");
+    assert.include(error.message, "Link the environment");
     assert.deepEqual(requests, []);
   }),
 );
@@ -254,7 +254,35 @@ it.effect("revoke asks the relay to drop the Linear authorization", () =>
     assert.equal(request.method, "POST");
     assert.equal(request.url, `${RELAY_URL}/v1/linear/oauth/revoke`);
     assert.equal(request.headers.authorization, `Bearer ${CLIENT_ACCESS_TOKEN}`);
-    assert.deepEqual(requestJson(request), { connectionId: CONNECTION_ID });
+    assert.deepEqual(requestJson(request), {
+      environmentId: ENVIRONMENT_ID,
+      connectionId: CONNECTION_ID,
+    });
+  }),
+);
+
+it.effect("maps a rejected Linear grant to blocked without leaking the response", () =>
+  Effect.gen(function* () {
+    const { relay } = makeHarness(() =>
+      Response.json(
+        {
+          _tag: "RelayLinearOAuthReauthorizationRequiredError",
+          code: "linear_oauth_reauthorization_required",
+          traceId: "trace-reauthorize",
+        },
+        { status: 409 },
+      ),
+    );
+
+    const error = yield* relay
+      .refresh({ environmentId: ENVIRONMENT_ID, connectionId: CONNECTION_ID })
+      .pipe(Effect.flip);
+
+    assert.instanceOf(error, RoutineError);
+    assert.equal(error.code, "blocked");
+    assert.include(error.message, "Connect Linear again");
+    assert.notInclude(error.message, ENVIRONMENT_CREDENTIAL);
+    assert.notInclude(error.message, "trace-reauthorize");
   }),
 );
 
@@ -274,7 +302,7 @@ it.effect("blocks revoke when the environment holds no cloud client credential",
   }),
 );
 
-it.effect("start asks the relay for a Linear authorize URL", () =>
+it.effect("start asks the relay for a Linear authorize URL with the environment credential", () =>
   Effect.gen(function* () {
     const { relay, requests } = makeHarness(() =>
       Response.json({ authorizeUrl: "https://linear.app/oauth/authorize?state=abc" }),
@@ -289,11 +317,8 @@ it.effect("start asks the relay for a Linear authorize URL", () =>
     assert.equal(requests.length, 1);
     const request = requests[0]!;
     assert.equal(request.method, "POST");
-    assert.equal(request.url, `${RELAY_URL}/v1/linear/oauth/start`);
-    assert.equal(request.headers.authorization, `Bearer ${CLIENT_ACCESS_TOKEN}`);
-    assert.deepEqual(requestJson(request), {
-      environmentId: ENVIRONMENT_ID,
-      connectionId: CONNECTION_ID,
-    });
+    assert.equal(request.url, `${RELAY_URL}/v1/environments/${ENVIRONMENT_ID}/linear/oauth/start`);
+    assert.equal(request.headers.authorization, `Bearer ${ENVIRONMENT_CREDENTIAL}`);
+    assert.deepEqual(requestJson(request), { connectionId: CONNECTION_ID });
   }),
 );

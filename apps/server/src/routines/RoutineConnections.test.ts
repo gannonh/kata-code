@@ -7,6 +7,7 @@ import {
   RoutineError,
   type RoutineLinearMetadata,
 } from "@kata-sh/code-contracts";
+import type { RelayLinearAccessToken } from "@kata-sh/code-contracts/relay";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -25,10 +26,9 @@ import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import type * as VcsProcess from "../vcs/VcsProcess.ts";
 import {
-  readLinearOAuthBundle,
+  readLinearAccessToken,
   routineLinearOAuthSecretName,
-  saveLinearOAuthBundle,
-  type LinearOAuthBundle,
+  saveLinearAccessToken,
 } from "./LinearOAuth.ts";
 import { summarizeLinearEvent } from "./LinearRoutineEvents.ts";
 import { LinearRoutineMetadata, type LinearMetadataError } from "./LinearRoutineMetadata.ts";
@@ -177,9 +177,10 @@ const linearMetadataLayer = Layer.mock(LinearRoutineMetadata)({
       lastLinearMetadataCredential = credential;
     }).pipe(Effect.andThen(linearMetadataRead())),
 });
-const freshOAuthBundle = (overrides: Partial<LinearOAuthBundle> = {}): LinearOAuthBundle => ({
+const freshAccessToken = (
+  overrides: Partial<RelayLinearAccessToken> = {},
+): RelayLinearAccessToken => ({
   accessToken: "linear-access-token",
-  refreshToken: "linear-refresh-token",
   expiresAt: 1_800_000_000_000,
   scope: "read",
   ...overrides,
@@ -494,10 +495,10 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
         CLOUD_MANAGED_ENDPOINT_URL,
         new TextEncoder().encode("https://env.example/"),
       );
-      yield* saveLinearOAuthBundle({
+      yield* saveLinearAccessToken({
         secrets,
         connectionId: id,
-        bundle: freshOAuthBundle({ accessToken }),
+        token: freshAccessToken({ accessToken }),
       });
     });
 
@@ -682,10 +683,10 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
         const secrets = yield* ServerSecretStore.ServerSecretStore;
         const store = yield* RoutineStore;
         const id = RoutineConnectionId.make("connection-linear-metadata-bundle");
-        yield* saveLinearOAuthBundle({
+        yield* saveLinearAccessToken({
           secrets,
           connectionId: id,
-          bundle: freshOAuthBundle({ accessToken: "bundle-access-token" }),
+          token: freshAccessToken({ accessToken: "bundle-access-token" }),
         });
         const metadata = yield* connections.linearMetadata({ environmentId, connectionId: id });
         assert.equal(metadata.workspace.name, "Acme");
@@ -700,10 +701,10 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
       const connections = yield* RoutineConnections;
       const secrets = yield* ServerSecretStore.ServerSecretStore;
       const id = RoutineConnectionId.make("connection-linear-metadata-refresh");
-      yield* saveLinearOAuthBundle({
+      yield* saveLinearAccessToken({
         secrets,
         connectionId: id,
-        bundle: freshOAuthBundle({ accessToken: "stale-access-token", expiresAt: 30_000 }),
+        token: freshAccessToken({ accessToken: "stale-access-token", expiresAt: 30_000 }),
       });
       const refreshes: Array<{ environmentId: string; connectionId: string }> = [];
       linearOAuthRefresh = (input) => {
@@ -720,9 +721,8 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
       assert.equal(metadata.workspace.name, "Acme");
       assert.deepEqual(refreshes, [{ environmentId, connectionId: id }]);
       assert.equal(lastLinearMetadataCredential, "refreshed-access-token");
-      const stored = Option.getOrThrow(yield* readLinearOAuthBundle({ secrets, connectionId: id }));
+      const stored = Option.getOrThrow(yield* readLinearAccessToken({ secrets, connectionId: id }));
       assert.equal(stored.accessToken, "refreshed-access-token");
-      assert.equal(stored.refreshToken, "linear-refresh-token");
     }),
   );
 

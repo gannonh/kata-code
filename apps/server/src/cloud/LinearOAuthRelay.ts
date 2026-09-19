@@ -3,6 +3,7 @@ import {
   RelayApi,
   RelayAuthInvalidError,
   RelayLinearOAuthNotConfiguredError,
+  RelayLinearOAuthReauthorizationRequiredError,
 } from "@kata-sh/code-contracts/relay";
 import { normalizeSecureRelayUrl } from "@kata-sh/code-shared/relayUrl";
 import * as Context from "effect/Context";
@@ -19,7 +20,7 @@ import * as CliTokenManager from "./CliTokenManager.ts";
 import { RELAY_ENVIRONMENT_CREDENTIAL_SECRET, RELAY_URL_SECRET } from "./config.ts";
 
 export interface LinearOAuthRelayShape {
-  /** Client-authenticated: starts an authorization for this user's environment. */
+  /** Environment-authenticated: starts an authorization for this environment. */
   readonly start: (input: {
     readonly environmentId: EnvironmentId;
     readonly connectionId: string;
@@ -62,15 +63,23 @@ const MISSING_ENVIRONMENT_CREDENTIAL =
 
 const isRelayAuthInvalidError = Schema.is(RelayAuthInvalidError);
 const isRelayLinearOAuthNotConfiguredError = Schema.is(RelayLinearOAuthNotConfiguredError);
+const isRelayLinearOAuthReauthorizationRequiredError = Schema.is(
+  RelayLinearOAuthReauthorizationRequiredError,
+);
 
 const relayFailure =
   (action: "authorize" | "refresh" | "revoke") =>
   (cause: unknown): RoutineError => {
     if (isRelayAuthInvalidError(cause)) {
       return blocked(
-        action === "refresh"
-          ? "Kata Code Connect rejected this environment's relay credential. Relink this environment, then try again."
-          : "Kata Code Connect rejected this machine's cloud authorization. Run `katacode connect login`, then try again.",
+        action === "revoke"
+          ? "Kata Code Connect rejected this machine's cloud authorization. Run `katacode connect login`, then try again."
+          : "Kata Code Connect rejected this environment's relay credential. Relink this environment, then try again.",
+      );
+    }
+    if (isRelayLinearOAuthReauthorizationRequiredError(cause)) {
+      return blocked(
+        "Linear no longer accepts this connection's authorization. Connect Linear again.",
       );
     }
     if (isRelayLinearOAuthNotConfiguredError(cause)) {
@@ -132,22 +141,19 @@ export function makeLinearOAuthRelay(
   const start: LinearOAuthRelayShape["start"] = Effect.fn("LinearOAuthRelay.start")(
     function* (input) {
       const relayUrl = yield* requireRelayUrl(dependencies.relayUrl);
-      const accessToken = yield* requireValue(
-        dependencies.clientAccessToken,
-        MISSING_CLIENT_CREDENTIAL,
+      const credential = yield* requireValue(
+        dependencies.environmentCredential,
+        MISSING_ENVIRONMENT_CREDENTIAL,
       );
       const client = yield* makeRelayClient({
         httpClient: dependencies.httpClient,
         relayUrl,
-        authorization: null,
+        authorization: credential,
       });
-      return yield* client.linearClient
+      return yield* client.linearServer
         .linearOAuthStart({
-          headers: { authorization: `Bearer ${accessToken}` },
-          payload: {
-            environmentId: input.environmentId,
-            connectionId: input.connectionId,
-          },
+          params: { environmentId: input.environmentId },
+          payload: { connectionId: input.connectionId },
         })
         .pipe(Effect.mapError(relayFailure("authorize")));
     },
@@ -189,7 +195,7 @@ export function makeLinearOAuthRelay(
       yield* client.linearClient
         .linearOAuthRevoke({
           headers: { authorization: `Bearer ${accessToken}` },
-          payload: { connectionId: input.connectionId },
+          payload: { environmentId: input.environmentId, connectionId: input.connectionId },
         })
         .pipe(Effect.mapError(relayFailure("revoke")));
     },

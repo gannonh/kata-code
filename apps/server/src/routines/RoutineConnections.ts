@@ -23,7 +23,7 @@ import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
 import * as CloudManagedEndpointRuntime from "../cloud/ManagedEndpointRuntime.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
-import { ensureFreshLinearOAuthBundle, routineLinearOAuthSecretName } from "./LinearOAuth.ts";
+import { ensureFreshLinearAccessToken, routineLinearOAuthSecretName } from "./LinearOAuth.ts";
 import { LinearRoutineMetadata, type LinearMetadataError } from "./LinearRoutineMetadata.ts";
 import { LinearWebhookAdmin } from "./LinearRoutineWebhooks.ts";
 import {
@@ -219,7 +219,7 @@ const makeRoutineConnections = Effect.gen(function* () {
     readonly allTeams: boolean;
     readonly teamIds: ReadonlyArray<string>;
   }) {
-    const bundle = yield* ensureFreshLinearOAuthBundle({
+    const bundle = yield* ensureFreshLinearAccessToken({
       secrets,
       relay: linearOAuthRelay,
       environmentId: input.environmentId,
@@ -501,7 +501,7 @@ const makeRoutineConnections = Effect.gen(function* () {
         // The provider-side delete and revoke are best effort; local
         // acceptance already ended with the signing secret above.
         if (current.webhookId !== null) {
-          const bundle = yield* ensureFreshLinearOAuthBundle({
+          const bundle = yield* ensureFreshLinearAccessToken({
             secrets,
             relay: linearOAuthRelay,
             environmentId: input.environmentId,
@@ -677,7 +677,7 @@ const makeRoutineConnections = Effect.gen(function* () {
     "RoutineConnections.linearMetadata",
   )(function* (input) {
     const id = yield* validateConnectionId(input.connectionId);
-    const bundle = yield* ensureFreshLinearOAuthBundle({
+    const bundle = yield* ensureFreshLinearAccessToken({
       secrets,
       relay: linearOAuthRelay,
       environmentId: input.environmentId,
