@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-export const LINEAR_GRAPHQL_ENDPOINT = "https://api.linear.app/graphql";
+const LINEAR_GRAPHQL_ENDPOINT = "https://api.linear.app/graphql";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_ERROR_TEXT = 200;
 

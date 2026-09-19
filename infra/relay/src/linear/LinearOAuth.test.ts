@@ -102,6 +102,32 @@ describe("LinearOAuth", () => {
     });
   });
 
+  it.effect("calls injected fetch without an object receiver", () => {
+    const fetchImpl = async function receiverSensitiveFetch(
+      this: unknown,
+      _input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) {
+      if (this !== undefined) {
+        throw new TypeError("Illegal invocation");
+      }
+      return jsonResponse({
+        access_token: "linear-access-token",
+        refresh_token: "linear-refresh-token",
+        expires_in: 3600,
+      });
+    } as typeof fetch;
+
+    return Effect.gen(function* () {
+      const bundle = yield* makeOAuth(fetchImpl).exchangeCode({
+        code: "authorization-code",
+        codeVerifier: "code-verifier",
+      });
+
+      expect(bundle.accessToken).toBe("linear-access-token");
+    });
+  });
+
   it.effect("reports a rejected exchange without leaking secrets or the response body", () => {
     const { fetchImpl } = makeFetch(() =>
       Promise.resolve(jsonResponse({ error: "invalid_grant", detail: "raw-body-token" }, 400)),

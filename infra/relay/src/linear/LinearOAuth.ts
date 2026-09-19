@@ -92,6 +92,8 @@ export function makeLinearOAuth(dependencies: {
   readonly redirectUri: string;
   readonly fetch: typeof fetch;
 }): LinearOAuthShape {
+  // workerd requires the ambient fetch receiver to stay undefined or globalThis.
+  const executeFetch = dependencies.fetch;
   const post = (
     operation: LinearOAuthRequestFailed["operation"],
     endpoint: string,
@@ -100,7 +102,7 @@ export function makeLinearOAuth(dependencies: {
     Effect.tryPromise({
       // The signal aborts the request when the relay deadline interrupts the handler.
       try: (signal) =>
-        dependencies.fetch(endpoint, {
+        executeFetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded" },
           body: form.toString(),
