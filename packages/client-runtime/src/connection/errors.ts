@@ -68,6 +68,7 @@ function relayProtectedError(error: RelayProtectedError): ConnectionAttemptError
       });
     case "RelayEnvironmentLinkFailedError":
     case "RelayLinearOAuthNotConfiguredError":
+    case "RelayLinearOAuthReauthorizationRequiredError":
     case "RelayInternalError":
       return new ConnectionTransientError({
         reason: "relay-unavailable",

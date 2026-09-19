@@ -563,6 +563,20 @@ export class RelayLinearOAuthNotConfiguredError extends Schema.TaggedError<Relay
   }
 }
 
+/** Linear no longer honors the stored grant; the user must authorize the connection again. */
+export class RelayLinearOAuthReauthorizationRequiredError extends Schema.TaggedError<RelayLinearOAuthReauthorizationRequiredError>()(
+  "RelayLinearOAuthReauthorizationRequiredError",
+  {
+    code: Schema.Literal("linear_oauth_reauthorization_required"),
+    traceId: TrimmedNonEmptyString,
+  },
+  { httpApiStatus: 409 },
+) {
+  override get message(): string {
+    return "Linear rejected the stored authorization; authorize the connection again";
+  }
+}
+
 export const RelayProtectedError = Schema.Union([
   RelayAuthInvalidError,
   RelayEnvironmentLinkProofExpiredError,
@@ -576,6 +590,7 @@ export const RelayProtectedError = Schema.Union([
   RelayAgentActivityPublishProofExpiredError,
   RelayAgentActivityPublishProofInvalidError,
   RelayLinearOAuthNotConfiguredError,
+  RelayLinearOAuthReauthorizationRequiredError,
   RelayInternalError,
 ]);
 export type RelayProtectedError = typeof RelayProtectedError.Type;
@@ -1138,22 +1153,32 @@ const RelayServerGroup = HttpApiGroup.make("server")
  * application, so a connection is identified by the environment that uses it
  * plus a client-generated connection id.
  */
-export const RelayLinearConnectionId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
+export const RelayLinearConnectionId = TrimmedNonEmptyString.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]{1,128}$/u),
+);
 export type RelayLinearConnectionId = typeof RelayLinearConnectionId.Type;
 
 /**
- * Signed delivery of an authorized Linear token bundle to the bound
- * environment. Tokens travel inside the relay proof so the environment can
+ * The Linear access token an environment holds for a connection. The relay
+ * keeps the refresh token; an environment renews through the refresh endpoint.
+ */
+export const RelayLinearAccessToken = Schema.Struct({
+  accessToken: TrimmedNonEmptyString,
+  expiresAt: Schema.Number,
+  scope: Schema.String,
+});
+export type RelayLinearAccessToken = typeof RelayLinearAccessToken.Type;
+
+/**
+ * Signed delivery of an authorized Linear access token to the bound
+ * environment. The token travels inside the relay proof so the environment can
  * verify the sender and bind every field to the request nonce.
  */
 export const RelayCloudLinearOAuthDeliveryProofPayload = Schema.Struct({
   ...RelaySignedJwtRegisteredClaims,
   environmentId: EnvironmentId,
   connectionId: RelayLinearConnectionId,
-  accessToken: Schema.String,
-  refreshToken: Schema.String,
-  expiresAt: Schema.Number,
-  scope: Schema.String,
+  token: RelayLinearAccessToken,
   nonce: TrimmedNonEmptyString,
 });
 export type RelayCloudLinearOAuthDeliveryProofPayload =
@@ -1176,6 +1201,7 @@ export const RelayLinearOAuthStartResponse = Schema.Struct({
 export type RelayLinearOAuthStartResponse = typeof RelayLinearOAuthStartResponse.Type;
 
 export const RelayLinearOAuthRevokeRequest = Schema.Struct({
+  environmentId: EnvironmentId,
   connectionId: RelayLinearConnectionId,
 });
 export type RelayLinearOAuthRevokeRequest = typeof RelayLinearOAuthRevokeRequest.Type;
@@ -1185,14 +1211,7 @@ export const RelayLinearOAuthRefreshRequest = Schema.Struct({
 });
 export type RelayLinearOAuthRefreshRequest = typeof RelayLinearOAuthRefreshRequest.Type;
 
-export const RelayLinearOAuthRefreshResponse = Schema.Struct({
-  accessToken: Schema.String,
-  expiresAt: Schema.Number,
-  scope: Schema.String,
-});
-export type RelayLinearOAuthRefreshResponse = typeof RelayLinearOAuthRefreshResponse.Type;
-
-export const RelayLinearOAuthStartEndpoint = HttpApiEndpoint.post(
+const RelayLinearOAuthStartEndpoint = HttpApiEndpoint.post(
   "linearOAuthStart",
   "/v1/linear/oauth/start",
   {
@@ -1203,25 +1222,25 @@ export const RelayLinearOAuthStartEndpoint = HttpApiEndpoint.post(
   },
 ).annotate(OpenApi.Summary, "Start a Linear OAuth authorization");
 
-export const RelayLinearOAuthRevokeEndpoint = HttpApiEndpoint.post(
+const RelayLinearOAuthRevokeEndpoint = HttpApiEndpoint.post(
   "linearOAuthRevoke",
   "/v1/linear/oauth/revoke",
   {
     headers: RelayBearerRequestHeaders,
     payload: RelayLinearOAuthRevokeRequest,
     success: RelayOkResponse,
-    error: RelayAuthAndInternalErrors,
+    error: RelayLinearOAuthErrors,
   },
 ).annotate(OpenApi.Summary, "Revoke a Linear OAuth authorization");
 
-export const RelayLinearOAuthRefreshEndpoint = HttpApiEndpoint.post(
+const RelayLinearOAuthRefreshEndpoint = HttpApiEndpoint.post(
   "linearOAuthRefresh",
   "/v1/environments/:environmentId/linear/oauth/refresh",
   {
     params: Schema.Struct({ environmentId: EnvironmentId }),
     payload: RelayLinearOAuthRefreshRequest,
-    success: RelayLinearOAuthRefreshResponse,
-    error: RelayLinearOAuthErrors,
+    success: RelayLinearAccessToken,
+    error: [...RelayLinearOAuthErrors, RelayLinearOAuthReauthorizationRequiredError],
   },
 ).annotate(OpenApi.Summary, "Refresh a delivered Linear access token");
 

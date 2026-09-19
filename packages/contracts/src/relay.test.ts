@@ -6,7 +6,7 @@ import {
   RelayApi,
   RelayCloudLinearOAuthDeliveryRequest,
   RelayDeviceRegistrationRequest,
-  RelayLinearOAuthRefreshResponse,
+  RelayLinearAccessToken,
   RelayLinearOAuthStartRequest,
 } from "./relay.ts";
 
@@ -75,8 +75,15 @@ describe("Linear OAuth relay contracts", () => {
     expect(decode({ environmentId: "environment-1", connectionId: "" })._tag).toBe("Failure");
   });
 
+  it("rejects a connection id that could leave the environment secret directory", () => {
+    const decode = Schema.decodeUnknownExit(RelayLinearOAuthStartRequest);
+    for (const connectionId of ["x/../relay-issuer", "..", "a.b", "a b", "a".repeat(129)]) {
+      expect(decode({ environmentId: "environment-1", connectionId })._tag).toBe("Failure");
+    }
+  });
+
   it("carries a refreshed token bundle", () => {
-    const decode = Schema.decodeUnknownExit(RelayLinearOAuthRefreshResponse);
+    const decode = Schema.decodeUnknownExit(RelayLinearAccessToken);
     expect(
       decode({ accessToken: "token", expiresAt: 1_800_000_000_000, scope: "read admin" })._tag,
     ).toBe("Success");
