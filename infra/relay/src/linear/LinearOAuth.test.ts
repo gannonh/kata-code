@@ -1,10 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
 
 import {
   makeLinearOAuth,
   LINEAR_AUTHORIZE_URL,
+  LINEAR_OAUTH_REQUEST_TIMEOUT_MS,
   LINEAR_OAUTH_SCOPES,
   LINEAR_REVOKE_ENDPOINT,
   LINEAR_TOKEN_ENDPOINT,
@@ -271,6 +275,25 @@ describe("LinearOAuth", () => {
       expect(error).toMatchObject({ _tag: "LinearOAuthRequestFailed", reason: "unavailable" });
       expect(error.message).not.toContain("linear-access-token");
       expect(error.message).not.toContain("linear-refresh-token");
+    });
+  });
+
+  it.effect("aborts a stalled Linear request and reports it as unavailable", () => {
+    const signals: Array<AbortSignal | null | undefined> = [];
+    const fetchImpl = ((_input: RequestInfo | URL, init?: RequestInit) => {
+      signals.push(init?.signal);
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+
+    return Effect.gen(function* () {
+      const fiber = yield* makeOAuth(fetchImpl)
+        .refresh({ refreshToken: "linear-refresh-token" })
+        .pipe(Effect.flip, Effect.forkChild);
+      yield* TestClock.adjust(Duration.millis(LINEAR_OAUTH_REQUEST_TIMEOUT_MS));
+      const error = yield* Fiber.join(fiber);
+
+      expect(error).toMatchObject({ _tag: "LinearOAuthRequestFailed", reason: "unavailable" });
+      expect(signals[0]?.aborted).toBe(true);
     });
   });
 });

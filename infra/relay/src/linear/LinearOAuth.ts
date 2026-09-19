@@ -1,5 +1,6 @@
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -12,6 +13,8 @@ import * as RelayConfiguration from "../Config.ts";
 export const LINEAR_AUTHORIZE_URL = "https://linear.app/oauth/authorize";
 export const LINEAR_TOKEN_ENDPOINT = "https://api.linear.app/oauth/token";
 export const LINEAR_REVOKE_ENDPOINT = "https://api.linear.app/oauth/revoke";
+// Below the relay request deadline, so a stalled Linear call fails as unavailable.
+export const LINEAR_OAUTH_REQUEST_TIMEOUT_MS = 5_000;
 export const LINEAR_OAUTH_SCOPES = "read,admin";
 export const LINEAR_OAUTH_CALLBACK_PATH = "/v1/oauth/linear/callback";
 
@@ -95,14 +98,21 @@ export function makeLinearOAuth(dependencies: {
     form: URLSearchParams,
   ) =>
     Effect.tryPromise({
-      try: () =>
+      // The signal aborts the request when the relay deadline interrupts the handler.
+      try: (signal) =>
         dependencies.fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded" },
           body: form.toString(),
+          signal,
         }),
       catch: () => new LinearOAuthRequestFailed({ operation, reason: "unavailable" }),
     }).pipe(
+      Effect.timeoutOrElse({
+        duration: Duration.millis(LINEAR_OAUTH_REQUEST_TIMEOUT_MS),
+        orElse: () =>
+          Effect.fail(new LinearOAuthRequestFailed({ operation, reason: "unavailable" })),
+      }),
       Effect.filterOrFail(
         (response) => response.status < 500,
         (response) =>

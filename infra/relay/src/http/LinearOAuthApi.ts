@@ -115,7 +115,9 @@ const callbackPage = (status: number, message: string) =>
     ),
   );
 
-const RETRY_MESSAGE = "Could not complete the Linear connection. Please try again.";
+// This link is single use, so every recovery starts a new authorization.
+const RETRY_MESSAGE =
+  "Could not complete the Linear connection. Connect Linear again from Kata Code.";
 
 /**
  * Exported as an effect, not a route: the worker provides the runtime layer
@@ -154,11 +156,14 @@ export const relayLinearOAuthCallbackHandler = Effect.gen(function* () {
       LinearOAuthRequestFailed: (error) =>
         error.reason === "rejected"
           ? callbackPage(400, "Linear rejected the authorization request.")
-          : callbackPage(502, "Could not reach Linear to finish connecting. Please retry."),
+          : callbackPage(
+              502,
+              "Could not reach Linear to finish connecting. Connect Linear again from Kata Code.",
+            ),
       LinearOAuthDeliveryFailed: () =>
         callbackPage(
           502,
-          "Kata Code could not deliver the Linear connection to the environment. Please retry.",
+          "Kata Code could not reach the environment, so Linear was not connected. Check that the environment is online, then connect Linear again from Kata Code.",
         ),
       LinearOAuthStateConsumePersistenceError: () => callbackPage(500, RETRY_MESSAGE),
       LinearTokenLookupPersistenceError: () => callbackPage(500, RETRY_MESSAGE),
