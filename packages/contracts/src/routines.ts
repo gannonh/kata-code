@@ -1,6 +1,7 @@
 import * as Cron from "effect/Cron";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import {
   EnvironmentId,
   ProjectId,
@@ -127,6 +128,60 @@ export const LinearEventTrigger = Schema.Union([
   }),
 ]);
 export type LinearEventTrigger = typeof LinearEventTrigger.Type;
+
+/**
+ * OpenAI strict structured output requires every object property in its JSON
+ * Schema to be required. Encode optional Linear scopes as required nullable
+ * fields for the model, then decode null back to an omitted filter.
+ */
+const LinearModelEventTriggerEncoded = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("linear"),
+    connectionId: RoutineConnectionId,
+    workspaceId: LinearResourceId,
+    teamId: Schema.NullOr(LinearResourceId),
+    projectId: Schema.NullOr(LinearResourceId),
+    event: Schema.Literal("issue_created"),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("linear"),
+    connectionId: RoutineConnectionId,
+    workspaceId: LinearResourceId,
+    teamId: Schema.NullOr(LinearResourceId),
+    projectId: Schema.NullOr(LinearResourceId),
+    event: Schema.Literal("status_changed"),
+    stateId: LinearResourceId,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("linear"),
+    connectionId: RoutineConnectionId,
+    workspaceId: LinearResourceId,
+    teamId: Schema.NullOr(LinearResourceId),
+    projectId: Schema.NullOr(LinearResourceId),
+    event: Schema.Literal("label_added"),
+    labelId: LinearResourceId,
+  }),
+]);
+type LinearModelEventTriggerEncoded = typeof LinearModelEventTriggerEncoded.Type;
+type LinearEventTriggerEncoded = typeof LinearEventTrigger.Encoded;
+const LinearModelEventTrigger = LinearModelEventTriggerEncoded.pipe(
+  Schema.decodeTo(
+    LinearEventTrigger,
+    SchemaTransformation.transform<LinearEventTriggerEncoded, LinearModelEventTriggerEncoded>({
+      decode: ({ teamId, projectId, ...trigger }) => ({
+        ...trigger,
+        ...(teamId === null ? {} : { teamId }),
+        ...(projectId === null ? {} : { projectId }),
+      }),
+      encode: (trigger) => ({
+        ...trigger,
+        connectionId: RoutineConnectionId.make(trigger.connectionId),
+        teamId: trigger.teamId ?? null,
+        projectId: trigger.projectId ?? null,
+      }),
+    }),
+  ),
+);
 export const RoutineTrigger = Schema.Union([
   ScheduleTrigger,
   GitHubEventTrigger,
@@ -166,7 +221,7 @@ export type RoutineDraft = typeof RoutineDraft.Type;
  * and the server repairs or clarifies against the provider registry before
  * any draft is accepted.
  */
-export const RoutineDraftGeneratedFields = Schema.Struct({
+const RoutineDraftGeneratedFieldShape = {
   name: TrimmedNonEmptyString.check(Schema.isMaxLength(120)),
   instruction: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
   projectId: ProjectId,
@@ -174,6 +229,9 @@ export const RoutineDraftGeneratedFields = Schema.Struct({
     instanceId: Schema.String.check(Schema.isMaxLength(200)),
     model: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   }),
+} as const;
+export const RoutineDraftGeneratedFields = Schema.Struct({
+  ...RoutineDraftGeneratedFieldShape,
   trigger: Schema.Union([ScheduleTrigger, LinearEventTrigger]),
 });
 export type RoutineDraftGeneratedFields = typeof RoutineDraftGeneratedFields.Type;
@@ -184,6 +242,17 @@ export const RoutineDraftModelOutput = Schema.Struct({
   assistantMessage: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
 });
 export type RoutineDraftModelOutput = typeof RoutineDraftModelOutput.Type;
+
+/** Provider wire schema for strict structured output; decodes to the public model output type. */
+const RoutineDraftProviderGeneratedFields = Schema.Struct({
+  ...RoutineDraftGeneratedFieldShape,
+  trigger: Schema.Union([ScheduleTrigger, LinearModelEventTrigger]),
+});
+export const RoutineDraftProviderOutput = Schema.Struct({
+  draft: Schema.NullOr(RoutineDraftProviderGeneratedFields),
+  assistantMessage: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
+});
+export type RoutineDraftProviderOutput = typeof RoutineDraftProviderOutput.Type;
 
 export const RoutineDraftConversationMessage = Schema.Struct({
   role: Schema.Literals(["user", "assistant"]),

@@ -7,7 +7,7 @@
  * @module textGenerationPrompts
  */
 import * as Schema from "effect/Schema";
-import { RoutineDraftModelOutput } from "@kata-sh/code-contracts";
+import { RoutineDraftProviderOutput } from "@kata-sh/code-contracts";
 import type {
   ChatAttachment,
   RoutineDraftConversationMessage,
@@ -455,5 +455,5 @@ export function buildRoutineDraftPrompt(input: RoutineDraftPromptInput) {
     limitSection(input.message, 12_000),
   ].join("\n");
 
-  return { prompt, outputSchema: RoutineDraftModelOutput };
+  return { prompt, outputSchema: RoutineDraftProviderOutput };
 }

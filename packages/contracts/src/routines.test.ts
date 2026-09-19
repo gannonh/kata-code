@@ -10,6 +10,7 @@ import {
   RoutineDraftGeneratedFields,
   RoutineDraftGenerationInput,
   RoutineDraftGenerationResult,
+  RoutineDraftProviderOutput,
   RoutineError,
   RoutineConnection,
   RoutineConnectionAuthorization,
@@ -73,6 +74,51 @@ describe("scheduled routine schedules", () => {
 const decodeDraftRequest = Schema.decodeUnknownSync(RoutineDraftGenerationInput);
 const decodeDraftResult = Schema.decodeUnknownSync(RoutineDraftGenerationResult);
 describe("routine draft generation contracts", () => {
+  it("emits strict nullable Linear scope fields and decodes null as an omitted filter", () => {
+    const document = Schema.toJsonSchemaDocument(RoutineDraftProviderOutput);
+    const linearObjects: Array<{ readonly required?: ReadonlyArray<string> }> = [];
+    const visit = (value: unknown): void => {
+      if (value === null || typeof value !== "object") return;
+      const object = value as {
+        readonly properties?: Record<string, unknown>;
+        readonly required?: ReadonlyArray<string>;
+      };
+      if (object.properties?.teamId !== undefined) linearObjects.push(object);
+      for (const child of Object.values(value)) visit(child);
+    };
+    visit(document);
+    expect(linearObjects).toHaveLength(3);
+    expect(
+      linearObjects.every(
+        (object) => object.required?.includes("teamId") && object.required.includes("projectId"),
+      ),
+    ).toBe(true);
+
+    const decoded = Schema.decodeUnknownSync(RoutineDraftProviderOutput)({
+      draft: {
+        name: "Linear triage",
+        instruction: "Triage the issue",
+        projectId: "project-1",
+        modelSelection,
+        trigger: {
+          kind: "linear",
+          connectionId: "connection-1",
+          workspaceId: "workspace-1",
+          teamId: null,
+          projectId: null,
+          event: "issue_created",
+        },
+      },
+      assistantMessage: "Drafted a Linear triage routine.",
+    });
+    expect(decoded.draft?.trigger).toEqual({
+      kind: "linear",
+      connectionId: "connection-1",
+      workspaceId: "workspace-1",
+      event: "issue_created",
+    });
+  });
+
   it("accepts a bounded conversational request and a clarification result", () => {
     const input = decodeDraftRequest({
       message: "Run a weekday brief at 9am",
