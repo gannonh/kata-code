@@ -3,12 +3,11 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
 import {
-  buildLinearAuthorizeUrl,
   makeLinearOAuth,
   LINEAR_AUTHORIZE_URL,
   LINEAR_OAUTH_SCOPES,
+  LINEAR_REVOKE_ENDPOINT,
   LINEAR_TOKEN_ENDPOINT,
-  type LinearOAuthError,
 } from "./LinearOAuth.ts";
 
 const CLIENT_SECRET = "linear-client-secret";
@@ -37,31 +36,30 @@ const makeOAuth = (fetchImpl: typeof fetch) =>
   });
 
 describe("LinearOAuth", () => {
-  it("builds an authorize URL with PKCE parameters and never the client secret", () => {
-    const url = new URL(
-      buildLinearAuthorizeUrl({
-        clientId: "linear-client-id",
-        redirectUri: "https://relay.example.com/v1/linear/oauth/callback",
-        state: "state-token",
-        codeChallenge: "code-challenge",
-      }),
-    );
+  it.effect("builds an authorize URL with PKCE parameters and never the client secret", () =>
+    Effect.gen(function* () {
+      const url = new URL(
+        yield* makeOAuth(
+          makeFetch(() => Promise.reject(new Error("unused"))).fetchImpl,
+        ).authorizeUrl({ state: "state-token", codeChallenge: "code-challenge" }),
+      );
 
-    expect(`${url.origin}${url.pathname}`).toBe(LINEAR_AUTHORIZE_URL);
-    expect(url.searchParams.get("response_type")).toBe("code");
-    expect(url.searchParams.get("client_id")).toBe("linear-client-id");
-    expect(url.searchParams.get("redirect_uri")).toBe(
-      "https://relay.example.com/v1/linear/oauth/callback",
-    );
-    expect(url.searchParams.get("scope")).toBe(LINEAR_OAUTH_SCOPES);
-    expect(url.searchParams.get("scope")).toBe("read,admin");
-    expect(url.searchParams.get("actor")).toBe("application");
-    expect(url.searchParams.get("prompt")).toBe("consent");
-    expect(url.searchParams.get("state")).toBe("state-token");
-    expect(url.searchParams.get("code_challenge")).toBe("code-challenge");
-    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
-    expect(url.toString()).not.toContain("client_secret");
-  });
+      expect(`${url.origin}${url.pathname}`).toBe(LINEAR_AUTHORIZE_URL);
+      expect(url.searchParams.get("response_type")).toBe("code");
+      expect(url.searchParams.get("client_id")).toBe("linear-client-id");
+      expect(url.searchParams.get("redirect_uri")).toBe(
+        "https://relay.example.com/v1/linear/oauth/callback",
+      );
+      expect(url.searchParams.get("scope")).toBe(LINEAR_OAUTH_SCOPES);
+      expect(url.searchParams.get("scope")).toBe("read,admin");
+      expect(url.searchParams.get("actor")).toBe("application");
+      expect(url.searchParams.get("prompt")).toBe("consent");
+      expect(url.searchParams.get("state")).toBe("state-token");
+      expect(url.searchParams.get("code_challenge")).toBe("code-challenge");
+      expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+      expect(url.toString()).not.toContain("client_secret");
+    }),
+  );
 
   it.effect("exchanges an authorization code with a form-encoded token request", () => {
     const { calls, fetchImpl } = makeFetch(() =>
@@ -106,14 +104,14 @@ describe("LinearOAuth", () => {
     );
 
     return Effect.gen(function* () {
-      const error = (yield* Effect.flip(
+      const error = yield* Effect.flip(
         makeOAuth(fetchImpl).exchangeCode({
           code: "authorization-code",
           codeVerifier: "code-verifier",
         }),
-      )) as LinearOAuthError;
+      );
 
-      expect(error._tag).toBe("linear_oauth_rejected");
+      expect(error).toMatchObject({ _tag: "LinearOAuthRequestFailed", reason: "rejected" });
       expect(error.message).toContain("400");
       for (const secret of [
         CLIENT_SECRET,
@@ -130,14 +128,14 @@ describe("LinearOAuth", () => {
     const { fetchImpl } = makeFetch(() => Promise.reject(new Error("socket hang up")));
 
     return Effect.gen(function* () {
-      const error = (yield* Effect.flip(
+      const error = yield* Effect.flip(
         makeOAuth(fetchImpl).exchangeCode({
           code: "authorization-code",
           codeVerifier: "code-verifier",
         }),
-      )) as LinearOAuthError;
+      );
 
-      expect(error._tag).toBe("linear_oauth_unavailable");
+      expect(error).toMatchObject({ _tag: "LinearOAuthRequestFailed", reason: "unavailable" });
       expect(error.message).not.toContain(CLIENT_SECRET);
     });
   });
@@ -148,14 +146,17 @@ describe("LinearOAuth", () => {
     );
 
     return Effect.gen(function* () {
-      const error = (yield* Effect.flip(
+      const error = yield* Effect.flip(
         makeOAuth(fetchImpl).exchangeCode({
           code: "authorization-code",
           codeVerifier: "code-verifier",
         }),
-      )) as LinearOAuthError;
+      );
 
-      expect(error._tag).toBe("linear_oauth_invalid_response");
+      expect(error).toMatchObject({
+        _tag: "LinearOAuthRequestFailed",
+        reason: "invalid_response",
+      });
       expect(error.message).not.toContain(CLIENT_SECRET);
     });
   });
@@ -202,6 +203,74 @@ describe("LinearOAuth", () => {
 
       expect(bundle.accessToken).toBe("refreshed-access-token");
       expect(bundle.refreshToken).toBe("previous-refresh-token");
+    });
+  });
+  it.effect("rejects a code exchange that returns no refresh token", () => {
+    const { fetchImpl } = makeFetch(() =>
+      Promise.resolve(jsonResponse({ access_token: "linear-access-token", expires_in: 3600 })),
+    );
+
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        makeOAuth(fetchImpl).exchangeCode({
+          code: "authorization-code",
+          codeVerifier: "code-verifier",
+        }),
+      );
+
+      expect(error).toMatchObject({
+        _tag: "LinearOAuthRequestFailed",
+        reason: "invalid_response",
+      });
+    });
+  });
+
+  it.effect("revokes the refresh token and the access token at Linear", () => {
+    const { calls, fetchImpl } = makeFetch(() =>
+      Promise.resolve(new Response(null, { status: 200 })),
+    );
+
+    return Effect.gen(function* () {
+      yield* makeOAuth(fetchImpl).revoke({
+        accessToken: "linear-access-token",
+        refreshToken: "linear-refresh-token",
+      });
+
+      expect(calls.map((call) => call.url)).toEqual([
+        LINEAR_REVOKE_ENDPOINT,
+        LINEAR_REVOKE_ENDPOINT,
+      ]);
+      const bodies = calls.map((call) => new URLSearchParams(String(call.init?.body)));
+      expect(bodies.map((body) => [body.get("token"), body.get("token_type_hint")])).toEqual([
+        ["linear-refresh-token", "refresh_token"],
+        ["linear-access-token", "access_token"],
+      ]);
+    });
+  });
+
+  it.effect("treats a token Linear cannot revoke as already revoked", () => {
+    const { fetchImpl } = makeFetch(() => Promise.resolve(jsonResponse({ error: "invalid" }, 400)));
+
+    return makeOAuth(fetchImpl).revoke({
+      accessToken: "linear-access-token",
+      refreshToken: "linear-refresh-token",
+    });
+  });
+
+  it.effect("fails revocation when Linear is unavailable, without leaking the tokens", () => {
+    const { fetchImpl } = makeFetch(() => Promise.resolve(new Response(null, { status: 503 })));
+
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        makeOAuth(fetchImpl).revoke({
+          accessToken: "linear-access-token",
+          refreshToken: "linear-refresh-token",
+        }),
+      );
+
+      expect(error).toMatchObject({ _tag: "LinearOAuthRequestFailed", reason: "unavailable" });
+      expect(error.message).not.toContain("linear-access-token");
+      expect(error.message).not.toContain("linear-refresh-token");
     });
   });
 });

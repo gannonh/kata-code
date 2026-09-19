@@ -29,6 +29,7 @@ const config = RelayConfiguration.RelayConfiguration.of({
   clerkJwtAudience: "kata-code-relay",
   cloudMintPrivateKey: Redacted.make(keyPair.privateKey),
   cloudMintPublicKey: keyPair.publicKey,
+  linearOAuth: null,
   managedEndpointBaseDomain: undefined,
   managedEndpointNamespace: undefined,
 });

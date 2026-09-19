@@ -28,7 +28,7 @@ export class RelayConfiguration extends Context.Service<
     readonly cloudMintPublicKey: string;
     readonly managedEndpointBaseDomain: string | undefined;
     readonly managedEndpointNamespace: string | undefined;
-    readonly linearOAuth?: {
+    readonly linearOAuth: {
       readonly clientId: string;
       readonly clientSecret: Redacted.Redacted<string>;
     } | null;

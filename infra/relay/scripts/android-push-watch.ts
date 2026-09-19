@@ -118,6 +118,7 @@ const main = Effect.gen(function* () {
           cloudMintPublicKey: "",
           managedEndpointBaseDomain: undefined,
           managedEndpointNamespace: undefined,
+          linearOAuth: null,
         }),
       ),
     ),

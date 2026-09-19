@@ -46,6 +46,7 @@ import * as RelayDb from "../db.ts";
 import * as EnvironmentCredentials from "../environments/EnvironmentCredentials.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvider.ts";
+import * as LinearOAuthBroker from "../linear/LinearOAuthBroker.ts";
 import * as EnvironmentLinker from "../environments/EnvironmentLinker.ts";
 import * as RelayTokens from "../auth/RelayTokens.ts";
 import * as Devices from "../agentActivity/Devices.ts";
@@ -70,6 +71,7 @@ const relaySettings: RelayConfiguration.RelayConfiguration["Service"] = {
   apnsDeliveryJobSigningSecret: Redacted.make("apns-delivery-secret"),
   cloudMintPrivateKey: Redacted.make("cloud-mint-private-key"),
   cloudMintPublicKey: "cloud-mint-public-key",
+  linearOAuth: null,
   managedEndpointBaseDomain: undefined,
   managedEndpointNamespace: undefined,
 };
@@ -107,6 +109,7 @@ describe("device listing compatibility", () => {
           Layer.mock(EnvironmentLinks.EnvironmentLinks, {}),
           Layer.mock(ManagedEndpointProvider.ManagedEndpointProvider, {}),
           Layer.mock(RelayDb.RelayTransactions, {}),
+          Layer.mock(LinearOAuthBroker.LinearOAuthBroker, {}),
         ),
       ),
       Layer.provide(
@@ -297,8 +300,12 @@ function relayUnlinkTestLayer(input?: {
   readonly revokeCredential?: EnvironmentCredentials.EnvironmentCredentials["Service"]["revokeForEnvironmentPublicKey"];
   readonly prepareDeprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["prepareDeprovision"];
   readonly deprovision?: ManagedEndpointProvider.ManagedEndpointProvider["Service"]["deprovision"];
+  readonly revokeLinearGrants?: LinearOAuthBroker.LinearOAuthBroker["Service"]["revokeForEnvironment"];
 }) {
   return Layer.mergeAll(
+    Layer.mock(LinearOAuthBroker.LinearOAuthBroker, {
+      revokeForEnvironment: input?.revokeLinearGrants ?? (() => Effect.void),
+    }),
     Layer.succeed(
       RelayDb.RelayTransactions,
       RelayDb.RelayTransactions.of({
@@ -410,6 +417,7 @@ describe("relay environment unlink", () => {
         "link",
         "credential",
         "deprovision",
+        "linear",
       ]);
     }).pipe(
       Effect.provide(
@@ -442,6 +450,11 @@ describe("relay environment unlink", () => {
             Effect.sync(() => {
               expect(request.target).toBe(deprovisionTarget);
               calls.push("deprovision");
+            }),
+          revokeLinearGrants: (request) =>
+            Effect.sync(() => {
+              expect(request).toEqual({ userId: "user-1", environmentId: "environment-1" });
+              calls.push("linear");
             }),
         }),
       ),
@@ -575,6 +588,41 @@ describe("relay request tracing", () => {
         expect(Option.isNone(spans[0]!.parent)).toBe(true);
         expect(Option.getOrUndefined(spans[1]!.parent)?.spanId).toBe(spans[0]?.spanId);
       }),
+  );
+
+  it.effect("keeps the Linear authorization code and state out of the request span", () =>
+    Effect.gen(function* () {
+      const spans: Array<Tracer.NativeSpan> = [];
+      const tracer = Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options);
+          spans.push(span);
+          return span;
+        },
+      });
+      const request = HttpServerRequest.fromWeb(
+        new Request(
+          "https://relay.test/v1/oauth/linear/callback?code=linear-code&state=linear-state",
+        ),
+      );
+      const handlerUrls: Array<string> = [];
+      const endpoint = HttpServerRequest.HttpServerRequest.pipe(
+        Effect.map((handled) => {
+          handlerUrls.push(handled.url);
+          return HttpServerResponse.empty({ status: 204 });
+        }),
+      );
+
+      yield* traceRelayHttpRequestWith(endpoint, Layer.succeed(Tracer.Tracer, tracer)).pipe(
+        Effect.provideService(HttpServerRequest.HttpServerRequest, request),
+      );
+
+      expect(handlerUrls[0]).toContain("code=linear-code");
+      expect(spans[0]?.attributes.get("url.path")).toBe("/v1/oauth/linear/callback");
+      const recorded = [...(spans[0]?.attributes.values() ?? [])].map(String).join(" ");
+      expect(recorded).not.toContain("linear-code");
+      expect(recorded).not.toContain("linear-state");
+    }),
   );
 
   it.effect("fails hung requests with a 504 before the client's 10s abort", () =>

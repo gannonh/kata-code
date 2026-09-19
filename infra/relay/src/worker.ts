@@ -21,8 +21,6 @@ import {
   clientApi,
   dpopClientApi,
   healthApi,
-  linearClientApi,
-  linearServerApi,
   metadataApi,
   mobileApi,
   relayClientAuthLayer,
@@ -30,13 +28,17 @@ import {
   relayCors,
   relayDocsRedirectRoute,
   relayEnvironmentAuthLayer,
-  relayLinearOAuthCallbackHandler,
   relayNotFoundRoute,
   serverApi,
   traceRelayHttpRequestWith,
   tokenApi,
   withoutCapturedParentSpan,
 } from "./http/Api.ts";
+import {
+  linearClientApi,
+  linearServerApi,
+  relayLinearOAuthCallbackHandler,
+} from "./http/LinearOAuthApi.ts";
 import { ManagedEndpointZone, RelayApiZone, RelayDeploymentConfig } from "./zone.ts";
 import { makeRelayTraceLayer, RelayObservability } from "./observability.ts";
 import * as DeliveryAttempts from "./agentActivity/DeliveryAttempts.ts";
@@ -73,6 +75,7 @@ import * as EnvironmentPublishSignatures from "./environments/EnvironmentPublish
 import * as ManagedEndpointProvider from "./environments/ManagedEndpointProvider.ts";
 import * as ManagedTunnelLimits from "./environments/ManagedTunnelLimits.ts";
 import * as LinearOAuth from "./linear/LinearOAuth.ts";
+import * as LinearOAuthBroker from "./linear/LinearOAuthBroker.ts";
 import * as LinearOAuthStates from "./linear/LinearOAuthStates.ts";
 import * as LinearTokens from "./linear/LinearTokens.ts";
 import * as MobileRegistrations from "./agentActivity/MobileRegistrations.ts";
@@ -235,9 +238,11 @@ export const ApiLive = Api.make(
       }).pipe(Effect.map(makeRelayTraceLayer)),
     );
 
+    // Split in two because `pipe` accepts at most 20 arguments.
     const runtimeFoundationLayer = Layer.empty.pipe(
       Layer.provideMerge(MobileRegistrations.layer),
       Layer.provideMerge(AgentActivityPublisher.layer),
+      Layer.provideMerge(LinearOAuthBroker.layer),
       Layer.provideMerge(EnvironmentConnector.layer),
       Layer.provideMerge(EnvironmentLinker.layer),
       Layer.provideMerge(EnvironmentPublishSignatures.layer),
@@ -349,6 +354,9 @@ export const ApiLive = Api.make(
     yield* Cloudflare.Workers.cron("*/5 * * * *", () =>
       DpopProofs.DpopProofReplay.pipe(
         Effect.flatMap((dpopProofs) => dpopProofs.pruneExpired),
+        Effect.andThen(
+          LinearOAuthStates.LinearOAuthStates.pipe(Effect.flatMap((states) => states.pruneExpired)),
+        ),
         // Terminal thread rows are kept briefly so finished agents show as
         // Done/Failed in the Live Activity; sweep them once they age out.
         Effect.andThen(

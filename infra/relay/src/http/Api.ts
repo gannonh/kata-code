@@ -5,12 +5,10 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Record from "effect/Record";
 import * as Redacted from "effect/Redacted";
-import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Tracer from "effect/Tracer";
 import * as HttpEffect from "effect/unstable/http/HttpEffect";
@@ -51,7 +49,6 @@ import {
   type RelayEnvironmentConnectRequest,
   type RelayDpopAccessTokenScope,
   RelayInternalError,
-  RelayLinearOAuthNotConfiguredError,
 } from "@kata-sh/code-contracts/relay";
 import { normalizeRelayIssuer } from "@kata-sh/code-shared/relayJwt";
 
@@ -70,7 +67,8 @@ import * as EnvironmentLinker from "../environments/EnvironmentLinker.ts";
 import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvider.ts";
 import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllocations.ts";
 import * as EnvironmentPublishSignatures from "../environments/EnvironmentPublishSignatures.ts";
-import * as LinearOAuth from "../linear/LinearOAuth.ts";
+import { LINEAR_OAUTH_CALLBACK_PATH } from "../linear/LinearOAuth.ts";
+import * as LinearOAuthBroker from "../linear/LinearOAuthBroker.ts";
 import * as LinearOAuthStates from "../linear/LinearOAuthStates.ts";
 import * as LinearTokens from "../linear/LinearTokens.ts";
 import * as MobileRegistrations from "../agentActivity/MobileRegistrations.ts";
@@ -212,10 +210,34 @@ export const traceRelayHttpRequest = <E, R>(
     HttpServerRequest.HttpServerRequest | R
   >,
 ) =>
-  // HttpMiddleware finalizes its span on the dispatcher; do not close a request-scoped exporter first.
-  HttpMiddleware.tracer(
-    appendRelayTraceContextResponseHeader.pipe(Effect.andThen(relayRequestDeadline(httpEffect))),
-  ).pipe(Effect.ensuring(Effect.yieldNow));
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    // HttpMiddleware finalizes its span on the dispatcher; do not close a request-scoped exporter first.
+    return yield* HttpMiddleware.tracer(
+      appendRelayTraceContextResponseHeader.pipe(
+        Effect.andThen(
+          relayRequestDeadline(
+            httpEffect.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request)),
+          ),
+        ),
+      ),
+    ).pipe(
+      Effect.provideService(HttpServerRequest.HttpServerRequest, withoutSecretQuery(request)),
+      Effect.ensuring(Effect.yieldNow),
+    );
+  });
+
+// The Linear callback carries its authorization code and state in the query.
+// The tracer and the deadline log record the request URL, so they see the
+// request without its query; the handler still receives the original.
+const withoutSecretQuery = (
+  request: HttpServerRequest.HttpServerRequest,
+): HttpServerRequest.HttpServerRequest => {
+  const queryIndex = request.url.indexOf("?");
+  return queryIndex !== -1 && request.url.slice(0, queryIndex).endsWith(LINEAR_OAUTH_CALLBACK_PATH)
+    ? request.modify({ url: request.url.slice(0, queryIndex) })
+    : request;
+};
 
 export const traceRelayHttpRequestWith = <E, R, LayerError, LayerRequirements>(
   httpEffect: Effect.Effect<
@@ -467,6 +489,9 @@ export const unlinkEnvironmentRecord = Effect.fn("relay.api.client.unlinkEnviron
       environmentId: input.environmentId,
       target: deprovisionTarget,
     });
+    // An unlinked environment can no longer refresh, so its Linear grants end here.
+    const linearOAuth = yield* LinearOAuthBroker.LinearOAuthBroker;
+    yield* linearOAuth.revokeForEnvironment(input);
     return unlinked;
   },
 );
@@ -1016,263 +1041,6 @@ export const serverApi = HttpApiBuilder.group(
   }),
 );
 
-export const linearClientApi = HttpApiBuilder.group(
-  RelayApi,
-  "linearClient",
-  Effect.fnUntraced(function* (handlers) {
-    const config = yield* RelayConfiguration.RelayConfiguration;
-    const crypto = yield* Crypto.Crypto;
-    const links = yield* EnvironmentLinks.EnvironmentLinks;
-    const states = yield* LinearOAuthStates.LinearOAuthStates;
-    const tokens = yield* LinearTokens.LinearTokens;
-    return handlers
-      .handle(
-        "linearOAuthStart",
-        Effect.fn("relay.api.linearClient.linearOAuthStart")(function* (args) {
-          const { payload } = args;
-          const { userId } = yield* RelayClientPrincipal;
-          const configured = config.linearOAuth;
-          if (!configured) {
-            return yield* relayLinearOAuthNotConfiguredError();
-          }
-          const link = yield* links.getForUser({
-            userId,
-            environmentId: payload.environmentId,
-          });
-          if (link === null) {
-            return yield* relayAuthInvalidError("not_authorized");
-          }
-          const codeVerifier = yield* crypto.randomBytes(32).pipe(
-            Effect.map(Encoding.encodeBase64Url),
-            Effect.catch(() => relayInternalErrorResponse("internal_error")),
-          );
-          const codeChallenge = yield* crypto
-            .digest("SHA-256", new TextEncoder().encode(codeVerifier))
-            .pipe(
-              Effect.map(Encoding.encodeBase64Url),
-              Effect.catch(() => relayInternalErrorResponse("internal_error")),
-            );
-          const { state } = yield* states.create({
-            userId,
-            environmentId: payload.environmentId,
-            connectionId: payload.connectionId,
-            codeVerifier,
-            now: yield* DateTime.now,
-          });
-          return {
-            authorizeUrl: LinearOAuth.buildLinearAuthorizeUrl({
-              clientId: configured.clientId,
-              redirectUri: LinearOAuth.linearOAuthRedirectUri(config.relayIssuer),
-              state,
-              codeChallenge,
-            }),
-          };
-        }, mapRelayCommonApiErrors("not_authorized")),
-      )
-      .handle(
-        "linearOAuthRevoke",
-        Effect.fn("relay.api.linearClient.linearOAuthRevoke")(function* (args) {
-          const { userId } = yield* RelayClientPrincipal;
-          yield* tokens.deleteForUserConnection({
-            userId,
-            connectionId: args.payload.connectionId,
-          });
-          return { ok: true };
-        }, mapRelayCommonApiErrors("not_authorized")),
-      );
-  }),
-);
-
-export const linearServerApi = HttpApiBuilder.group(
-  RelayApi,
-  "linearServer",
-  Effect.fnUntraced(function* (handlers) {
-    const config = yield* RelayConfiguration.RelayConfiguration;
-    const oauth = yield* LinearOAuth.LinearOAuth;
-    const tokens = yield* LinearTokens.LinearTokens;
-    return handlers.handle(
-      "linearOAuthRefresh",
-      Effect.fn("relay.api.linearServer.linearOAuthRefresh")(
-        function* (args) {
-          const { params, payload } = args;
-          const principal = yield* RelayEnvironmentPrincipal;
-          if (principal.environmentId !== params.environmentId) {
-            return yield* new HttpApiError.Unauthorized({});
-          }
-          if (!config.linearOAuth) {
-            return yield* relayLinearOAuthNotConfiguredError();
-          }
-          const record = yield* tokens.getForEnvironment({
-            environmentId: params.environmentId,
-            connectionId: payload.connectionId,
-          });
-          if (record === null) {
-            return yield* relayAuthInvalidError("not_authorized");
-          }
-          const refreshed = yield* oauth.refresh({ refreshToken: record.refreshToken });
-          yield* tokens.save({
-            userId: record.userId,
-            environmentId: params.environmentId,
-            connectionId: payload.connectionId,
-            accessToken: refreshed.accessToken,
-            refreshToken: refreshed.refreshToken,
-            expiresAt: refreshed.expiresAt,
-            scope: refreshed.scope,
-          });
-          return {
-            accessToken: refreshed.accessToken,
-            expiresAt: refreshed.expiresAt,
-            scope: refreshed.scope,
-          };
-        },
-        mapErrorTags({
-          linear_oauth_not_configured: (_error, traceId) =>
-            new RelayLinearOAuthNotConfiguredError({
-              code: "linear_oauth_not_configured",
-              traceId,
-            }),
-          linear_oauth_rejected: (_error, traceId) =>
-            new RelayInternalError({
-              code: "internal_error",
-              reason: "upstream_unavailable",
-              traceId,
-            }),
-          linear_oauth_unavailable: (_error, traceId) =>
-            new RelayInternalError({
-              code: "internal_error",
-              reason: "upstream_unavailable",
-              traceId,
-            }),
-          linear_oauth_invalid_response: (_error, traceId) =>
-            new RelayInternalError({
-              code: "internal_error",
-              reason: "upstream_unavailable",
-              traceId,
-            }),
-        }),
-        mapRelayCommonApiErrors("not_authorized"),
-      ),
-    );
-  }),
-);
-
-function linearOAuthCallbackPage(status: number, message: string) {
-  return HttpServerResponse.setStatus(
-    HttpServerResponse.html(
-      `<!doctype html><html><head><meta charset="utf-8"><title>Kata Code</title></head><body><p>${escapeLinearOAuthHtml(message)}</p></body></html>`,
-    ),
-    status,
-  );
-}
-
-function escapeLinearOAuthHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-/**
- * Exported as an effect, not a route: the worker provides the runtime layer
- * inside the handler so the route layer carries no requirements that a
- * plain-route `Layer.provide` can silently drop.
- */
-export const relayLinearOAuthCallbackHandler = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const url = HttpServerRequest.toURL(request);
-  if (Option.isNone(url)) {
-    return linearOAuthCallbackPage(400, "This Linear authorization link is invalid.");
-  }
-  const params = url.value.searchParams;
-  const rejection = params.get("error");
-  if (rejection !== null) {
-    return linearOAuthCallbackPage(
-      400,
-      `Linear rejected the authorization (${safeAuthFailureReason(rejection)}).`,
-    );
-  }
-  const code = params.get("code");
-  const state = params.get("state");
-  if (!code || !state) {
-    return linearOAuthCallbackPage(
-      400,
-      "This Linear authorization link is missing its code or state.",
-    );
-  }
-  const oauth = yield* LinearOAuth.LinearOAuth;
-  const states = yield* LinearOAuthStates.LinearOAuthStates;
-  const tokens = yield* LinearTokens.LinearTokens;
-  const connector = yield* EnvironmentConnector.EnvironmentConnector;
-  const consumed = yield* states.consume({ state, now: yield* DateTime.now }).pipe(Effect.result);
-  if (Result.isFailure(consumed)) {
-    return consumed.failure._tag === "linear_oauth_state_rejected"
-      ? linearOAuthCallbackPage(
-          400,
-          "This Linear authorization link is invalid, expired, or already used.",
-        )
-      : linearOAuthCallbackPage(500, "Could not complete the Linear connection. Please try again.");
-  }
-  const binding = consumed.success;
-  const exchanged = yield* oauth
-    .exchangeCode({ code, codeVerifier: binding.codeVerifier })
-    .pipe(Effect.result);
-  if (Result.isFailure(exchanged)) {
-    switch (exchanged.failure._tag) {
-      case "linear_oauth_rejected":
-        return linearOAuthCallbackPage(400, "Linear rejected the authorization request.");
-      case "linear_oauth_not_configured":
-        return linearOAuthCallbackPage(
-          503,
-          "Kata Code Connect is not configured to connect to Linear.",
-        );
-      case "linear_oauth_unavailable":
-      case "linear_oauth_invalid_response":
-        return linearOAuthCallbackPage(
-          502,
-          "Could not reach Linear to finish connecting. Please retry.",
-        );
-    }
-  }
-  const bundle = exchanged.success;
-  const stored = yield* tokens
-    .save({
-      userId: binding.userId,
-      environmentId: binding.environmentId,
-      connectionId: binding.connectionId,
-      accessToken: bundle.accessToken,
-      refreshToken: bundle.refreshToken,
-      expiresAt: bundle.expiresAt,
-      scope: bundle.scope,
-    })
-    .pipe(Effect.result);
-  if (Result.isFailure(stored)) {
-    return linearOAuthCallbackPage(500, "Could not store the Linear connection. Please try again.");
-  }
-  const delivered = yield* connector
-    .deliverLinearOAuth({
-      userId: binding.userId,
-      environmentId: binding.environmentId,
-      connectionId: binding.connectionId,
-      accessToken: bundle.accessToken,
-      refreshToken: bundle.refreshToken,
-      expiresAt: bundle.expiresAt,
-      scope: bundle.scope,
-    })
-    .pipe(Effect.result);
-  if (Result.isFailure(delivered)) {
-    return linearOAuthCallbackPage(
-      502,
-      "Kata Code could not deliver the Linear connection to the environment. Please retry.",
-    );
-  }
-  return linearOAuthCallbackPage(
-    200,
-    "Kata Code is connected to Linear. You can close this window.",
-  );
-});
-
 class ClerkTokenVerificationFailed extends Schema.TaggedError<ClerkTokenVerificationFailed>()(
   "ClerkTokenVerificationFailed",
   {
@@ -1361,20 +1129,7 @@ function relayInternalErrorResponse(reason: RelayInternalError["reason"]) {
   );
 }
 
-function relayLinearOAuthNotConfiguredError() {
-  return currentTraceId.pipe(
-    Effect.flatMap((traceId) =>
-      Effect.fail(
-        new RelayLinearOAuthNotConfiguredError({
-          code: "linear_oauth_not_configured",
-          traceId,
-        }),
-      ),
-    ),
-  );
-}
-
-function mapRelayCommonApiErrors(authReason: RelayAuthInvalidReason) {
+export function mapRelayCommonApiErrors(authReason: RelayAuthInvalidReason) {
   const mapError = Effect.fnUntraced(function* <E>(error: E) {
     const traceId = yield* currentTraceId;
     if (isDpopProofRejected(error)) {
@@ -1446,7 +1201,7 @@ type CatchTagCases<E, Cases> = {
   ) => Effect.Effect<never, MappedTagError<Cases>>;
 } & (unknown extends E ? {} : { readonly [K in Exclude<keyof Cases, TaggedErrorTag<E>>]: never });
 
-function mapErrorTags<
+export function mapErrorTags<
   E,
   Cases extends MapErrorTagCases<E> &
     (unknown extends E ? {} : { readonly [K in Exclude<keyof Cases, TaggedErrorTag<E>>]: never }),
@@ -1486,7 +1241,7 @@ function resolveConnectClientKeyThumbprint(payload: RelayEnvironmentConnectReque
   return requestedThumbprint;
 }
 
-function safeAuthFailureReason(value: string): string {
+export function safeAuthFailureReason(value: string): string {
   return /^[a-z0-9._-]+$/i.test(value) ? value : "unknown";
 }
 
@@ -1632,7 +1387,7 @@ const requireDpopProof = Effect.fn("relay.api.require_dpop_proof")(function* (op
   });
 });
 
-const relayAuthInvalidError = Effect.fnUntraced(function* (reason: RelayAuthInvalidReason) {
+export const relayAuthInvalidError = Effect.fnUntraced(function* (reason: RelayAuthInvalidReason) {
   const traceId = yield* currentTraceId;
   yield* Effect.annotateCurrentSpan({
     "relay.trace_id": traceId,

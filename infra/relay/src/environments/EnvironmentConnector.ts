@@ -16,6 +16,7 @@ import {
   RelayCloudMintCredentialProofPayload,
   RelayEnvironmentConnectNotAuthorizedReason,
   type RelayEnvironmentConnectResponse,
+  type RelayLinearAccessToken,
   type RelayEnvironmentStatusResponse,
 } from "@kata-sh/code-contracts/relay";
 import { wireEnvironmentIssuer } from "@kata-sh/code-contracts/wireIdentity";
@@ -71,11 +72,18 @@ function environmentConnectNotAuthorizedReasonMessage(
   }
 }
 
+const EnvironmentConnectorOperation = Schema.Literals([
+  "connect",
+  "status",
+  "linear-oauth-delivery",
+]);
+type EnvironmentConnectorOperation = typeof EnvironmentConnectorOperation.Type;
+
 export class EnvironmentConnectNotAuthorized extends Schema.TaggedError<EnvironmentConnectNotAuthorized>()(
   "EnvironmentConnectNotAuthorized",
   {
     environmentId: Schema.String,
-    operation: Schema.Literals(["connect", "status", "linear-oauth-delivery"]),
+    operation: EnvironmentConnectorOperation,
     reason: RelayEnvironmentConnectNotAuthorizedReason,
   },
 ) {
@@ -88,7 +96,7 @@ export class EnvironmentMintRequestFailed extends Schema.TaggedError<Environment
   "EnvironmentMintRequestFailed",
   {
     environmentId: Schema.String,
-    operation: Schema.Literals(["connect", "status", "linear-oauth-delivery"]),
+    operation: EnvironmentConnectorOperation,
     cause: Schema.Defect(),
   },
 ) {
@@ -113,7 +121,7 @@ export class EnvironmentMintResponseInvalid extends Schema.TaggedError<Environme
   "EnvironmentMintResponseInvalid",
   {
     environmentId: Schema.String,
-    operation: Schema.Literals(["connect", "status", "linear-oauth-delivery"]),
+    operation: EnvironmentConnectorOperation,
   },
 ) {
   override get message(): string {
@@ -130,6 +138,9 @@ export type EnvironmentConnectorError =
   | ManagedEndpointAllocations.ManagedEndpointAllocationPersistenceError;
 
 export const ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS = 10_000;
+// A delivery runs inside the browser's callback request, after the Linear code
+// exchange, so it must fail well inside the relay request deadline.
+export const LINEAR_OAUTH_DELIVERY_TIMEOUT_MS = 5_000;
 const ENVIRONMENT_HEALTH_CLOCK_SKEW_MILLIS = 60 * 1_000;
 
 export class EnvironmentConnector extends Context.Service<
@@ -149,10 +160,7 @@ export class EnvironmentConnector extends Context.Service<
       readonly userId: string;
       readonly environmentId: string;
       readonly connectionId: string;
-      readonly accessToken: string;
-      readonly refreshToken: string;
-      readonly expiresAt: number;
-      readonly scope: string;
+      readonly token: RelayLinearAccessToken;
     }) => Effect.Effect<void, EnvironmentConnectorError>;
   }
 >()("kata-code-relay/environments/EnvironmentConnector") {}
@@ -313,7 +321,7 @@ const make = Effect.gen(function* () {
     );
   const resolveManagedEndpoint = Effect.fn("relay.environment_connector.resolve_managed_endpoint")(
     function* (input: {
-      readonly operation: "connect" | "status" | "linear-oauth-delivery";
+      readonly operation: EnvironmentConnectorOperation;
       readonly link: EnvironmentLinks.RelayLinkedEnvironmentRecord;
       readonly allocation: ManagedEndpointAllocations.ManagedEndpointAllocation | null;
     }) {
@@ -403,77 +411,104 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const requestFailed =
+    (operation: EnvironmentConnectorOperation, environmentId: string) => (cause: unknown) =>
+      new EnvironmentMintRequestFailed({ environmentId, operation, cause });
+
+  // Every relay-to-environment call is addressed to the user's linked managed
+  // endpoint and carries a short-lived proof with these registered claims.
+  const prepareRequest = Effect.fnUntraced(function* (input: {
+    readonly operation: EnvironmentConnectorOperation;
+    readonly userId: string;
+    readonly environmentId: string;
+  }) {
+    const { link, allocation } = yield* Effect.all(
+      {
+        link: links.getForUser(input),
+        allocation: allocations.get(input),
+      },
+      { concurrency: 2 },
+    );
+    if (!link) {
+      return yield* new EnvironmentConnectNotAuthorized({
+        environmentId: input.environmentId,
+        operation: input.operation,
+        reason: "environment_link_not_found",
+      });
+    }
+    const endpoint = yield* resolveManagedEndpoint({
+      operation: input.operation,
+      link,
+      allocation,
+    });
+    const now = yield* DateTime.now;
+    const uuid = crypto.randomUUIDv4.pipe(
+      Effect.mapError(requestFailed(input.operation, input.environmentId)),
+    );
+    const nonce = yield* uuid;
+    return {
+      link,
+      endpoint,
+      now,
+      nonce,
+      claims: {
+        iss: relayIssuer,
+        aud: wireEnvironmentIssuer(link.environmentId),
+        sub: input.userId,
+        jti: yield* uuid,
+        iat: Math.floor(now.epochMilliseconds / 1_000),
+        exp: Math.floor(DateTime.add(now, { minutes: 2 }).epochMilliseconds / 1_000),
+        environmentId: link.environmentId,
+        nonce,
+      },
+    };
+  });
+
+  const signProof = (input: {
+    readonly operation: EnvironmentConnectorOperation;
+    readonly environmentId: string;
+    readonly typ: Parameters<typeof signRelayJwt>[0]["typ"];
+    readonly payload: Parameters<typeof signRelayJwt>[0]["payload"];
+  }) =>
+    signRelayJwt({
+      privateKey: Redacted.value(settings.cloudMintPrivateKey),
+      typ: input.typ,
+      payload: input.payload,
+    }).pipe(Effect.mapError(requestFailed(input.operation, input.environmentId)));
+
+  const failAfter =
+    (environmentId: string, timeoutMs: number) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.timeoutOption(Duration.millis(timeoutMs)),
+        Effect.flatMap(
+          Option.match({
+            onNone: () =>
+              Effect.fail(new EnvironmentMintRequestTimedOut({ environmentId, timeoutMs })),
+            onSome: Effect.succeed,
+          }),
+        ),
+      );
+
   return EnvironmentConnector.of({
     status: Effect.fn("relay.environment_connector.status")(function* (input) {
       yield* Effect.annotateCurrentSpan({
         "relay.environment_id": input.environmentId,
         "relay.operation": "status",
       });
-      const { link, allocation } = yield* Effect.all(
-        {
-          link: links.getForUser(input),
-          allocation: allocations.get(input),
-        },
-        { concurrency: 2 },
-      );
-      if (!link) {
-        return yield* new EnvironmentConnectNotAuthorized({
-          environmentId: input.environmentId,
-          operation: "status",
-          reason: "environment_link_not_found",
-        });
-      }
-      const endpoint = yield* resolveManagedEndpoint({
+      const { link, endpoint, now, nonce, claims } = yield* prepareRequest({
         operation: "status",
-        link,
-        allocation,
+        ...input,
       });
-      const now = yield* DateTime.now;
-      const expiresAt = DateTime.add(now, { minutes: 2 });
-      const nonce = yield* crypto.randomUUIDv4.pipe(
-        Effect.mapError(
-          (cause) =>
-            new EnvironmentMintRequestFailed({
-              environmentId: input.environmentId,
-              operation: "status",
-              cause,
-            }),
-        ),
-      );
-      const payload = {
-        iss: relayIssuer,
-        aud: wireEnvironmentIssuer(link.environmentId),
-        sub: input.userId,
-        jti: yield* crypto.randomUUIDv4.pipe(
-          Effect.mapError(
-            (cause) =>
-              new EnvironmentMintRequestFailed({
-                environmentId: input.environmentId,
-                operation: "status",
-                cause,
-              }),
-          ),
-        ),
-        iat: Math.floor(now.epochMilliseconds / 1_000),
-        exp: Math.floor(expiresAt.epochMilliseconds / 1_000),
-        environmentId: link.environmentId,
-        nonce,
-        scope: ["environment:status"],
-      } satisfies RelayCloudEnvironmentHealthProofPayload;
-      const proof = yield* signRelayJwt({
-        privateKey: Redacted.value(settings.cloudMintPrivateKey),
+      const proof = yield* signProof({
+        operation: "status",
+        environmentId: input.environmentId,
         typ: RELAY_HEALTH_REQUEST_TYP,
-        payload,
-      }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new EnvironmentMintRequestFailed({
-              environmentId: input.environmentId,
-              operation: "status",
-              cause,
-            }),
-        ),
-      );
+        payload: {
+          ...claims,
+          scope: ["environment:status"],
+        } satisfies RelayCloudEnvironmentHealthProofPayload,
+      });
       const checkedAt = DateTime.formatIso(now);
       const traceId = yield* currentTraceId;
       const environmentClient = yield* makeEnvironmentClient(endpoint.httpBaseUrl);
@@ -564,100 +599,30 @@ const make = Effect.gen(function* () {
           reason: "client_proof_key_thumbprint_missing",
         });
       }
-      const { link, allocation } = yield* Effect.all(
-        {
-          link: links.getForUser(input),
-          allocation: allocations.get(input),
-        },
-        { concurrency: 2 },
-      );
-      if (!link) {
-        return yield* new EnvironmentConnectNotAuthorized({
-          environmentId: input.environmentId,
-          operation: "connect",
-          reason: "environment_link_not_found",
-        });
-      }
-      const endpoint = yield* resolveManagedEndpoint({
+      const { link, endpoint, now, nonce, claims } = yield* prepareRequest({
         operation: "connect",
-        link,
-        allocation,
+        userId: input.userId,
+        environmentId: input.environmentId,
       });
-      const now = yield* DateTime.now;
-      const expiresAt = DateTime.add(now, { minutes: 2 });
-      const nonce = yield* crypto.randomUUIDv4.pipe(
-        Effect.mapError(
-          (cause) =>
-            new EnvironmentMintRequestFailed({
-              environmentId: input.environmentId,
-              operation: "connect",
-              cause,
-            }),
-        ),
-      );
-      const payload = {
-        iss: relayIssuer,
-        aud: wireEnvironmentIssuer(link.environmentId),
-        sub: input.userId,
-        jti: yield* crypto.randomUUIDv4.pipe(
-          Effect.mapError(
-            (cause) =>
-              new EnvironmentMintRequestFailed({
-                environmentId: input.environmentId,
-                operation: "connect",
-                cause,
-              }),
-          ),
-        ),
-        iat: Math.floor(now.epochMilliseconds / 1_000),
-        exp: Math.floor(expiresAt.epochMilliseconds / 1_000),
-        environmentId: link.environmentId,
-        clientProofKeyThumbprint: input.clientProofKeyThumbprint,
-        cnf: { jkt: input.clientProofKeyThumbprint },
-        ...(input.deviceId ? { deviceId: input.deviceId } : {}),
-        nonce,
-        scope: ["environment:connect"],
-      } satisfies RelayCloudMintCredentialProofPayload;
-      const proof = yield* signRelayJwt({
-        privateKey: Redacted.value(settings.cloudMintPrivateKey),
+      const proof = yield* signProof({
+        operation: "connect",
+        environmentId: input.environmentId,
         typ: RELAY_MINT_REQUEST_TYP,
-        payload,
-      }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new EnvironmentMintRequestFailed({
-              environmentId: input.environmentId,
-              operation: "connect",
-              cause,
-            }),
-        ),
-      );
+        payload: {
+          ...claims,
+          clientProofKeyThumbprint: input.clientProofKeyThumbprint,
+          cnf: { jkt: input.clientProofKeyThumbprint },
+          ...(input.deviceId ? { deviceId: input.deviceId } : {}),
+          scope: ["environment:connect"],
+        } satisfies RelayCloudMintCredentialProofPayload,
+      });
       const environmentClient = yield* makeEnvironmentClient(endpoint.httpBaseUrl);
       const decoded = yield* environmentClient.connect
         .kataConnectMintCredential({ payload: { proof } })
         .pipe(
           withoutRedirects,
-          Effect.mapError(
-            (cause) =>
-              new EnvironmentMintRequestFailed({
-                environmentId: input.environmentId,
-                operation: "connect",
-                cause,
-              }),
-          ),
-          Effect.timeoutOption(Duration.millis(ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS)),
-          Effect.flatMap(
-            Option.match({
-              onNone: () =>
-                Effect.fail(
-                  new EnvironmentMintRequestTimedOut({
-                    environmentId: input.environmentId,
-                    timeoutMs: ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS,
-                  }),
-                ),
-              onSome: Effect.succeed,
-            }),
-          ),
+          Effect.mapError(requestFailed("connect", input.environmentId)),
+          failAfter(input.environmentId, ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS),
         );
       const verified = yield* verifyEnvironmentResponse({
         response: decoded,
@@ -688,101 +653,28 @@ const make = Effect.gen(function* () {
           "relay.operation": "linear-oauth-delivery",
           "relay.linear.connection_id": input.connectionId,
         });
-        const { link, allocation } = yield* Effect.all(
-          {
-            link: links.getForUser(input),
-            allocation: allocations.get(input),
-          },
-          { concurrency: 2 },
-        );
-        if (!link) {
-          return yield* new EnvironmentConnectNotAuthorized({
-            environmentId: input.environmentId,
-            operation: "linear-oauth-delivery",
-            reason: "environment_link_not_found",
-          });
-        }
-        const endpoint = yield* resolveManagedEndpoint({
+        const { endpoint, claims } = yield* prepareRequest({
           operation: "linear-oauth-delivery",
-          link,
-          allocation,
+          userId: input.userId,
+          environmentId: input.environmentId,
         });
-        const now = yield* DateTime.now;
-        const expiresAt = DateTime.add(now, { minutes: 2 });
-        const nonce = yield* crypto.randomUUIDv4.pipe(
-          Effect.mapError(
-            (cause) =>
-              new EnvironmentMintRequestFailed({
-                environmentId: input.environmentId,
-                operation: "linear-oauth-delivery",
-                cause,
-              }),
-          ),
-        );
-        const payload = {
-          iss: relayIssuer,
-          aud: wireEnvironmentIssuer(link.environmentId),
-          sub: input.userId,
-          jti: yield* crypto.randomUUIDv4.pipe(
-            Effect.mapError(
-              (cause) =>
-                new EnvironmentMintRequestFailed({
-                  environmentId: input.environmentId,
-                  operation: "linear-oauth-delivery",
-                  cause,
-                }),
-            ),
-          ),
-          iat: Math.floor(now.epochMilliseconds / 1_000),
-          exp: Math.floor(expiresAt.epochMilliseconds / 1_000),
-          environmentId: link.environmentId,
-          connectionId: input.connectionId,
-          accessToken: input.accessToken,
-          refreshToken: input.refreshToken,
-          expiresAt: input.expiresAt,
-          scope: input.scope,
-          nonce,
-        } satisfies RelayCloudLinearOAuthDeliveryProofPayload;
-        const proof = yield* signRelayJwt({
-          privateKey: Redacted.value(settings.cloudMintPrivateKey),
+        const proof = yield* signProof({
+          operation: "linear-oauth-delivery",
+          environmentId: input.environmentId,
           typ: RELAY_LINEAR_OAUTH_DELIVERY_TYP,
-          payload,
-        }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new EnvironmentMintRequestFailed({
-                environmentId: input.environmentId,
-                operation: "linear-oauth-delivery",
-                cause,
-              }),
-          ),
-        );
+          payload: {
+            ...claims,
+            connectionId: input.connectionId,
+            token: input.token,
+          } satisfies RelayCloudLinearOAuthDeliveryProofPayload,
+        });
         const environmentClient = yield* makeEnvironmentClient(endpoint.httpBaseUrl);
         const decoded = yield* environmentClient.connect
           .linearOAuthDelivery({ payload: { proof } })
           .pipe(
             withoutRedirects,
-            Effect.mapError(
-              (cause) =>
-                new EnvironmentMintRequestFailed({
-                  environmentId: input.environmentId,
-                  operation: "linear-oauth-delivery",
-                  cause,
-                }),
-            ),
-            Effect.timeoutOption(Duration.millis(ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS)),
-            Effect.flatMap(
-              Option.match({
-                onNone: () =>
-                  Effect.fail(
-                    new EnvironmentMintRequestTimedOut({
-                      environmentId: input.environmentId,
-                      timeoutMs: ENVIRONMENT_MINT_REQUEST_TIMEOUT_MS,
-                    }),
-                  ),
-                onSome: Effect.succeed,
-              }),
-            ),
+            Effect.mapError(requestFailed("linear-oauth-delivery", input.environmentId)),
+            failAfter(input.environmentId, LINEAR_OAUTH_DELIVERY_TIMEOUT_MS),
           );
         if (!decoded.ok) {
           return yield* new EnvironmentMintResponseInvalid({

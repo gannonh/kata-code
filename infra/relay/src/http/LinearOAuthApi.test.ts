@@ -18,14 +18,19 @@ import {
   RelayEnvironmentPrincipal,
   RelayLinearOAuthStartRequest,
   RelayLinearOAuthStartResponse,
-  RelayLinearOAuthRefreshResponse,
+  RelayLinearAccessToken,
 } from "@kata-sh/code-contracts/relay";
 
-import { linearClientApi, linearServerApi, relayLinearOAuthCallbackHandler } from "./Api.ts";
+import {
+  linearClientApi,
+  linearServerApi,
+  relayLinearOAuthCallbackHandler,
+} from "./LinearOAuthApi.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as EnvironmentConnector from "../environments/EnvironmentConnector.ts";
 import * as EnvironmentLinks from "../environments/EnvironmentLinks.ts";
 import * as LinearOAuth from "../linear/LinearOAuth.ts";
+import * as LinearOAuthBroker from "../linear/LinearOAuthBroker.ts";
 import * as LinearOAuthStates from "../linear/LinearOAuthStates.ts";
 import * as LinearTokens from "../linear/LinearTokens.ts";
 
@@ -77,14 +82,24 @@ const decodeStartResponse = Schema.decodeUnknownSync(
   Schema.fromJsonString(RelayLinearOAuthStartResponse),
 );
 const decodeRefreshResponse = Schema.decodeUnknownSync(
-  Schema.fromJsonString(RelayLinearOAuthRefreshResponse),
+  Schema.fromJsonString(RelayLinearAccessToken),
 );
+
+// Only `authorizeUrl` is real; every call that reaches Linear is replaced per test.
+const makeLinearOAuthForTest = () =>
+  LinearOAuth.makeLinearOAuth({
+    clientId: "linear-client-id",
+    clientSecret: "linear-client-secret",
+    redirectUri: "https://relay.example.test/v1/oauth/linear/callback",
+    fetch: () => Promise.reject(new Error("unexpected Linear request")),
+  });
 
 function makeLinearTestServices(options?: {
   readonly linkForEnvironment1?: boolean;
   readonly failDelivery?: boolean;
   readonly oauthExchange?: LinearOAuth.LinearOAuth["Service"]["exchangeCode"];
   readonly oauthRefresh?: LinearOAuth.LinearOAuth["Service"]["refresh"];
+  readonly oauthRevoke?: LinearOAuth.LinearOAuth["Service"]["revoke"];
   readonly linearSettings?: RelayConfiguration.RelayConfiguration["Service"];
 }) {
   const states = new Map<string, LinearOAuthStates.LinearOAuthStateBinding>();
@@ -94,6 +109,7 @@ function makeLinearTestServices(options?: {
     Parameters<EnvironmentConnector.EnvironmentConnector["Service"]["deliverLinearOAuth"]>[0]
   > = [];
   const refreshCalls: Array<string> = [];
+  const revoked: Array<string> = [];
   const exchangeCalls: Array<{ code: string; codeVerifier: string }> = [];
 
   let stateCounter = 0;
@@ -123,48 +139,64 @@ function makeLinearTestServices(options?: {
         consumedStates.add(state);
         return Effect.succeed(binding);
       }),
+    pruneExpired: Effect.die("unused pruneExpired"),
   });
 
+  const tokenKey = (input: { readonly environmentId: string; readonly connectionId: string }) =>
+    `${input.environmentId}:${input.connectionId}`;
   const tokensService = LinearTokens.LinearTokens.of({
     save: (input) =>
       Effect.sync(() => {
-        storedTokens.set(`${input.environmentId}:${input.connectionId}`, {
-          ...input,
-          updatedAt: "2026-09-18T00:00:00.000Z",
-        });
+        storedTokens.set(tokenKey(input), input);
       }),
-    get: ({ userId, environmentId, connectionId }) => {
-      const record = storedTokens.get(`${environmentId}:${connectionId}`);
-      return Effect.succeed(record && record.userId === userId ? record : null);
-    },
-    getForEnvironment: ({ environmentId, connectionId }) =>
-      Effect.succeed(storedTokens.get(`${environmentId}:${connectionId}`) ?? null),
-    delete: () => Effect.die("unused delete"),
-    deleteForUserConnection: ({ userId, connectionId }) =>
-      Effect.sync(() =>
-        [...storedTokens.entries()].some(([key, record]) =>
-          key.endsWith(`:${connectionId}`) && record.userId === userId
-            ? storedTokens.delete(key)
-            : false,
-        ),
-      ),
+    get: (input) => Effect.succeed(storedTokens.get(tokenKey(input)) ?? null),
+    delete: (input) =>
+      Effect.sync(() => {
+        const record = storedTokens.get(tokenKey(input));
+        if (!record || record.userId !== input.userId) {
+          return null;
+        }
+        storedTokens.delete(tokenKey(input));
+        return record;
+      }),
     deleteForEnvironment: () => Effect.die("unused deleteForEnvironment"),
   });
 
-  const oauthService = LinearOAuth.LinearOAuth.of({
-    exchangeCode:
-      options?.oauthExchange ??
-      ((input) => {
-        exchangeCalls.push(input);
-        return Effect.succeed(LINEAR_BUNDLE);
-      }),
-    refresh:
-      options?.oauthRefresh ??
-      ((input) => {
-        refreshCalls.push(input.refreshToken);
-        return Effect.succeed(ROTATED_BUNDLE);
-      }),
-  });
+  const settings = options?.linearSettings ?? relaySettings;
+  const configuredOAuth = makeLinearOAuthForTest();
+  const notConfigured = () => Effect.fail(new LinearOAuth.LinearOAuthNotConfigured());
+  const oauthService = LinearOAuth.LinearOAuth.of(
+    settings.linearOAuth === null
+      ? {
+          ensureConfigured: notConfigured(),
+          authorizeUrl: notConfigured,
+          exchangeCode: notConfigured,
+          refresh: notConfigured,
+          revoke: notConfigured,
+        }
+      : {
+          ensureConfigured: Effect.void,
+          authorizeUrl: configuredOAuth.authorizeUrl,
+          exchangeCode:
+            options?.oauthExchange ??
+            ((input) => {
+              exchangeCalls.push(input);
+              return Effect.succeed(LINEAR_BUNDLE);
+            }),
+          refresh:
+            options?.oauthRefresh ??
+            ((input) => {
+              refreshCalls.push(input.refreshToken);
+              return Effect.succeed(ROTATED_BUNDLE);
+            }),
+          revoke:
+            options?.oauthRevoke ??
+            ((input) =>
+              Effect.sync(() => {
+                revoked.push(input.refreshToken);
+              })),
+        },
+  );
 
   const linksService = EnvironmentLinks.EnvironmentLinks.of({
     upsert: () => Effect.die("unused upsert"),
@@ -199,23 +231,25 @@ function makeLinearTestServices(options?: {
   });
 
   return {
-    layer: Layer.mergeAll(
-      Layer.succeed(
-        RelayConfiguration.RelayConfiguration,
-        options?.linearSettings ?? relaySettings,
+    layer: LinearOAuthBroker.layer.pipe(
+      Layer.provideMerge(
+        Layer.mergeAll(
+          Layer.succeed(RelayConfiguration.RelayConfiguration, settings),
+          NodeCrypto.layer,
+          Layer.succeed(LinearOAuth.LinearOAuth, oauthService),
+          Layer.succeed(LinearOAuthStates.LinearOAuthStates, statesService),
+          Layer.succeed(LinearTokens.LinearTokens, tokensService),
+          Layer.succeed(EnvironmentLinks.EnvironmentLinks, linksService),
+          Layer.succeed(EnvironmentConnector.EnvironmentConnector, connectorService),
+        ),
       ),
-      NodeCrypto.layer,
-      Layer.succeed(LinearOAuth.LinearOAuth, oauthService),
-      Layer.succeed(LinearOAuthStates.LinearOAuthStates, statesService),
-      Layer.succeed(LinearTokens.LinearTokens, tokensService),
-      Layer.succeed(EnvironmentLinks.EnvironmentLinks, linksService),
-      Layer.succeed(EnvironmentConnector.EnvironmentConnector, connectorService),
     ),
     states,
     consumedStates,
     storedTokens,
     delivered,
     refreshCalls,
+    revoked,
     exchangeCalls,
   };
 }
@@ -354,7 +388,6 @@ describe("relay Linear OAuth client API", () => {
       environmentId: "environment-1",
       connectionId: "connection-1",
       ...LINEAR_BUNDLE,
-      updatedAt: "2026-09-18T00:00:00.000Z",
     });
     return Effect.gen(function* () {
       const app = yield* Effect.acquireRelease(
@@ -367,7 +400,7 @@ describe("relay Linear OAuth client API", () => {
           new Request("https://relay.example.test/v1/linear/oauth/revoke", {
             method: "POST",
             headers: { authorization: "Bearer test-token", "content-type": "application/json" },
-            body: `{"connectionId":"connection-1"}`,
+            body: `{"environmentId":"environment-1","connectionId":"connection-1"}`,
           }),
         ),
       );
@@ -375,7 +408,76 @@ describe("relay Linear OAuth client API", () => {
       expect(response.status).toBe(200);
       const body = yield* Effect.promise(() => response.text());
       expect(body).not.toContain(LINEAR_BUNDLE.accessToken);
+      expect(services.revoked).toEqual([LINEAR_BUNDLE.refreshToken]);
       expect(services.storedTokens.size).toBe(0);
+    }).pipe(Effect.scoped);
+  });
+
+  it.effect("keeps the stored bundle when Linear cannot be reached to revoke it", () => {
+    const services = makeLinearTestServices({
+      oauthRevoke: () =>
+        Effect.fail(
+          new LinearOAuth.LinearOAuthRequestFailed({
+            operation: "token revocation",
+            reason: "unavailable",
+          }),
+        ),
+    });
+    services.storedTokens.set("environment-1:connection-1", {
+      userId: "user-1",
+      environmentId: "environment-1",
+      connectionId: "connection-1",
+      ...LINEAR_BUNDLE,
+    });
+    return Effect.gen(function* () {
+      const app = yield* Effect.acquireRelease(
+        Effect.sync(() => toWebHandler(makeApiApp(services))),
+        (app) => Effect.promise(() => app.dispose()),
+      );
+
+      const response = yield* Effect.promise(() =>
+        app.handler(
+          new Request("https://relay.example.test/v1/linear/oauth/revoke", {
+            method: "POST",
+            headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+            body: `{"environmentId":"environment-1","connectionId":"connection-1"}`,
+          }),
+        ),
+      );
+
+      expect(response.status).toBe(500);
+      expect(services.storedTokens.size).toBe(1);
+    }).pipe(Effect.scoped);
+  });
+
+  it.effect("does not revoke a connection another user authorized", () => {
+    const services = makeLinearTestServices();
+    services.storedTokens.set("environment-1:connection-1", {
+      userId: "user-other",
+      environmentId: "environment-1",
+      connectionId: "connection-1",
+      ...LINEAR_BUNDLE,
+    });
+    return Effect.gen(function* () {
+      const app = yield* Effect.acquireRelease(
+        Effect.sync(() => toWebHandler(makeApiApp(services))),
+        (app) => Effect.promise(() => app.dispose()),
+      );
+
+      const response = yield* Effect.promise(() =>
+        app.handler(
+          new Request("https://relay.example.test/v1/linear/oauth/revoke", {
+            method: "POST",
+            headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+            body: `{"environmentId":"environment-1","connectionId":"connection-1"}`,
+          }),
+        ),
+      );
+
+      expect(response.status).toBe(200);
+      expect(yield* Effect.promise(() => response.text())).toContain('"ok":false');
+      expect(services.revoked).toEqual([]);
+      expect(services.storedTokens.size).toBe(1);
     }).pipe(Effect.scoped);
   });
 
@@ -418,7 +520,6 @@ describe("relay Linear OAuth environment API", () => {
       environmentId: "environment-2",
       connectionId: "connection-1",
       ...LINEAR_BUNDLE,
-      updatedAt: "2026-09-18T00:00:00.000Z",
     });
     return Effect.gen(function* () {
       const app = yield* Effect.acquireRelease(
@@ -451,7 +552,6 @@ describe("relay Linear OAuth environment API", () => {
       environmentId: "environment-1",
       connectionId: "connection-1",
       ...LINEAR_BUNDLE,
-      updatedAt: "2026-09-18T00:00:00.000Z",
     });
     return Effect.gen(function* () {
       const app = yield* Effect.acquireRelease(
@@ -482,6 +582,51 @@ describe("relay Linear OAuth environment API", () => {
       });
       expect(services.refreshCalls).toEqual([LINEAR_BUNDLE.refreshToken]);
       expect(services.storedTokens.get("environment-1:connection-1")).toMatchObject(ROTATED_BUNDLE);
+    }).pipe(Effect.scoped);
+  });
+});
+
+describe("relay Linear OAuth revoked grants", () => {
+  it.effect("tells the environment to reauthorize when Linear rejects the stored grant", () => {
+    const services = makeLinearTestServices({
+      oauthRefresh: () =>
+        Effect.fail(
+          new LinearOAuth.LinearOAuthRequestFailed({
+            operation: "token refresh",
+            reason: "rejected",
+            status: 400,
+          }),
+        ),
+    });
+    services.storedTokens.set("environment-1:connection-1", {
+      userId: "user-1",
+      environmentId: "environment-1",
+      connectionId: "connection-1",
+      ...LINEAR_BUNDLE,
+    });
+    return Effect.gen(function* () {
+      const app = yield* Effect.acquireRelease(
+        Effect.sync(() => toWebHandler(makeApiApp(services))),
+        (app) => Effect.promise(() => app.dispose()),
+      );
+
+      const response = yield* Effect.promise(() =>
+        app.handler(
+          new Request(
+            "https://relay.example.test/v1/environments/environment-1/linear/oauth/refresh",
+            {
+              method: "POST",
+              headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+              body: `{"connectionId":"connection-1"}`,
+            },
+          ),
+        ),
+      );
+
+      expect(response.status).toBe(409);
+      const body = yield* Effect.promise(() => response.text());
+      expect(body).toContain("linear_oauth_reauthorization_required");
+      expect(body).not.toContain(LINEAR_BUNDLE.refreshToken);
     }).pipe(Effect.scoped);
   });
 });
@@ -521,7 +666,11 @@ describe("relay Linear OAuth callback", () => {
           userId: "user-1",
           environmentId: "environment-1",
           connectionId: "connection-1",
-          ...LINEAR_BUNDLE,
+          token: {
+            accessToken: LINEAR_BUNDLE.accessToken,
+            expiresAt: LINEAR_BUNDLE.expiresAt,
+            scope: LINEAR_BUNDLE.scope,
+          },
         },
       ]);
 
@@ -560,7 +709,7 @@ describe("relay Linear OAuth callback", () => {
     }).pipe(Effect.scoped);
   });
 
-  it.effect("returns 502 on delivery failure but keeps the stored tokens", () => {
+  it.effect("revokes and discards the grant when delivery fails, leaving no unheld token", () => {
     const services = makeLinearTestServices({ failDelivery: true });
     services.states.set("state-1", {
       userId: "user-1",
@@ -584,7 +733,8 @@ describe("relay Linear OAuth callback", () => {
       const body = yield* Effect.promise(() => response.text());
       expect(body).not.toContain(LINEAR_BUNDLE.accessToken);
       expect(body).not.toContain(LINEAR_BUNDLE.refreshToken);
-      expect(services.storedTokens.get("environment-1:connection-1")).toMatchObject(LINEAR_BUNDLE);
+      expect(services.storedTokens.size).toBe(0);
+      expect(services.revoked).toEqual([LINEAR_BUNDLE.refreshToken]);
     }).pipe(Effect.scoped);
   });
 });

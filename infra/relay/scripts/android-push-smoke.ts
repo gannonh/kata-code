@@ -93,6 +93,7 @@ const main = Effect.gen(function* () {
     cloudMintPublicKey: "",
     managedEndpointBaseDomain: undefined,
     managedEndpointNamespace: undefined,
+    linearOAuth: null,
   };
   const result = yield* FcmClient.FcmClient.pipe(
     Effect.flatMap((client) =>
