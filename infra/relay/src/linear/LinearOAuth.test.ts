@@ -56,7 +56,7 @@ describe("LinearOAuth", () => {
       );
       expect(url.searchParams.get("scope")).toBe(LINEAR_OAUTH_SCOPES);
       expect(url.searchParams.get("scope")).toBe("read,admin");
-      expect(url.searchParams.get("actor")).toBe("application");
+      expect(url.searchParams.get("actor")).toBe("user");
       expect(url.searchParams.get("prompt")).toBe("consent");
       expect(url.searchParams.get("state")).toBe("state-token");
       expect(url.searchParams.get("code_challenge")).toBe("code-challenge");

@@ -204,7 +204,7 @@ export function makeLinearOAuth(dependencies: {
         url.searchParams.set("client_id", dependencies.clientId);
         url.searchParams.set("redirect_uri", dependencies.redirectUri);
         url.searchParams.set("scope", LINEAR_OAUTH_SCOPES);
-        url.searchParams.set("actor", "application");
+        url.searchParams.set("actor", "user");
         url.searchParams.set("prompt", "consent");
         url.searchParams.set("state", input.state);
         url.searchParams.set("code_challenge", input.codeChallenge);
