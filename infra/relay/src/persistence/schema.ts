@@ -4,6 +4,7 @@ import type {
   RelayAgentAwarenessPreferences,
 } from "@kata-sh/code-contracts/relay";
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -189,4 +190,36 @@ export const relayDpopProofs = pgTable(
     primaryKey({ columns: [table.thumbprint, table.jti] }),
     index("idx_relay_dpop_proofs_expires_at").on(table.expiresAt),
   ],
+);
+
+export const relayLinearOAuthStates = pgTable(
+  "relay_linear_oauth_states",
+  {
+    stateHash: varchar("state_hash", { length: 64 }).primaryKey(),
+    userId: varchar("user_id", { length: 191 }).notNull(),
+    environmentId: varchar("environment_id", { length: 191 }).notNull(),
+    connectionId: varchar("connection_id", { length: 128 }).notNull(),
+    codeVerifier: text("code_verifier").notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+    consumedAt: varchar("consumed_at", { length: 64 }),
+    createdAt: varchar("created_at", { length: 64 }).notNull(),
+    updatedAt: varchar("updated_at", { length: 64 }).notNull(),
+  },
+  (table) => [index("idx_relay_linear_oauth_states_expires_at").on(table.expiresAt)],
+);
+
+export const relayLinearOAuthTokens = pgTable(
+  "relay_linear_oauth_tokens",
+  {
+    userId: varchar("user_id", { length: 191 }).notNull(),
+    environmentId: varchar("environment_id", { length: 191 }).notNull(),
+    connectionId: varchar("connection_id", { length: 128 }).notNull(),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token").notNull(),
+    expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
+    scope: text("scope").notNull(),
+    createdAt: varchar("created_at", { length: 64 }).notNull(),
+    updatedAt: varchar("updated_at", { length: 64 }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.environmentId, table.connectionId] })],
 );

@@ -67,6 +67,10 @@ import * as EnvironmentLinker from "../environments/EnvironmentLinker.ts";
 import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvider.ts";
 import * as ManagedEndpointAllocations from "../environments/ManagedEndpointAllocations.ts";
 import * as EnvironmentPublishSignatures from "../environments/EnvironmentPublishSignatures.ts";
+import { LINEAR_OAUTH_CALLBACK_PATH } from "../linear/LinearOAuth.ts";
+import * as LinearOAuthBroker from "../linear/LinearOAuthBroker.ts";
+import * as LinearOAuthStates from "../linear/LinearOAuthStates.ts";
+import * as LinearTokens from "../linear/LinearTokens.ts";
 import * as MobileRegistrations from "../agentActivity/MobileRegistrations.ts";
 import { withSpanAttributes } from "../observability.ts";
 import * as RelayDb from "../db.ts";
@@ -206,10 +210,34 @@ export const traceRelayHttpRequest = <E, R>(
     HttpServerRequest.HttpServerRequest | R
   >,
 ) =>
-  // HttpMiddleware finalizes its span on the dispatcher; do not close a request-scoped exporter first.
-  HttpMiddleware.tracer(
-    appendRelayTraceContextResponseHeader.pipe(Effect.andThen(relayRequestDeadline(httpEffect))),
-  ).pipe(Effect.ensuring(Effect.yieldNow));
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    // HttpMiddleware finalizes its span on the dispatcher; do not close a request-scoped exporter first.
+    return yield* HttpMiddleware.tracer(
+      appendRelayTraceContextResponseHeader.pipe(
+        Effect.andThen(
+          relayRequestDeadline(
+            httpEffect.pipe(Effect.provideService(HttpServerRequest.HttpServerRequest, request)),
+          ),
+        ),
+      ),
+    ).pipe(
+      Effect.provideService(HttpServerRequest.HttpServerRequest, withoutSecretQuery(request)),
+      Effect.ensuring(Effect.yieldNow),
+    );
+  });
+
+// The Linear callback carries its authorization code and state in the query.
+// The tracer and the deadline log record the request URL, so they see the
+// request without its query; the handler still receives the original.
+const withoutSecretQuery = (
+  request: HttpServerRequest.HttpServerRequest,
+): HttpServerRequest.HttpServerRequest => {
+  const queryIndex = request.url.indexOf("?");
+  return queryIndex !== -1 && request.url.slice(0, queryIndex).endsWith(LINEAR_OAUTH_CALLBACK_PATH)
+    ? request.modify({ url: request.url.slice(0, queryIndex) })
+    : request;
+};
 
 export const traceRelayHttpRequestWith = <E, R, LayerError, LayerRequirements>(
   httpEffect: Effect.Effect<
@@ -461,6 +489,9 @@ export const unlinkEnvironmentRecord = Effect.fn("relay.api.client.unlinkEnviron
       environmentId: input.environmentId,
       target: deprovisionTarget,
     });
+    // An unlinked environment can no longer refresh, so its Linear grants end here.
+    const linearOAuth = yield* LinearOAuthBroker.LinearOAuthBroker;
+    yield* linearOAuth.revokeForEnvironment(input);
     return unlinked;
   },
 );
@@ -1049,6 +1080,11 @@ const RelayCommonPersistenceError = Schema.Union([
   AgentActivityRows.AgentActivityRowListPersistenceError,
   LiveActivities.LiveActivityDeliveryMarkPersistenceError,
   DeliveryAttempts.DeliveryAttemptRecordPersistenceError,
+  LinearOAuthStates.LinearOAuthStateCreatePersistenceError,
+  LinearOAuthStates.LinearOAuthStateConsumePersistenceError,
+  LinearTokens.LinearTokenSavePersistenceError,
+  LinearTokens.LinearTokenLookupPersistenceError,
+  LinearTokens.LinearTokenDeletePersistenceError,
 ]);
 type RelayCommonPersistenceError = typeof RelayCommonPersistenceError.Type;
 const isRelayCommonPersistenceError = Schema.is(RelayCommonPersistenceError);
@@ -1093,7 +1129,7 @@ function relayInternalErrorResponse(reason: RelayInternalError["reason"]) {
   );
 }
 
-function mapRelayCommonApiErrors(authReason: RelayAuthInvalidReason) {
+export function mapRelayCommonApiErrors(authReason: RelayAuthInvalidReason) {
   const mapError = Effect.fnUntraced(function* <E>(error: E) {
     const traceId = yield* currentTraceId;
     if (isDpopProofRejected(error)) {
@@ -1165,7 +1201,7 @@ type CatchTagCases<E, Cases> = {
   ) => Effect.Effect<never, MappedTagError<Cases>>;
 } & (unknown extends E ? {} : { readonly [K in Exclude<keyof Cases, TaggedErrorTag<E>>]: never });
 
-function mapErrorTags<
+export function mapErrorTags<
   E,
   Cases extends MapErrorTagCases<E> &
     (unknown extends E ? {} : { readonly [K in Exclude<keyof Cases, TaggedErrorTag<E>>]: never }),
@@ -1205,7 +1241,7 @@ function resolveConnectClientKeyThumbprint(payload: RelayEnvironmentConnectReque
   return requestedThumbprint;
 }
 
-function safeAuthFailureReason(value: string): string {
+export function safeAuthFailureReason(value: string): string {
   return /^[a-z0-9._-]+$/i.test(value) ? value : "unknown";
 }
 
@@ -1351,7 +1387,7 @@ const requireDpopProof = Effect.fn("relay.api.require_dpop_proof")(function* (op
   });
 });
 
-const relayAuthInvalidError = Effect.fnUntraced(function* (reason: RelayAuthInvalidReason) {
+export const relayAuthInvalidError = Effect.fnUntraced(function* (reason: RelayAuthInvalidReason) {
   const traceId = yield* currentTraceId;
   yield* Effect.annotateCurrentSpan({
     "relay.trace_id": traceId,

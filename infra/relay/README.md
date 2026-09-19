@@ -38,6 +38,9 @@ credential, or authorization behavior.
   provisioning, and connection flows.
 - [`src/agentActivity`](./src/agentActivity) contains mobile device registration, activity state,
   APNs and FCM delivery, and queue processing.
+- [`src/linear`](./src/linear) contains the Linear OAuth broker: authorization state, the Linear
+  token client, stored grants, and delivery to the linked environment. Its HTTP handlers live in
+  [`src/http/LinearOAuthApi.ts`](./src/http/LinearOAuthApi.ts).
 - [`src/auth`](./src/auth) contains relay token and DPoP proof handling.
 - [`src/persistence/schema.ts`](./src/persistence/schema.ts) defines persisted relay state. Keep
   schema and migration changes together.

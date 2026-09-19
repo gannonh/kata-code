@@ -15,6 +15,8 @@ import {
 import {
   RelayCloudEnvironmentHealthProofPayload,
   RelayCloudEnvironmentHealthRequest,
+  RelayCloudLinearOAuthDeliveryProofPayload,
+  RelayCloudLinearOAuthDeliveryRequest,
   RelayCloudMintCredentialProofPayload,
   RelayCloudMintCredentialRequest,
   RelayEnvironmentHealthResponseProofPayload,
@@ -36,6 +38,7 @@ import {
   normalizeRelayIssuer,
   RELAY_HEALTH_REQUEST_TYP,
   RELAY_HEALTH_RESPONSE_TYP,
+  RELAY_LINEAR_OAUTH_DELIVERY_TYP,
   RELAY_LINK_PROOF_TYP,
   RELAY_MINT_REQUEST_TYP,
   RELAY_MINT_RESPONSE_TYP,
@@ -61,6 +64,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { requireEnvironmentScope } from "../auth/http.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { saveLinearAccessToken } from "../routines/LinearOAuth.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
 import {
   SERVICE_STATE_FILE,
@@ -89,10 +93,6 @@ import { getOrCreateEnvironmentKeyPairFromSecretStore } from "./environmentKeys.
 import { traceRelayRequest } from "./traceRelayRequest.ts";
 import { filterRelayResponse, relayRequestError } from "./relayResponse.ts";
 
-const CLOUD_MINT_NONCE_PREFIX = "cloud-mint-nonce-";
-const CLOUD_MINT_JTI_PREFIX = "cloud-mint-jti-";
-const CLOUD_HEALTH_NONCE_PREFIX = "cloud-health-nonce-";
-const CLOUD_HEALTH_JTI_PREFIX = "cloud-health-jti-";
 const CLOUD_PROOF_MAX_LIFETIME_SECONDS = 5 * 60;
 const CLOUD_PROOF_CLOCK_SKEW_SECONDS = 60;
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
@@ -359,6 +359,9 @@ function hasBoundedCloudProofLifetime(input: {
 
 const decodeCloudHealthProof = Schema.decodeUnknownEffect(RelayCloudEnvironmentHealthProofPayload);
 const decodeCloudMintProof = Schema.decodeUnknownEffect(RelayCloudMintCredentialProofPayload);
+const decodeCloudLinearOAuthDeliveryProof = Schema.decodeUnknownEffect(
+  RelayCloudLinearOAuthDeliveryProofPayload,
+);
 
 interface CloudHttpDependencies {
   readonly secrets: ServerSecretStore.ServerSecretStore["Service"];
@@ -846,71 +849,108 @@ const cloudPreferencesHandler = Effect.fn("environment.cloud.preferences")(
   ),
 );
 
+/**
+ * Verifies a relay-signed cloud proof and consumes its replay guards. Every
+ * relay-to-environment request passes the same gate: signed by the installed
+ * relay for this environment, issued for the installed cloud user, short
+ * lived, and used once. `accepts` adds the request-specific claims.
+ */
+const verifyCloudProof = Effect.fnUntraced(function* <
+  Proof extends {
+    readonly environmentId: string;
+    readonly sub: string;
+    readonly iat: number;
+    readonly exp: number;
+    readonly jti: string;
+    readonly nonce: string;
+  },
+  E,
+  R,
+>(
+  dependencies: CloudHttpDependencies,
+  input: {
+    readonly token: string;
+    readonly typ: string;
+    readonly decode: (payload: unknown) => Effect.Effect<Proof, E, R>;
+    readonly accepts?: (proof: Proof) => boolean;
+    readonly replayPrefix: string;
+    readonly invalidMessage: string;
+    readonly consumedMessage: string;
+  },
+) {
+  const cloudMintPublicKey = yield* dependencies.secrets
+    .get(CLOUD_MINT_PUBLIC_KEY)
+    .pipe(
+      Effect.flatMap((bytes) =>
+        Option.isSome(bytes)
+          ? Effect.succeed(bytesToString(bytes.value))
+          : Effect.fail(new EnvironmentAuth.ServerAuthCloudMintPublicKeyMissingError({})),
+      ),
+    );
+  const relayIssuer = yield* dependencies.secrets
+    .get(RELAY_ISSUER_SECRET)
+    .pipe(
+      Effect.flatMap((bytes) =>
+        Option.isSome(bytes)
+          ? Effect.succeed(bytesToString(bytes.value))
+          : dependencies.secrets
+              .get(RELAY_URL_SECRET)
+              .pipe(
+                Effect.flatMap((fallbackBytes) =>
+                  Option.isSome(fallbackBytes)
+                    ? Effect.succeed(bytesToString(fallbackBytes.value))
+                    : Effect.fail(new EnvironmentAuth.ServerAuthCloudRelayIssuerMissingError({})),
+                ),
+              ),
+      ),
+    );
+  const environmentId = yield* dependencies.environment.getEnvironmentId;
+  const linkedCloudUserId = yield* readInstalledCloudUserId(dependencies.secrets);
+  const now = yield* DateTime.now;
+  const nowSeconds = Math.floor(now.epochMilliseconds / 1_000);
+  const proofOption = yield* verifyRelayJwt({
+    publicKey: cloudMintPublicKey,
+    token: input.token,
+    typ: input.typ,
+    issuer: normalizeRelayIssuer(relayIssuer),
+    audience: wireEnvironmentIssuer(environmentId),
+    nowEpochSeconds: nowSeconds,
+  }).pipe(Effect.flatMap(input.decode), Effect.option);
+  if (
+    Option.isNone(proofOption) ||
+    proofOption.value.environmentId !== environmentId ||
+    proofOption.value.sub !== linkedCloudUserId ||
+    !hasBoundedCloudProofLifetime({ ...proofOption.value, nowSeconds }) ||
+    input.accepts?.(proofOption.value) === false
+  ) {
+    return yield* new EnvironmentHttpUnauthorizedError({ message: input.invalidMessage });
+  }
+  const proof = proofOption.value;
+  const consumedReplayGuards = yield* consumeCloudReplayGuards({
+    secrets: dependencies.secrets,
+    names: [`${input.replayPrefix}-jti-${proof.jti}`, `${input.replayPrefix}-nonce-${proof.nonce}`],
+    value: stringToBytes(DateTime.formatIso(now)),
+  });
+  if (!consumedReplayGuards) {
+    return yield* new EnvironmentHttpConflictError({ message: input.consumedMessage });
+  }
+  return { proof, environmentId, relayIssuer, now, nowSeconds };
+});
+
 const cloudEnvironmentHealthHandler = Effect.fn("environment.cloud.health")(
   function* (dependencies: CloudHttpDependencies, request: RelayCloudEnvironmentHealthRequest) {
-    const cloudMintPublicKey = yield* dependencies.secrets
-      .get(CLOUD_MINT_PUBLIC_KEY)
-      .pipe(
-        Effect.flatMap((bytes) =>
-          Option.isSome(bytes)
-            ? Effect.succeed(bytesToString(bytes.value))
-            : Effect.fail(new EnvironmentAuth.ServerAuthCloudMintPublicKeyMissingError({})),
-        ),
-      );
-    const relayIssuer = yield* dependencies.secrets
-      .get(RELAY_ISSUER_SECRET)
-      .pipe(
-        Effect.flatMap((bytes) =>
-          Option.isSome(bytes)
-            ? Effect.succeed(bytesToString(bytes.value))
-            : dependencies.secrets
-                .get(RELAY_URL_SECRET)
-                .pipe(
-                  Effect.flatMap((fallbackBytes) =>
-                    Option.isSome(fallbackBytes)
-                      ? Effect.succeed(bytesToString(fallbackBytes.value))
-                      : Effect.fail(new EnvironmentAuth.ServerAuthCloudRelayIssuerMissingError({})),
-                  ),
-                ),
-        ),
-      );
-    const environmentId = yield* dependencies.environment.getEnvironmentId;
-    const linkedCloudUserId = yield* readInstalledCloudUserId(dependencies.secrets);
-    const now = yield* DateTime.now;
-    const nowSeconds = Math.floor(now.epochMilliseconds / 1_000);
-    const proofOption = yield* verifyRelayJwt({
-      publicKey: cloudMintPublicKey,
-      token: request.proof,
-      typ: RELAY_HEALTH_REQUEST_TYP,
-      issuer: normalizeRelayIssuer(relayIssuer),
-      audience: wireEnvironmentIssuer(environmentId),
-      nowEpochSeconds: nowSeconds,
-    }).pipe(Effect.flatMap(decodeCloudHealthProof), Effect.option);
-    if (
-      Option.isNone(proofOption) ||
-      proofOption.value.environmentId !== environmentId ||
-      proofOption.value.sub !== linkedCloudUserId ||
-      !hasBoundedCloudProofLifetime({ ...proofOption.value, nowSeconds }) ||
-      !hasExactScope({ scopes: proofOption.value.scope, expected: "environment:status" })
-    ) {
-      return yield* new EnvironmentHttpUnauthorizedError({
-        message: "Invalid cloud health request.",
-      });
-    }
-    const proof = proofOption.value;
-
-    const jtiSecretName = `${CLOUD_HEALTH_JTI_PREFIX}${proof.jti}`;
-    const nonceSecretName = `${CLOUD_HEALTH_NONCE_PREFIX}${proof.nonce}`;
-    const consumedReplayGuards = yield* consumeCloudReplayGuards({
-      secrets: dependencies.secrets,
-      names: [jtiSecretName, nonceSecretName],
-      value: stringToBytes(DateTime.formatIso(now)),
-    });
-    if (!consumedReplayGuards) {
-      return yield* new EnvironmentHttpConflictError({
-        message: "Cloud health request was already consumed.",
-      });
-    }
+    const { proof, environmentId, relayIssuer, now, nowSeconds } = yield* verifyCloudProof(
+      dependencies,
+      {
+        token: request.proof,
+        typ: RELAY_HEALTH_REQUEST_TYP,
+        decode: decodeCloudHealthProof,
+        accepts: (proof) => hasExactScope({ scopes: proof.scope, expected: "environment:status" }),
+        replayPrefix: "cloud-health",
+        invalidMessage: "Invalid cloud health request.",
+        consumedMessage: "Cloud health request was already consumed.",
+      },
+    );
 
     const keyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(dependencies.secrets);
     const descriptor = yield* dependencies.environment.getDescriptor;
@@ -966,70 +1006,20 @@ const cloudEnvironmentHealthHandler = Effect.fn("environment.cloud.health")(
 
 const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")(
   function* (dependencies: CloudHttpDependencies, request: RelayCloudMintCredentialRequest) {
-    const cloudMintPublicKey = yield* dependencies.secrets
-      .get(CLOUD_MINT_PUBLIC_KEY)
-      .pipe(
-        Effect.flatMap((bytes) =>
-          Option.isSome(bytes)
-            ? Effect.succeed(bytesToString(bytes.value))
-            : Effect.fail(new EnvironmentAuth.ServerAuthCloudMintPublicKeyMissingError({})),
-        ),
-      );
-    const relayIssuer = yield* dependencies.secrets
-      .get(RELAY_ISSUER_SECRET)
-      .pipe(
-        Effect.flatMap((bytes) =>
-          Option.isSome(bytes)
-            ? Effect.succeed(bytesToString(bytes.value))
-            : dependencies.secrets
-                .get(RELAY_URL_SECRET)
-                .pipe(
-                  Effect.flatMap((fallbackBytes) =>
-                    Option.isSome(fallbackBytes)
-                      ? Effect.succeed(bytesToString(fallbackBytes.value))
-                      : Effect.fail(new EnvironmentAuth.ServerAuthCloudRelayIssuerMissingError({})),
-                  ),
-                ),
-        ),
-      );
-    const environmentId = yield* dependencies.environment.getEnvironmentId;
-    const linkedCloudUserId = yield* readInstalledCloudUserId(dependencies.secrets);
-    const now = yield* DateTime.now;
-    const nowSeconds = Math.floor(now.epochMilliseconds / 1_000);
-    const proofOption = yield* verifyRelayJwt({
-      publicKey: cloudMintPublicKey,
-      token: request.proof,
-      typ: RELAY_MINT_REQUEST_TYP,
-      issuer: normalizeRelayIssuer(relayIssuer),
-      audience: wireEnvironmentIssuer(environmentId),
-      nowEpochSeconds: nowSeconds,
-    }).pipe(Effect.flatMap(decodeCloudMintProof), Effect.option);
-    if (
-      Option.isNone(proofOption) ||
-      proofOption.value.environmentId !== environmentId ||
-      proofOption.value.sub !== linkedCloudUserId ||
-      proofOption.value.cnf.jkt !== proofOption.value.clientProofKeyThumbprint ||
-      !hasBoundedCloudProofLifetime({ ...proofOption.value, nowSeconds }) ||
-      !hasExactScope({ scopes: proofOption.value.scope, expected: "environment:connect" })
-    ) {
-      return yield* new EnvironmentHttpUnauthorizedError({
-        message: "Invalid cloud mint request.",
-      });
-    }
-    const proof = proofOption.value;
-
-    const jtiSecretName = `${CLOUD_MINT_JTI_PREFIX}${proof.jti}`;
-    const nonceSecretName = `${CLOUD_MINT_NONCE_PREFIX}${proof.nonce}`;
-    const consumedReplayGuards = yield* consumeCloudReplayGuards({
-      secrets: dependencies.secrets,
-      names: [jtiSecretName, nonceSecretName],
-      value: stringToBytes(DateTime.formatIso(now)),
-    });
-    if (!consumedReplayGuards) {
-      return yield* new EnvironmentHttpConflictError({
-        message: "Cloud mint request was already consumed.",
-      });
-    }
+    const { proof, environmentId, relayIssuer, nowSeconds } = yield* verifyCloudProof(
+      dependencies,
+      {
+        token: request.proof,
+        typ: RELAY_MINT_REQUEST_TYP,
+        decode: decodeCloudMintProof,
+        accepts: (proof) =>
+          proof.cnf.jkt === proof.clientProofKeyThumbprint &&
+          hasExactScope({ scopes: proof.scope, expected: "environment:connect" }),
+        replayPrefix: "cloud-mint",
+        invalidMessage: "Invalid cloud mint request.",
+        consumedMessage: "Cloud mint request was already consumed.",
+      },
+    );
 
     const keyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(dependencies.secrets);
     const issued = yield* dependencies.environmentAuth.createPairingLink({
@@ -1085,6 +1075,40 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
   ),
 );
 
+const cloudLinearOAuthDeliveryHandler = Effect.fn("environment.cloud.linearOAuthDelivery")(
+  function* (dependencies: CloudHttpDependencies, request: RelayCloudLinearOAuthDeliveryRequest) {
+    const { proof } = yield* verifyCloudProof(dependencies, {
+      token: request.proof,
+      typ: RELAY_LINEAR_OAUTH_DELIVERY_TYP,
+      decode: decodeCloudLinearOAuthDeliveryProof,
+      replayPrefix: "cloud-linear-oauth",
+      invalidMessage: "Invalid Linear OAuth delivery.",
+      consumedMessage: "Linear OAuth delivery was already consumed.",
+    });
+
+    yield* saveLinearAccessToken({
+      secrets: dependencies.secrets,
+      connectionId: proof.connectionId,
+      token: proof.token,
+    });
+    yield* Effect.logInfo("Stored Linear access token", {
+      connectionId: proof.connectionId,
+      outcome: "stored",
+    });
+    return { ok: true } satisfies RelayOkResponse;
+  },
+  Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
+    failEnvironmentCloudInternalError(error.message)(error),
+  ),
+  Effect.catchIf(
+    ServerSecretStore.isSecretStoreError,
+    failEnvironmentCloudInternalError("Could not store Linear OAuth delivery."),
+  ),
+  Effect.catchTag("RoutineError", (error) =>
+    failEnvironmentCloudInternalError(error.message)(error),
+  ),
+);
+
 export const connectHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   "connect",
@@ -1100,6 +1124,9 @@ export const connectHttpApiLayer = HttpApiBuilder.group(
       .handle("mintCredential", ({ payload }) => cloudMintCredentialHandler(dependencies, payload))
       .handle("kataConnectMintCredential", ({ payload }) =>
         traceRelayRequest(cloudMintCredentialHandler(dependencies, payload)),
+      )
+      .handle("linearOAuthDelivery", ({ payload }) =>
+        cloudLinearOAuthDeliveryHandler(dependencies, payload),
       );
   }),
 );

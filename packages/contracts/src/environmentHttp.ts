@@ -46,12 +46,14 @@ import {
 } from "./pullRequest.ts";
 import {
   RelayCloudEnvironmentHealthRequest,
+  RelayCloudLinearOAuthDeliveryRequest,
   RelayCloudMintCredentialRequest,
   RelayEnvironmentConfigRequest,
   RelayEnvironmentHealthResponse,
   RelayEnvironmentLinkProof,
   RelayEnvironmentMintResponse,
   RelayLinkProofRequest,
+  RelayOkResponse,
 } from "./relay.ts";
 import { WIRE_CONNECT_API_PREFIX, WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "./wireIdentity.ts";
 
@@ -617,6 +619,13 @@ class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
         error: EnvironmentHttpCloudErrors,
       },
     ),
+  )
+  .add(
+    HttpApiEndpoint.post("linearOAuthDelivery", "/api/connect/linear-oauth", {
+      payload: RelayCloudLinearOAuthDeliveryRequest,
+      success: RelayOkResponse,
+      error: EnvironmentHttpCloudErrors,
+    }),
   ) {}
 
 export class EnvironmentHttpApi extends HttpApi.make("environment")

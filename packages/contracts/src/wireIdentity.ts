@@ -22,6 +22,7 @@ export const WIRE_RELAY_CLERK_JWT_AUDIENCE = "kata-code-relay" as const;
 export const WIRE_RELAY_ENV_LINK_JWT_TYP = "kata-env-link+jwt" as const;
 export const WIRE_RELAY_CLOUD_MINT_REQUEST_JWT_TYP = "kata-cloud-mint+jwt" as const;
 export const WIRE_RELAY_CLOUD_HEALTH_REQUEST_JWT_TYP = "kata-cloud-health+jwt" as const;
+export const WIRE_RELAY_CLOUD_LINEAR_OAUTH_JWT_TYP = "kata-cloud-linear-oauth+jwt" as const;
 export const WIRE_RELAY_ENV_MINT_RESPONSE_JWT_TYP = "kata-env-mint+jwt" as const;
 export const WIRE_RELAY_ENV_HEALTH_RESPONSE_JWT_TYP = "kata-env-health+jwt" as const;
 export const WIRE_RELAY_ENV_ACTIVITY_JWT_TYP = "kata-env-activity+jwt" as const;

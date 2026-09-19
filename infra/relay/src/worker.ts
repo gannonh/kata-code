@@ -34,6 +34,11 @@ import {
   tokenApi,
   withoutCapturedParentSpan,
 } from "./http/Api.ts";
+import {
+  linearClientApi,
+  linearServerApi,
+  relayLinearOAuthCallbackHandler,
+} from "./http/LinearOAuthApi.ts";
 import { ManagedEndpointZone, RelayApiZone, RelayDeploymentConfig } from "./zone.ts";
 import { makeRelayTraceLayer, RelayObservability } from "./observability.ts";
 import * as DeliveryAttempts from "./agentActivity/DeliveryAttempts.ts";
@@ -69,6 +74,10 @@ import * as EnvironmentLinker from "./environments/EnvironmentLinker.ts";
 import * as EnvironmentPublishSignatures from "./environments/EnvironmentPublishSignatures.ts";
 import * as ManagedEndpointProvider from "./environments/ManagedEndpointProvider.ts";
 import * as ManagedTunnelLimits from "./environments/ManagedTunnelLimits.ts";
+import * as LinearOAuth from "./linear/LinearOAuth.ts";
+import * as LinearOAuthBroker from "./linear/LinearOAuthBroker.ts";
+import * as LinearOAuthStates from "./linear/LinearOAuthStates.ts";
+import * as LinearTokens from "./linear/LinearTokens.ts";
 import * as MobileRegistrations from "./agentActivity/MobileRegistrations.ts";
 
 const webcryptoLayer = Layer.succeed(
@@ -102,6 +111,8 @@ const relayApiLayer = Layer.mergeAll(
   tokenApi,
   dpopClientApi,
   serverApi,
+  linearClientApi,
+  linearServerApi,
 );
 
 const CloudMintKeyPair = Alchemy.KeyPair("CloudMintKeyPair");
@@ -169,6 +180,23 @@ export const ApiLive = Api.make(
     const clerkPublishableKey = yield* Config.string("CLERK_PUBLISHABLE_KEY");
     const clerkJwtAudience = yield* Config.string("CLERK_JWT_AUDIENCE");
 
+    const linearOAuthClientId = Option.getOrUndefined(
+      Option.filter(
+        yield* Config.option(Config.string("LINEAR_OAUTH_CLIENT_ID")),
+        (value) => value.trim().length > 0,
+      ),
+    );
+    const linearOAuthClientSecret = Option.getOrUndefined(
+      Option.filter(
+        yield* Config.option(Config.redacted("LINEAR_OAUTH_CLIENT_SECRET")),
+        (value) => Redacted.value(value).trim().length > 0,
+      ),
+    );
+    const linearOAuth =
+      linearOAuthClientId && linearOAuthClientSecret
+        ? { clientId: linearOAuthClientId, clientSecret: linearOAuthClientSecret }
+        : null;
+
     const cloudMintPrivateKey = yield* cloudMintKeyPair.privateKey;
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
     const hyperdrive = yield* Cloudflare.Hyperdrive.Connect(yield* RelayDb.RelayHyperdrive);
@@ -198,6 +226,7 @@ export const ApiLive = Api.make(
         cloudMintPublicKey: yield* cloudMintPublicKey,
         managedEndpointBaseDomain: yield* managedEndpointZoneName,
         managedEndpointNamespace: stage,
+        linearOAuth,
       });
     });
 
@@ -209,12 +238,17 @@ export const ApiLive = Api.make(
       }).pipe(Effect.map(makeRelayTraceLayer)),
     );
 
-    const runtimeLayer = Layer.empty.pipe(
+    // Split in two because `pipe` accepts at most 20 arguments.
+    const runtimeFoundationLayer = Layer.empty.pipe(
       Layer.provideMerge(MobileRegistrations.layer),
       Layer.provideMerge(AgentActivityPublisher.layer),
+      Layer.provideMerge(LinearOAuthBroker.layer),
       Layer.provideMerge(EnvironmentConnector.layer),
       Layer.provideMerge(EnvironmentLinker.layer),
       Layer.provideMerge(EnvironmentPublishSignatures.layer),
+      Layer.provideMerge(LinearOAuth.layer),
+      Layer.provideMerge(LinearOAuthStates.layer),
+      Layer.provideMerge(LinearTokens.layer),
       Layer.provideMerge(
         ManagedEndpointProvider.layerCloudflareBindings(
           managedEndpointTunnelBinding,
@@ -223,6 +257,8 @@ export const ApiLive = Api.make(
         ),
       ),
       Layer.provideMerge(DpopProofs.layer),
+    );
+    const runtimeLayer = runtimeFoundationLayer.pipe(
       Layer.provideMerge(ApnsDeliveries.layer),
       Layer.provideMerge(
         FcmDeliveries.layer.pipe(
@@ -318,6 +354,9 @@ export const ApiLive = Api.make(
     yield* Cloudflare.Workers.cron("*/5 * * * *", () =>
       DpopProofs.DpopProofReplay.pipe(
         Effect.flatMap((dpopProofs) => dpopProofs.pruneExpired),
+        Effect.andThen(
+          LinearOAuthStates.LinearOAuthStates.pipe(Effect.flatMap((states) => states.pruneExpired)),
+        ),
         // Terminal thread rows are kept briefly so finished agents show as
         // Done/Failed in the Live Activity; sweep them once they age out.
         Effect.andThen(
@@ -341,6 +380,11 @@ export const ApiLive = Api.make(
         ),
         HttpApiScalar.layer(RelayApi, { path: "/docs" }),
         relayDocsRedirectRoute,
+        HttpRouter.add(
+          "GET",
+          LinearOAuth.LINEAR_OAUTH_CALLBACK_PATH,
+          relayLinearOAuthCallbackHandler.pipe(Effect.provide(runtimeLayer)),
+        ),
       ).pipe(Layer.provide([Etag.layerWeak, httpPlatformNotSupportedLayer, relayCors])),
       relayNotFoundRoute,
     ).pipe(
