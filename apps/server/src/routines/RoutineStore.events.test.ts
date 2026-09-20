@@ -9,6 +9,7 @@ import {
   RuntimeMode,
   type RoutineConnection,
   type RoutineDraft,
+  type RoutineLinearMetadata,
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -100,6 +101,19 @@ const linearConnection: RoutineConnection = {
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
+const linearMetadata = {
+  workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
+  teams: [{ id: "team-1", name: "Kata", key: "KAT", visibility: "public" }],
+  projects: [{ id: "project-1", name: "Kata Code", teamIds: ["team-1"] }],
+  states: [
+    { id: "state-todo", name: "Todo", teamId: "team-1", type: "unstarted" },
+    { id: "state-done", name: "Done", teamId: "team-1", type: "completed" },
+  ],
+  labels: [
+    { id: "label-bug", name: "Bug", teamId: "team-1" },
+    { id: "label-urgent", name: "Urgent", teamId: null },
+  ],
+} satisfies RoutineLinearMetadata;
 const linearConfiguration = (trigger: RoutineDraft["trigger"]): RoutineDraft => ({
   ...configuration,
   name: "Linear triage",
@@ -549,6 +563,7 @@ it.layer(storeLayer)("RoutineStore Linear events", (it) => {
             }),
           },
           1_000,
+          { linearMetadata },
         );
         const created = linearEvent("linear-delivery-1", linearPayload("create", {}));
         const first = yield* store.admitEvent({ connectionId: id, ...created, now: 2_000 });
@@ -604,6 +619,7 @@ it.layer(storeLayer)("RoutineStore Linear events", (it) => {
           }),
         },
         1_000,
+        { linearMetadata },
       );
       yield* store.save(
         environmentId,
@@ -619,6 +635,7 @@ it.layer(storeLayer)("RoutineStore Linear events", (it) => {
           }),
         },
         1_100,
+        { linearMetadata },
       );
       yield* store.save(
         environmentId,
@@ -634,6 +651,7 @@ it.layer(storeLayer)("RoutineStore Linear events", (it) => {
           }),
         },
         1_200,
+        { linearMetadata },
       );
 
       const transition = linearEvent(
