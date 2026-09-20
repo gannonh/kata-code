@@ -42,6 +42,8 @@ describe("thread sidebar width", () => {
 
     expect(sidebarSource).toContain("h-[var(--workspace-topbar-height)]");
     expect(sidebarSource).toContain("SidebarTrigger");
+    expect(sidebarSource).not.toContain("function SidebarBrand");
+    expect(sidebarSource).not.toContain("<SidebarStageBackdrop");
     expect(THREAD_SIDEBAR_MIN_WIDTH).toBe(13 * 16);
   });
 });
