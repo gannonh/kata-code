@@ -3,12 +3,27 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import { describe, expect, it } from "@effect/vitest";
 
-import { relayManagedTunnelLimits, relayMobileDevices } from "./schema.ts";
+import {
+  relayLinearOAuthStates,
+  relayLinearOAuthTokens,
+  relayManagedTunnelLimits,
+  relayMobileDevices,
+} from "./schema.ts";
 
 const postgresMigrationsDir = new URL("../../migrations/postgres/", import.meta.url);
 
 const reconciliationMigration = NodeFS.readFileSync(
   new URL("20260821120000_kata_connect_state_reconciliation/migration.sql", postgresMigrationsDir),
+  "utf8",
+);
+
+const linearOAuthMigration = NodeFS.readFileSync(
+  new URL("20260918165546_eager_shinobi_shaw/migration.sql", postgresMigrationsDir),
+  "utf8",
+);
+
+const linearOAuthTokenKeysMigration = NodeFS.readFileSync(
+  new URL("20260919144745_linear_oauth_token_keys/migration.sql", postgresMigrationsDir),
   "utf8",
 );
 
@@ -40,6 +55,36 @@ describe("relay persisted schema reconciliation", () => {
     expect("bundleId" in relayMobileDevices).toBe(true);
     expect("apsEnvironment" in relayMobileDevices).toBe(true);
     expect("maxTunnels" in relayManagedTunnelLimits).toBe(true);
+  });
+
+  it("creates the Linear OAuth state and token tables in the latest migration", () => {
+    expect("codeVerifier" in relayLinearOAuthStates).toBe(true);
+    expect("consumedAt" in relayLinearOAuthStates).toBe(true);
+    expect("stateHash" in relayLinearOAuthStates).toBe(true);
+    expect("accessToken" in relayLinearOAuthTokens).toBe(true);
+    expect("refreshToken" in relayLinearOAuthTokens).toBe(true);
+    expect(linearOAuthMigration).toContain('CREATE TABLE "relay_linear_oauth_states"');
+    expect(linearOAuthMigration).toContain('"code_verifier" text NOT NULL');
+    expect(linearOAuthMigration).toContain('"consumed_at" varchar(64)');
+    expect(linearOAuthMigration).toContain('CREATE TABLE "relay_linear_oauth_tokens"');
+    expect(linearOAuthMigration).toContain('"access_token" text NOT NULL');
+    expect(linearOAuthMigration).toContain('"refresh_token" text NOT NULL');
+  });
+
+  it("stores Linear OAuth expiries as epoch milliseconds, which overflow a 32-bit integer", () => {
+    expect(relayLinearOAuthStates.expiresAt.getSQLType()).toBe("bigint");
+    expect(relayLinearOAuthTokens.expiresAt.getSQLType()).toBe("bigint");
+    for (const table of ["relay_linear_oauth_states", "relay_linear_oauth_tokens"]) {
+      expect(linearOAuthTokenKeysMigration).toContain(
+        `ALTER TABLE "${table}" ALTER COLUMN "expires_at" SET DATA TYPE bigint`,
+      );
+    }
+  });
+
+  it("keys Linear OAuth tokens by environment and connection", () => {
+    expect(linearOAuthTokenKeysMigration).toContain(
+      'ALTER TABLE "relay_linear_oauth_tokens" ADD PRIMARY KEY ("environment_id","connection_id")',
+    );
   });
 
   it("reconciles archive-shaped state idempotently without row replacement", () => {

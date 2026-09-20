@@ -45,6 +45,7 @@ const config = {
   apnsDeliveryJobSigningSecret: Redacted.make("unused"),
   cloudMintPrivateKey: Redacted.make("unused"),
   cloudMintPublicKey: "unused",
+  linearOAuth: null,
   managedEndpointBaseDomain: undefined,
   managedEndpointNamespace: undefined,
 } satisfies RelayConfiguration["Service"];

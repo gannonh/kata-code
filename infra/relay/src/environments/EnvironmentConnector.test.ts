@@ -5,6 +5,8 @@ import {
   RelayCloudEnvironmentHealthRequest,
   RelayCloudMintCredentialRequest,
   RelayCloudEnvironmentHealthProofPayload,
+  RelayCloudLinearOAuthDeliveryProofPayload,
+  RelayCloudLinearOAuthDeliveryRequest,
   RelayCloudMintCredentialProofPayload,
   RelayEnvironmentHealthResponse,
   RelayEnvironmentHealthResponseProofPayload,
@@ -54,6 +56,9 @@ const decodeHealthRequestBody = Schema.decodeUnknownSync(
 const decodeMintRequestBody = Schema.decodeUnknownSync(
   Schema.fromJsonString(RelayCloudMintCredentialRequest),
 );
+const decodeLinearOAuthDeliveryRequestBody = Schema.decodeUnknownSync(
+  Schema.fromJsonString(RelayCloudLinearOAuthDeliveryRequest),
+);
 const isEnvironmentConnectNotAuthorized = Schema.is(
   EnvironmentConnector.EnvironmentConnectNotAuthorized,
 );
@@ -77,6 +82,7 @@ const settings = RelayConfiguration.RelayConfiguration.of({
   clerkJwtAudience: "kata-code-relay",
   cloudMintPrivateKey: Redacted.make(cloudKeyPair.privateKey),
   cloudMintPublicKey: cloudKeyPair.publicKey,
+  linearOAuth: null,
   managedEndpointBaseDomain: "example.test",
   managedEndpointNamespace: undefined,
 });
@@ -691,6 +697,53 @@ describe("EnvironmentConnector", () => {
       });
     }).pipe(Effect.provide(connectorTestLayer(execute)));
   });
+
+  it.effect(
+    "delivers the Linear access token, never the refresh token, to the linked environment",
+    () => {
+      const seenUrls: Array<string> = [];
+      const seenProofs: Array<RelayCloudLinearOAuthDeliveryProofPayload> = [];
+      const execute = (request: HttpClientRequest.HttpClientRequest) =>
+        Effect.sync(() => {
+          const deliveryRequest = decodeLinearOAuthDeliveryRequestBody(requestBodyText(request));
+          seenUrls.push(request.url);
+          seenProofs.push(decodeRequestProof(deliveryRequest.proof));
+          return HttpClientResponse.fromWeb(request, Response.json({ ok: true }, { status: 200 }));
+        });
+
+      return Effect.gen(function* () {
+        const connector = yield* EnvironmentConnector.EnvironmentConnector;
+        yield* connector.deliverLinearOAuth({
+          userId: "user_123",
+          environmentId: "env-connector-test",
+          connectionId: "connection-1",
+          token: {
+            accessToken: "linear-access-token",
+            expiresAt: 1_790_000_000_000,
+            scope: "read,admin",
+          },
+        });
+
+        expect(seenUrls).toEqual(["https://env.example.test/api/connect/linear-oauth"]);
+        expect(seenProofs[0]).toMatchObject({
+          iss: "https://relay.example.test",
+          aud: "kata-env:env-connector-test",
+          sub: "user_123",
+          environmentId: "env-connector-test",
+          connectionId: "connection-1",
+          token: {
+            accessToken: "linear-access-token",
+            expiresAt: 1_790_000_000_000,
+            scope: "read,admin",
+          },
+        });
+        expect(Object.keys(seenProofs[0] ?? {})).not.toContain("refreshToken");
+        expect(seenProofs[0]!.nonce.length).toBeGreaterThan(0);
+        expect(seenProofs[0]!.jti.length).toBeGreaterThan(0);
+        expect(seenProofs[0]!.exp).toBeGreaterThan(seenProofs[0]!.iat);
+      }).pipe(Effect.provide(connectorTestLayer(execute)));
+    },
+  );
 
   it.effect("only accepts mint responses signed by the user's linked environment key", () => {
     const execute = (request: HttpClientRequest.HttpClientRequest) =>

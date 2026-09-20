@@ -28,6 +28,7 @@ const config = RelayConfiguration.RelayConfiguration.of({
   clerkJwtAudience: "kata-code-relay",
   cloudMintPrivateKey: Redacted.make("cloud-private-key"),
   cloudMintPublicKey: "cloud-public-key",
+  linearOAuth: null,
   managedEndpointBaseDomain: "t3code.test",
   managedEndpointNamespace: "dev_julius",
 });
