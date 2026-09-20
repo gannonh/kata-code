@@ -233,6 +233,7 @@ it.effect("checkpoint capture refuses a truncated nested repository listing", ()
                 input.args.includes("--others") ? { ...result, stdoutTruncated: true } : result,
               ),
             ),
+        runBytes: () => Effect.die("unused binary process runner"),
       }),
     );
 
@@ -272,6 +273,7 @@ it.effect("checkpoint recovery refuses excessive candidates before probing", () 
             }),
           );
         },
+        runBytes: () => Effect.die("unused binary process runner"),
       }),
     );
     const result = yield* Effect.result(
@@ -337,6 +339,7 @@ it.effect.each([
               );
             });
           },
+          runBytes: () => Effect.die("unused binary process runner"),
         }),
       );
       const captureDriver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
@@ -349,6 +352,7 @@ it.effect.each([
                 return Effect.void;
               }),
             ),
+          runBytes: () => Effect.die("unused binary process runner"),
         }),
       );
       const captureStore = yield* makeCaptureStore(captureDriver, cwd);
@@ -456,6 +460,7 @@ for (const blockedPhase of ["discovery", "probe", "retry"] as const) {
               }),
             );
           },
+          runBytes: () => Effect.die("unused binary process runner"),
         }),
       );
       const captureStore = yield* makeCaptureStore(captureDriver, cwd);
@@ -500,6 +505,7 @@ it.effect("checkpoint recovery preserves interruption and removes the private in
             ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
             : liveProcess.run(input);
         },
+        runBytes: () => Effect.die("unused binary process runner"),
       }),
     );
     const fiber = yield* captureDriver.checkpoints

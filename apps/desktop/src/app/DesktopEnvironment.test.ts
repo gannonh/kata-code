@@ -51,8 +51,6 @@ describe("DesktopEnvironment", () => {
           VITE_DEV_SERVER_URL: "http://localhost:5173",
           KATACODE_DEV_REMOTE_T3_SERVER_ENTRY_PATH: " /remote/server.mjs ",
           KATACODE_OTLP_TRACES_URL: " http://127.0.0.1:4318/v1/traces ",
-          KATACODE_OTLP_METRICS_URL: " http://127.0.0.1:4318/v1/metrics ",
-          KATACODE_OTLP_LOGS_URL: " http://127.0.0.1:4318/v1/logs ",
           KATACODE_OTLP_EXPORT_INTERVAL_MS: "2500",
         },
       );
@@ -87,8 +85,6 @@ describe("DesktopEnvironment", () => {
       assert.deepEqual(environment.configuredBackendPort, Option.some(4949));
       assert.deepEqual(environment.commitHashOverride, Option.some("0123456789abcdef"));
       assert.deepEqual(environment.otlpTracesUrl, Option.some("http://127.0.0.1:4318/v1/traces"));
-      assert.deepEqual(environment.otlpMetricsUrl, Option.some("http://127.0.0.1:4318/v1/metrics"));
-      assert.deepEqual(environment.otlpLogsUrl, Option.some("http://127.0.0.1:4318/v1/logs"));
       assert.equal(environment.otlpExportIntervalMs, 2500);
     }),
   );

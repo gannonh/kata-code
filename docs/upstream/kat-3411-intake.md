@@ -2,12 +2,12 @@
 
 ## Frozen refs
 
-| Value                  | Commit                                                                                                                                                                                                   |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Kata base              | `2eb3b14fa4662ed3824be818d5e285ead63696ca` (updated from `5b7fa4dc4f251e83d7562c5223d295f005de94ca` after Gannon merged origin/main KAT-3415; earlier freeze `7fad04511b62b0897ce8db989cb98f2edd12cc02`) |
-| Previous upstream pin  | `47ace94962a714a561d7cfbdbaa4c721ef6b0598`                                                                                                                                                               |
-| Frozen upstream target | `0150c6a53b409ba3bcb45645709b649cf8708354`                                                                                                                                                               |
-| Original upstream root | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f`                                                                                                                                                               |
+| Value                  | Commit                                                                                                                                                                                                                                                                                                |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kata base              | `13d48b9a61985ce8d197fa1baa6a5bfe79b83190` (updated from `2eb3b14fa4662ed3824be818d5e285ead63696ca` after KAT-3322 PR #240 and PR #242) (updated from `5b7fa4dc4f251e83d7562c5223d295f005de94ca` after Gannon merged origin/main KAT-3415; earlier freeze `7fad04511b62b0897ce8db989cb98f2edd12cc02`) |
+| Previous upstream pin  | `47ace94962a714a561d7cfbdbaa4c721ef6b0598`                                                                                                                                                                                                                                                            |
+| Frozen upstream target | `c14f6015bfe479d313355cb234af1a5c16dbb15f` (refrozen 2026-09-20T15:20Z; supersedes `0150c6a53b409ba3bcb45645709b649cf8708354`, which stays an ancestor)                                                                                                                                               |
+| Original upstream root | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f`                                                                                                                                                                                                                                                            |
 
 Run `kat-upstream-20260917T071749Z-cursor-cloud` froze a range of 130 commits and 751 changed paths. Reverse commits: 0.
 
@@ -50,3 +50,71 @@ Shared contracts, package manifests, the lockfile, workflow ownership, and migra
 ## Verification
 
 Build verification uses the checker and inventory archived from the current Kata base (`2eb3b14fa4662ed3824be818d5e285ead63696ca`). Required checks include formatting and lint, typecheck, unused-code checks, CI test partitions, desktop build, preload verification, branding, ancestry, workflow-reference scan, and the preservation checker. Trusted-base `--mode ci` and GitHub Actions receipts bound to superseded candidates `6f4a18b5512d0890174e461a4f21958bd22749ee`, `35d45f93800c85c61d9ad9f7ead1606b6ef853f6`, `cd2a5746fb6756c0db5b55091987517fbe19aefb`, and `36427e288d5e62d286979cf873c3709a0f16af7c` are invalid after the KAT-3415 main merge. Portable CI on merge `33d49ea8ddcf80ffa3bbaf3418ecbb1dea11b525` (Actions run 35479196608) is valid only for that SHA. Mandatory live browser, device, provider, Android artwork, and macOS Icon Composer evidence remains `NOT RUN` until exercised against an exact candidate.
+
+## 2026-09-20 extension to `c14f6015b`
+
+Gannon instructed this run to bring the branch current with `origin/main` and to pull the
+latest upstream rather than hold the previous freeze. The frozen target moves from
+`0150c6a53b409ba3bcb45645709b649cf8708354` to `c14f6015bfe479d313355cb234af1a5c16dbb15f`,
+118 commits, 0 reverse commits. 4529 changed paths, of which 3824 are `.repos/` vendored
+reference trees this fork deletes.
+
+Gannon asked to "rebase onto main". This branch carries recovered previous-pin ancestry and
+two upstream merges, and its acceptance criteria require both the Kata base and the upstream
+tip to remain ancestors of the candidate. A literal rebase linearises that away, so the branch
+was brought current with `git merge origin/main` (merge `e7a32710af`), the documented
+equivalent in `.agents/skills/rebase-kata-upstream/references/git-integration.md`.
+
+Ancestry on candidate `8424725a9`: Kata base `13d48b9a6`, upstream tip `c14f6015b`, superseded
+freeze `0150c6a53`, previous pin `47ace9496`, and original root `6a687ee43` are all ancestors.
+`git merge-base --all HEAD c14f6015b` is exactly the frozen tip.
+
+### Resolutions worth recording
+
+Git rename detection matched upstream's restructured `.repos/effect-smol/packages/effect/**`
+onto `packages/kata-sandbox-docker/**`, staging 68 effect-smol files into the Kata-only Docker
+sandbox package. None of that package's 16 real files overlapped, so all 68 were dropped.
+
+Upstream migration `053_PullRequestFilesViewed` collides with Kata `053_Routines` and registers
+as `057`. Kata identities `041`-`056` are unchanged. `KataUpstreamUpgrade.test.ts` grows to 57
+and asserts the new `pull_request_files_viewed` table, the same catalog-growth case KAT-3329
+recorded.
+
+Upstream removed `NodeSqliteClient.layerMemory()`. Three Kata-only migration tests migrate to
+`layer({ filename: ":memory:" })`.
+
+`alchemy` moves to `2.0.0-beta.79`. Holding `beta.76` breaks the relay, because that version
+calls `Config.string`, which effect `rc.115` removed. Kata's PlanetScale replica patch applies
+to `beta.79` unchanged and is re-registered under the new version.
+
+### Preservation repairs found outside the conflicts
+
+Auditing the whole fork delta, not only the conflicted files, found seven regressions that had
+merged cleanly:
+
+- `apps/mobile/src/lib/appLinking.ts` filtered only `t3code` schemes, so a scheme-only wake URL
+  on this fork's registered schemes reset navigation to Home. Its test fed only `t3code` URLs,
+  so it passed while the shipped path was broken.
+- `apps/mobile/eas.json` set `T3CODE_MOBILE_UPDATES_ENABLED` while `app.config.ts` reads
+  `KATACODE_MOBILE_UPDATES_ENABLED`, so that profile shipped with OTA updates enabled.
+- `scripts/mobile-native-client.ts` addressed upstream's iOS artifacts, so its build, install,
+  and launch path could not work in this fork.
+- `packages/shared/src/connectAuth.ts` had silently reverted `3f735ea031`. Short fragment keys
+  and state/challenge format validation are restored, so a clipped authorize link fails closed.
+- The `DeviceService` iOS stream-attach rejection test was dropped while `/grid/api/start` and
+  its `ok: false` handling survived. Restored with the stub branch it needs.
+- `makeTextGenerationFromRegistry`, which `ws.ts` calls for routine drafts, had lost its only
+  coverage. Added.
+- Rendered `T3 Code` / `T3 Connect` copy in `Stack.tsx`, `SettingsAboutRouteScreen.tsx`, and
+  `SettingsNotificationsRouteScreen.tsx` now uses the branding constants. Upstream's screen
+  split had also left the live-activity preference write fire-and-forget;
+  `persistLiveActivityPreference` is ported back so a failed save is reported.
+
+### Superseded decision
+
+KAT-3371 recorded a SKIP preserving the Kata mobile skill accent `#f0abfc`. Upstream now derives
+`--color-user-bubble-skill-foreground` for contrast against the user bubble rather than taking a
+hand-set value, and it changed the bubble colour. Measured against the current light bubble
+`#efeff1`, `#f0abfc` scores 1.53:1 and upstream's derived `#1b4ed8` scores 5.85:1. This fork's own
+`keeps the default user bubble readable in both appearances` test requires 4.5:1, so preserving the
+old accent would ship unreadable copy and fail that test. The SKIP is superseded by measurement.

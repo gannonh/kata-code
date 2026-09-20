@@ -4,7 +4,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as NodeSqliteClient from "@kata-sh/code-shared/nodeSqliteClient";
 
 import { runMigrations } from "../Migrations.ts";
-import migrateActiveOrderKey from "./049_ProjectionThreadsActiveOrderKey.ts";
+import migrateActiveOrderKey from "./051_ProjectionThreadsActiveOrderKey.ts";
 
 it.layer(NodeSqliteClient.layer({ filename: ":memory:" }))(
   "051_ProjectionThreadsActiveOrderKey",

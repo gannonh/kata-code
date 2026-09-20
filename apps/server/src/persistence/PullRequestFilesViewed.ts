@@ -80,7 +80,7 @@ export class PullRequestFilesViewedRepository extends Context.Service<
       input: SetPullRequestFilesViewedInput,
     ) => Effect.Effect<void, PullRequestFilesViewedRepositoryError>;
   }
->()("t3/persistence/PullRequestFilesViewed/PullRequestFilesViewedRepository") {}
+>()("@kata-sh/code-cli/persistence/PullRequestFilesViewed/PullRequestFilesViewedRepository") {}
 
 function toSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): PullRequestFilesViewedRepositoryError =>

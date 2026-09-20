@@ -401,16 +401,16 @@ const runInvocation = Effect.fn("cli.sprite.run")(function* (invocation: SpriteI
   return false;
 });
 
-const spriteFlag = Flag.string("sprite").pipe(
+const spriteFlag = Flag.String("sprite").pipe(
   Flag.withAlias("s"),
   Flag.withDescription("Existing Sprite name. This command never creates or destroys a Sprite."),
 );
-const orgFlag = Flag.string("org").pipe(
+const orgFlag = Flag.String("org").pipe(
   Flag.withAlias("o"),
   Flag.optional,
   Flag.withDescription("Fly organization that owns the Sprite."),
 );
-const environmentFileFlag = Flag.string("env").pipe(
+const environmentFileFlag = Flag.String("env").pipe(
   Flag.optional,
   Flag.withDescription(
     "Path to a .env file. Setup saves it across wake-ups; clone reuses saved values by default.",
@@ -454,7 +454,7 @@ const readEnvironmentFile = Effect.fn("cli.sprite.readEnvironmentFile")(function
 const setupCommand = Command.make("setup", {
   ...targetFlags,
   env: environmentFileFlag,
-  package: Flag.string("package").pipe(
+  package: Flag.String("package").pipe(
     Flag.withDefault(`@kata-sh/code-cli@${packageJson.version}`),
     Flag.withDescription("Kata Code package spec to install inside the existing Sprite."),
   ),
@@ -513,10 +513,10 @@ const releaseCommand = Command.make("release", targetFlags).pipe(
 
 const cloneCommand = Command.make("clone", {
   ...targetFlags,
-  repo: Flag.string("repo").pipe(
+  repo: Flag.String("repo").pipe(
     Flag.withDescription("Git repository URL to clone or fast-forward."),
   ),
-  dir: Flag.string("dir").pipe(
+  dir: Flag.String("dir").pipe(
     Flag.optional,
     Flag.withDescription("Absolute destination path. Defaults to $HOME/workspaces/<repository>."),
   ),

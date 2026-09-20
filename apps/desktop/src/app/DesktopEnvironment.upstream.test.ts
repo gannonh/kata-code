@@ -70,6 +70,31 @@ describe("DesktopEnvironment upstream OTLP and client assets", () => {
     }),
   );
 
+  it.effect("trims the OTLP metrics and logs signal URLs from the environment", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment(
+        {},
+        {
+          KATACODE_HOME: " /tmp/t3 ",
+          KATACODE_OTLP_METRICS_URL: " http://127.0.0.1:4318/v1/metrics ",
+          KATACODE_OTLP_LOGS_URL: " http://127.0.0.1:4318/v1/logs ",
+        },
+      );
+
+      assert.deepEqual(environment.otlpMetricsUrl, Option.some("http://127.0.0.1:4318/v1/metrics"));
+      assert.deepEqual(environment.otlpLogsUrl, Option.some("http://127.0.0.1:4318/v1/logs"));
+    }),
+  );
+
+  it.effect("leaves the OTLP metrics and logs URLs absent when unset", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({}, { KATACODE_HOME: "/tmp/t3" });
+
+      assert.deepEqual(environment.otlpMetricsUrl, Option.none());
+      assert.deepEqual(environment.otlpLogsUrl, Option.none());
+    }),
+  );
+
   it.effect("exposes packaged Windows client assets next to the server sidecar", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment({
