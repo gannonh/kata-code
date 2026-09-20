@@ -11,7 +11,7 @@ import {
   type CodexSettings,
   DEFAULT_TEXT_GENERATION_REASONING_EFFORT,
   type ModelSelection,
-  RoutineDraftModelOutput,
+  RoutineDraftProviderOutput,
   type ServerProviderModel,
   TextGenerationError,
 } from "@kata-sh/code-contracts";
@@ -464,7 +464,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         operation: "generateRoutineDraft",
         cwd: input.cwd,
         prompt: input.prompt,
-        outputSchemaJson: RoutineDraftModelOutput,
+        outputSchemaJson: RoutineDraftProviderOutput,
         modelSelection: input.modelSelection,
         strictRoutineOutput: true,
       });

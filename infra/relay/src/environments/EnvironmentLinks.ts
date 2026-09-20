@@ -41,7 +41,7 @@ export class EnvironmentLinkUpsertPersistenceError extends Schema.TaggedError<En
 export class EnvironmentLinkUserListPersistenceError extends Schema.TaggedError<EnvironmentLinkUserListPersistenceError>()(
   "EnvironmentLinkUserListPersistenceError",
   {
-    operation: Schema.Literals(["list-users", "list-delivery-users"]),
+    operation: Schema.Literals(["list-users", "list-delivery-users", "list-users-for-key"]),
     environmentId: Schema.String,
     cause: Schema.Defect(),
   },
@@ -112,6 +112,10 @@ export class EnvironmentLinks extends Context.Service<
     }) => Effect.Effect<void, EnvironmentLinkUpsertPersistenceError>;
     readonly listUsersForEnvironment: (input: {
       readonly environmentId: string;
+    }) => Effect.Effect<ReadonlyArray<string>, EnvironmentLinkUserListPersistenceError>;
+    readonly listUsersForEnvironmentPublicKey: (input: {
+      readonly environmentId: string;
+      readonly environmentPublicKey: string;
     }) => Effect.Effect<ReadonlyArray<string>, EnvironmentLinkUserListPersistenceError>;
     readonly listDeliveryUsersForEnvironment: (input: {
       readonly environmentId: string;
@@ -240,6 +244,33 @@ const make = Effect.gen(function* () {
           );
       },
     ),
+
+    listUsersForEnvironmentPublicKey: Effect.fn(
+      "relay.environment_links.list_users_for_environment_public_key",
+    )(function* (input) {
+      yield* Effect.annotateCurrentSpan({ "relay.environment_id": input.environmentId });
+      return yield* db
+        .select({ userId: relayEnvironmentLinks.userId })
+        .from(relayEnvironmentLinks)
+        .where(
+          and(
+            eq(relayEnvironmentLinks.environmentId, input.environmentId),
+            eq(relayEnvironmentLinks.environmentPublicKey, input.environmentPublicKey),
+            isNull(relayEnvironmentLinks.revokedAt),
+          ),
+        )
+        .pipe(
+          Effect.map((rows) => rows.map((row) => row.userId)),
+          Effect.mapError(
+            (cause) =>
+              new EnvironmentLinkUserListPersistenceError({
+                operation: "list-users-for-key",
+                environmentId: input.environmentId,
+                cause,
+              }),
+          ),
+        );
+    }),
 
     listDeliveryUsersForEnvironment: Effect.fn(
       "relay.environment_links.list_delivery_users_for_environment",

@@ -116,6 +116,48 @@ describe("EnvironmentLinks", () => {
     );
   });
 
+  it.effect("lists users for an environment public key without the delivery filter", () => {
+    const whereConditions: Array<unknown> = [];
+    const fakeDb = {
+      select: (selection: unknown) => {
+        expect(selection).toBeDefined();
+        return {
+          from: (table: unknown) => {
+            expect(table).toBe(relayEnvironmentLinks);
+            return {
+              where: (condition: unknown) => {
+                whereConditions.push(condition);
+                return Effect.succeed([]);
+              },
+            };
+          },
+        };
+      },
+    } as unknown as RelayDb.RelayDb["Service"];
+
+    return Effect.gen(function* () {
+      const links = yield* EnvironmentLinks.EnvironmentLinks;
+      expect(
+        yield* links.listUsersForEnvironmentPublicKey({
+          environmentId: "env-1",
+          environmentPublicKey: "public-key",
+        }),
+      ).toEqual([]);
+      expect(whereConditions).toHaveLength(1);
+
+      const query = new PgDialect().sqlToQuery(whereConditions[0] as never);
+      expect(query.sql).toContain('"relay_environment_links"."environment_id" = $1');
+      expect(query.sql).toContain('"relay_environment_links"."environment_public_key" = $2');
+      expect(query.sql).toContain('"relay_environment_links"."revoked_at" is null');
+      expect(query.sql).not.toContain("notifications_enabled");
+      expect(query.params).toEqual(["env-1", "public-key"]);
+    }).pipe(
+      Effect.provide(
+        EnvironmentLinks.layer.pipe(Layer.provide(Layer.succeed(RelayDb.RelayDb, fakeDb))),
+      ),
+    );
+  });
+
   it.effect("revokes only the active link owned by the requesting user", () => {
     const updateValues: Array<Record<string, unknown>> = [];
     const whereConditions: Array<unknown> = [];

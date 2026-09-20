@@ -5,7 +5,7 @@ Usage shows estimated API cost and token counts for the connected environment, w
 ## Sub-features
 
 - `usage-open` opens the page from the sidebar and from `/usage`.
-- `usage-empty` shows zero totals on a fresh home.
+- `usage-empty` shows zero totals when the host has no provider usage transcripts.
 - `usage-metric` switches Cost, Tokens, and Limits.
 - `usage-period` switches Past 24h, 7 days, 30 days, and 90 days (disabled on Limits).
 - `usage-breakdown` switches Model and Day (or Hour in Past 24h).
@@ -27,11 +27,11 @@ Preconditions:
 - `bin/doctor` still passes.
 - Viewport is wide enough that the sidebar footer shows icon buttons (not the mobile drawer). If the `Usage` button is missing, open `/usage` and record that the sidebar entry was not reached.
 
-- **Sidebar entry.** Choose `Usage`. Run `agent-browser --session katacode-verify click` on the button named `Usage`. The heading is `Usage`. Breadcrumb named `Usage breadcrumb` includes a menu named `All environments`. A group named `Usage metric` contains `Cost`, `Tokens`, and `Limits`. A group named `Usage period` contains `Past 24h`, `7 days`, `30 days`, `90 days`. `30 days` is pressed on a fresh session.
+- **Sidebar entry.** Choose `Usage`. Run `agent-browser --session katacode-verify click` on the button named `Usage`. The heading is `Usage`. Breadcrumb named `Usage breadcrumb` includes a menu named `All environments`. A group named `Usage metric` contains `Cost`, `Tokens`, and `Limits`. A group named `Usage period` contains `Past 24h`, `7 days`, `30 days`, `90 days`. A fresh browser opens on `Limits`; choose `Cost` before checking cost totals. `30 days` is pressed on a fresh session.
 - **Route entry.** Open `/usage` on the same origin. Run `agent-browser --session katacode-verify open "$WEB_ORIGIN/usage"` and wait on the heading `Usage`; `wait --text "Refresh usage"` never resolves because that name is an `aria-label` on an icon button. The same heading and groups appear. This must not require pairing again.
 - **Environment menu.** Choose `All environments`. The menu lists checkbox `All environments`, this environment's label, and `Model prices`. Close without writing prices. Coverage notice strings (`could not report usage`, `runs an older server version`, `Counted once across environments sharing a transcript directory:`) are findings if they appear. Do not treat a missing device checkmark strip as a fail. The menu replaced that strip.
-- **Wait for totals.** The page shows a skeleton until the environment answers. The skeleton also includes the headings `Totals` and `Breakdown`, so neither is a loaded signal. Wait until the hero shows `$0.00` or another `$` amount, and the breakdown shows `No activity in this window.` or a model row. If the page opened on Limits from a reused session, choose `Cost` first.
-- **Empty window.** If this machine has no provider usage transcripts, the large figure is `$0.00`, the cost caption is `0 sessions · API estimate`, and the breakdown table says `No activity in this window.` If Codex or Claude Code CLIs on this host have usage, the page shows those totals even on a disposable Kata home. That is expected. Non-zero numbers are not proof that you attached to `~/.katacode`.
+- **Wait for totals.** Choose `Cost`, then wait for the environment to answer. The skeleton also includes the headings `Totals` and `Breakdown`, so neither is a loaded signal. Wait until the hero shows `$0.00` or another `$` amount, and the breakdown shows `No activity in this window.` or a model row.
+- **Empty window.** If this machine has no provider usage transcripts, the large figure is `$0.00`, the cost caption is `0 sessions · API estimate`, and the breakdown table says `No activity in this window.` If Codex, Claude Code, or Grok Build CLIs on this host have usage, the page shows those totals even on a disposable Kata home. That is expected. Non-zero numbers are not proof that you attached to `~/.katacode`.
 - **Tokens metric.** Choose `Tokens`. Run click on `Tokens` inside `Usage metric`. The large figure is a token count (for example `876M` or `0`), not a `$` amount, and its caption is `N sessions` without the `· API estimate` suffix. The chart heading (an `h2`) contains `processed tokens`; the `Totals` label `Processed tokens` exists in the skeleton too, so match the heading, not page text.
 - **Cost metric.** Choose `Cost`. The large figure is a `$` amount. The chart heading contains `cost`.
 - **Past 24h.** Choose `Past 24h`. The chart heading starts with `Hourly`. The breakdown group offers `Hour` instead of `Day`.

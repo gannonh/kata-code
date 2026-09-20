@@ -6,6 +6,7 @@ import type { GitHubEventTrigger, GitHubRoutineEvent } from "@kata-sh/code-contr
  * rendered as bounded context, never interpreted as instructions.
  */
 export interface GitHubRoutineEventSummary {
+  readonly provider: "github";
   readonly event: GitHubRoutineEvent;
   readonly repositoryId: number;
   readonly repositoryName: string;
@@ -78,6 +79,7 @@ export function summarizeGitHubEvent(
           : null;
     if (event === null) return null;
     return {
+      provider: "github",
       event,
       repositoryId,
       repositoryName,
@@ -97,6 +99,7 @@ export function summarizeGitHubEvent(
     const issue = asRecord(body.issue);
     if (!issue) return null;
     return {
+      provider: "github",
       event: "issue_opened",
       repositoryId,
       repositoryName,
@@ -118,6 +121,7 @@ export function summarizeGitHubEvent(
     const conclusion = asString(run.conclusion);
     if (conclusion === null || !WORKFLOW_FAILURE_CONCLUSIONS.has(conclusion)) return null;
     return {
+      provider: "github",
       event: "workflow_failed",
       repositoryId,
       repositoryName,

@@ -17,7 +17,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import {
   type ClaudeSettings,
   type ModelSelection,
-  RoutineDraftModelOutput,
+  RoutineDraftProviderOutput,
 } from "@kata-sh/code-contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
@@ -427,7 +427,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
         operation: "generateRoutineDraft",
         cwd: input.cwd,
         prompt: input.prompt,
-        outputSchemaJson: RoutineDraftModelOutput,
+        outputSchemaJson: RoutineDraftProviderOutput,
         modelSelection: input.modelSelection,
         strictRoutineOutput: true,
       });

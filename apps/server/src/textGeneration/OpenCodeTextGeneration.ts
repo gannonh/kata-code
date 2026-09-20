@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema";
 
 import {
   NonNegativeInt,
-  RoutineDraftModelOutput,
+  RoutineDraftProviderOutput,
   TextGenerationError,
   type ChatAttachment,
   type ModelSelection,
@@ -539,7 +539,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         operation: "generateRoutineDraft",
         cwd: input.cwd,
         prompt: input.prompt,
-        outputSchemaJson: RoutineDraftModelOutput,
+        outputSchemaJson: RoutineDraftProviderOutput,
         modelSelection: input.modelSelection,
       });
     });

@@ -110,9 +110,15 @@ import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import { RoutineStoreLive } from "./routines/RoutineStore.ts";
 import { RoutineConnectionsLive } from "./routines/RoutineConnections.ts";
+import { LinearRoutineMetadataLive } from "./routines/LinearRoutineMetadata.ts";
+import { LinearWebhookAdminLive } from "./routines/LinearRoutineWebhooks.ts";
 import { RoutineDispatcherLive } from "./routines/RoutineDispatcher.ts";
 import { RoutineSchedulerLive } from "./routines/RoutineScheduler.ts";
-import { isRoutineWebhookPath, routineWebhookRouteLayer } from "./routines/RoutineWebhooks.ts";
+import {
+  isRoutineWebhookPath,
+  linearWebhookRouteLayer,
+  routineWebhookRouteLayer,
+} from "./routines/RoutineWebhooks.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as PullRequestReadCache from "./pullRequest/PullRequestReadCache.ts";
@@ -137,6 +143,7 @@ import { shouldRetryCloudLink } from "./cloud/relayResponse.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as CloudCliState from "./cloud/CliState.ts";
+import { LinearOAuthRelayLive } from "./cloud/LinearOAuthRelay.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as DesktopAppUpdate from "./desktopUpdate/DesktopAppUpdate.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
@@ -567,6 +574,9 @@ const RuntimeCoreDependenciesLive = RoutineSchedulerLive.pipe(
     RoutineConnectionsLive.pipe(
       Layer.provide(RoutineStoreLayerLive),
       Layer.provide(GitHubCli.layer.pipe(Layer.provide(VcsProcess.layer))),
+      Layer.provide(LinearRoutineMetadataLive),
+      Layer.provide(LinearWebhookAdminLive),
+      Layer.provide(LinearOAuthRelayLive),
     ),
   ),
   Layer.provideMerge(RoutineStoreLayerLive),
@@ -619,6 +629,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     ),
     sandboxBootstrapPairingRouteLayer,
     routineWebhookRouteLayer,
+    linearWebhookRouteLayer,
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
     attachmentUploadRouteLayer,

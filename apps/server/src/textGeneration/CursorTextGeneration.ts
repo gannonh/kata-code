@@ -11,7 +11,7 @@ import { AcpRequestError } from "effect-acp/errors";
 import {
   type CursorSettings,
   type ModelSelection,
-  RoutineDraftModelOutput,
+  RoutineDraftProviderOutput,
 } from "@kata-sh/code-contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
 import { extractJsonObject } from "@kata-sh/code-shared/schemaJson";
@@ -348,7 +348,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
         operation: "generateRoutineDraft",
         cwd: input.cwd,
         prompt: input.prompt,
-        outputSchemaJson: RoutineDraftModelOutput,
+        outputSchemaJson: RoutineDraftProviderOutput,
         modelSelection: input.modelSelection,
         strictRoutineOutput: true,
       });

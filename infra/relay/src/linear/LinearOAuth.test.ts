@@ -55,8 +55,8 @@ describe("LinearOAuth", () => {
         "https://relay.example.com/v1/linear/oauth/callback",
       );
       expect(url.searchParams.get("scope")).toBe(LINEAR_OAUTH_SCOPES);
-      expect(url.searchParams.get("scope")).toBe("read,admin");
-      expect(url.searchParams.get("actor")).toBe("application");
+      expect(url.searchParams.get("scope")).toBe("read,write,admin");
+      expect(url.searchParams.get("actor")).toBe("user");
       expect(url.searchParams.get("prompt")).toBe("consent");
       expect(url.searchParams.get("state")).toBe("state-token");
       expect(url.searchParams.get("code_challenge")).toBe("code-challenge");
@@ -99,6 +99,32 @@ describe("LinearOAuth", () => {
       expect(bundle.refreshToken).toBe("linear-refresh-token");
       expect(bundle.scope).toBe("read,admin");
       expect(bundle.expiresAt).toBe(now.epochMilliseconds + 3_600_000);
+    });
+  });
+
+  it.effect("calls injected fetch without an object receiver", () => {
+    const fetchImpl = async function receiverSensitiveFetch(
+      this: unknown,
+      _input: RequestInfo | URL,
+      _init?: RequestInit,
+    ) {
+      if (this !== undefined) {
+        throw new TypeError("Illegal invocation");
+      }
+      return jsonResponse({
+        access_token: "linear-access-token",
+        refresh_token: "linear-refresh-token",
+        expires_in: 3600,
+      });
+    } as typeof fetch;
+
+    return Effect.gen(function* () {
+      const bundle = yield* makeOAuth(fetchImpl).exchangeCode({
+        code: "authorization-code",
+        codeVerifier: "code-verifier",
+      });
+
+      expect(bundle.accessToken).toBe("linear-access-token");
     });
   });
 

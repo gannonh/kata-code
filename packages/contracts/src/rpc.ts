@@ -272,6 +272,7 @@ import {
   Routine,
   RoutineChangeInput,
   RoutineConnection,
+  RoutineConnectionAuthorization,
   RoutineConnectionCreateInput,
   RoutineConnectionInput,
   RoutineConnectionList,
@@ -282,6 +283,8 @@ import {
   RoutineGitHubMetadata,
   RoutineGitHubMetadataInput,
   RoutineHistory,
+  RoutineLinearMetadata,
+  RoutineLinearMetadataInput,
   RoutineHistoryInput,
   RoutineList,
   RoutinePreview,
@@ -304,11 +307,13 @@ export const WS_METHODS = {
   routinesSubscribe: "routines.subscribe",
   routinesDraft: "routines.draft",
   routinesConnectionsList: "routines.connections.list",
+  routinesConnectionsBeginAuthorization: "routines.connections.beginAuthorization",
   routinesConnectionsCreate: "routines.connections.create",
   routinesConnectionsVerify: "routines.connections.verify",
   routinesConnectionsDisable: "routines.connections.disable",
   routinesConnectionsRotateSecret: "routines.connections.rotateSecret",
   routinesGitHubMetadata: "routines.github.metadata",
+  routinesLinearMetadata: "routines.linear.metadata",
 
   // Project registry methods
   projectsList: "projects.list",
@@ -545,6 +550,15 @@ const WsRoutinesConnectionsCreateRpc = Rpc.make(WS_METHODS.routinesConnectionsCr
   error: RoutineRpcError,
 });
 
+const WsRoutinesConnectionsBeginAuthorizationRpc = Rpc.make(
+  WS_METHODS.routinesConnectionsBeginAuthorization,
+  {
+    payload: RoutineConnectionInput,
+    success: RoutineConnectionAuthorization,
+    error: RoutineRpcError,
+  },
+);
+
 const WsRoutinesConnectionsVerifyRpc = Rpc.make(WS_METHODS.routinesConnectionsVerify, {
   payload: RoutineConnectionInput,
   success: RoutineConnection,
@@ -566,6 +580,12 @@ const WsRoutinesConnectionsRotateSecretRpc = Rpc.make(WS_METHODS.routinesConnect
 const WsRoutinesGitHubMetadataRpc = Rpc.make(WS_METHODS.routinesGitHubMetadata, {
   payload: RoutineGitHubMetadataInput,
   success: RoutineGitHubMetadata,
+  error: RoutineRpcError,
+});
+
+const WsRoutinesLinearMetadataRpc = Rpc.make(WS_METHODS.routinesLinearMetadata, {
+  payload: RoutineLinearMetadataInput,
+  success: RoutineLinearMetadata,
   error: RoutineRpcError,
 });
 
@@ -1502,10 +1522,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsRoutinesDraftRpc,
   WsRoutinesConnectionsListRpc,
   WsRoutinesConnectionsCreateRpc,
+  WsRoutinesConnectionsBeginAuthorizationRpc,
   WsRoutinesConnectionsVerifyRpc,
   WsRoutinesConnectionsDisableRpc,
   WsRoutinesConnectionsRotateSecretRpc,
   WsRoutinesGitHubMetadataRpc,
+  WsRoutinesLinearMetadataRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,

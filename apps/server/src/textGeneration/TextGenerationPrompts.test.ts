@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
+import * as Schema from "effect/Schema";
+import { RoutineDraftModelOutput } from "@kata-sh/code-contracts";
 
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildRoutineDraftPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -71,6 +74,115 @@ describe("buildCommitMessagePrompt", () => {
     expect(result.prompt).toContain("Use a terse repository-specific subject.");
   });
 });
+
+describe("buildRoutineDraftPrompt", () => {
+  it("limits generated fields and excludes permission/workspace output", () => {
+    const result = buildRoutineDraftPrompt({
+      message: "Create a weekday summary at 9am",
+      currentDraft: null,
+      history: [],
+      projectId: "project-1",
+      projects: [{ id: "project-1", title: "Kata Code" }],
+      availableModels: [{ instanceId: "codex", model: "gpt-6-astra", name: "GPT-6 Astra" }],
+      generationModelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+      eventSources: [],
+    });
+
+    expect(result.prompt).toContain("exactly these keys: draft, assistantMessage");
+    expect(result.prompt).toContain("Do not return runtimeMode, workspace");
+    expect(result.prompt).toContain("project-1: Kata Code");
+    expect(result.prompt).toContain('"instanceId": "codex"');
+    expect(result.prompt).toContain('"model": "gpt-6-astra"');
+    expect(result.prompt).toContain(
+      "Copy modelSelection.instanceId and modelSelection.model verbatim",
+    );
+    expect(result.outputSchema).toBeDefined();
+  });
+
+  it("lists Linear event sources and states that other providers are unsupported", () => {
+    const result = buildRoutineDraftPrompt({
+      message: "When a Linear issue is created, triage it",
+      currentDraft: null,
+      history: [],
+      projectId: "project-1",
+      projects: [{ id: "project-1", title: "Kata Code" }],
+      availableModels: [{ instanceId: "codex", model: "gpt-6-astra", name: "GPT-6 Astra" }],
+      generationModelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+      eventSources: [
+        {
+          connectionId: "linear-connection-1",
+          provider: "linear",
+          workspaceId: "workspace-uuid",
+          workspaceName: "Acme",
+          teams: [{ id: "team-uuid", name: "Engineering", key: "ENG" }],
+          projects: [{ id: "project-uuid", name: "Roadmap", teamIds: ["team-uuid"] }],
+          states: [{ id: "state-uuid", name: "In Progress", teamId: "team-uuid", type: "started" }],
+          labels: [{ id: "label-uuid", name: "Bug", teamId: "team-uuid" }],
+        },
+      ],
+    });
+
+    expect(result.prompt).toContain("linear-connection-1");
+    expect(result.prompt).toContain("workspace-uuid");
+    expect(result.prompt).toContain("team-uuid");
+    expect(result.prompt).toContain("state-uuid");
+    expect(result.prompt).toMatch(/GitHub, Slack, Microsoft Teams, Sentry, PagerDuty.*unsupported/);
+    expect(result.prompt).toMatch(/status_changed requires stateId/);
+    expect(result.prompt).toMatch(/label_added requires labelId/);
+    expect(result.prompt).toContain("Always include teamId and projectId.");
+    expect(result.prompt).toContain("use null for an unscoped teamId or projectId");
+    expect(result.prompt).toContain(
+      "A null teamId or projectId means every team or project inside the connection scope.",
+    );
+  });
+
+  it("keeps every paginated Linear resource available to chat generation", () => {
+    const result = buildRoutineDraftPrompt({
+      message: "Use the last project, status, and label",
+      currentDraft: null,
+      history: [],
+      projectId: "project-1",
+      projects: [{ id: "project-1", title: "Kata Code" }],
+      availableModels: [{ instanceId: "codex", model: "gpt-6-astra", name: "GPT-6 Astra" }],
+      generationModelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+      eventSources: [
+        {
+          connectionId: "linear-connection-1",
+          provider: "linear",
+          workspaceId: "workspace-uuid",
+          workspaceName: "Acme",
+          teams: Array.from({ length: 51 }, (_, index) => ({
+            id: `team-${index + 1}`,
+            name: `Team ${index + 1}`,
+            key: `T${index + 1}`,
+          })),
+          projects: Array.from({ length: 51 }, (_, index) => ({
+            id: `project-${index + 1}`,
+            name: `Project ${index + 1}`,
+            teamIds: [`team-${index + 1}`],
+          })),
+          states: Array.from({ length: 101 }, (_, index) => ({
+            id: `state-${index + 1}`,
+            name: `State ${index + 1}`,
+            teamId: "team-1",
+            type: "started",
+          })),
+          labels: Array.from({ length: 101 }, (_, index) => ({
+            id: `label-${index + 1}`,
+            name: `Label ${index + 1}`,
+            teamId: "team-1",
+          })),
+        },
+      ],
+    });
+
+    expect(result.prompt).toContain('"id": "team-51"');
+    expect(result.prompt).toContain('"id": "project-51"');
+    expect(result.prompt).toContain('"id": "state-101"');
+    expect(result.prompt).toContain('"id": "label-101"');
+  });
+});
+
 
 describe("buildPrContentPrompt", () => {
   it("includes branch names, commits, and diff in the prompt", () => {
@@ -166,6 +278,15 @@ describe("buildThreadTitlePrompt", () => {
     expect(result.prompt).toContain("User message:");
     expect(result.prompt).toContain("Investigate reconnect regressions after session restore");
     expect(result.prompt).not.toContain("Attachment metadata:");
+    expect(result.prompt).toContain(
+      "Generate a title that will help the user recognize this Kata Code thread weeks later.",
+    );
+    expect(result.prompt).toContain(
+      "Title the subject and outcome. Discard incidental instructions.",
+    );
+    expect(result.prompt).toContain(
+      "Name the product change, not the mock, plan, report, branch, or PR used to produce it.",
+    );
   });
 
   it("includes attachment metadata when attachments are provided", () => {
@@ -328,5 +449,34 @@ describe("normalizeCliError", () => {
 
     expect(result.detail).toBe("Failed to generate a commit message");
     expect(result.message).not.toContain("secret-token");
+  });
+});
+
+describe("decodeStrictRoutineDraftModelOutput", () => {
+  it("rejects permission and workspace fields from provider output", () => {
+    const output = {
+      draft: {
+        name: "Daily brief",
+        instruction: "Summarize changes",
+        projectId: "project-1",
+        modelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+        trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
+        runtimeMode: "full-access",
+        workspace: { kind: "shared", directory: "/tmp" },
+      },
+      assistantMessage: "Drafted a daily brief.",
+    };
+    const decode = Schema.decodeUnknownSync(RoutineDraftModelOutput, {
+      onExcessProperty: "error",
+    });
+    expect(() => decode(output)).toThrow(/excess property|unexpected key/i);
+  });
+
+  it("accepts an explicit clarification envelope", () => {
+    expect(
+      Schema.decodeUnknownSync(RoutineDraftModelOutput, {
+        onExcessProperty: "error",
+      })({ draft: null, assistantMessage: "Which time zone should I use?" }).draft,
+    ).toBeNull();
   });
 });

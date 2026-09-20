@@ -27,6 +27,11 @@ const linearOAuthTokenKeysMigration = NodeFS.readFileSync(
   "utf8",
 );
 
+const linearOAuthActiveStateMigration = NodeFS.readFileSync(
+  new URL("20260920023350_linear_oauth_active_state/migration.sql", postgresMigrationsDir),
+  "utf8",
+);
+
 const productionAppliedArchiveMigrations = [
   {
     file: "20260712150134_environment_link_leases/migration.sql",
@@ -85,6 +90,13 @@ describe("relay persisted schema reconciliation", () => {
     expect(linearOAuthTokenKeysMigration).toContain(
       'ALTER TABLE "relay_linear_oauth_tokens" ADD PRIMARY KEY ("environment_id","connection_id")',
     );
+  });
+
+  it("allows only one active Linear OAuth state per connection", () => {
+    expect(linearOAuthActiveStateMigration).toContain(
+      'CREATE UNIQUE INDEX "idx_relay_linear_oauth_states_active_connection"',
+    );
+    expect(linearOAuthActiveStateMigration).toMatch(/WHERE "consumed_at" is null/iu);
   });
 
   it("reconciles archive-shaped state idempotently without row replacement", () => {
