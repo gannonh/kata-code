@@ -25,7 +25,7 @@ This directory is the maintained source for verifying user-facing behavior of th
 - UI proof includes an accessibility snapshot and a screenshot that shows Kata Code chrome (sidebar or heading), not a blank tab.
 - Mutation proof includes a second user-facing view of the stored value.
 - Record the feature ID and entry point used in `uat-evidence/<RUN_ID>/evidence.json`.
-- For a PR-backed change, upload at least one representative screenshot or video to the PR conversation, confirm the attachment renders there, and record the PR URL, comment URL, and filenames in `evidence.json`.
+- For a PR-backed change, upload at least one representative screenshot or video to the PR conversation with `gh pr comment --attach` (or an equivalent binary upload), confirm the comment contains a rendered attachment URL, and record the PR URL, comment URL, and filenames in `evidence.json`.
 - Report an unreachable path with the attempted command and the unmet precondition.
 - Do not report a skipped entry point as verified through a different path.
 
