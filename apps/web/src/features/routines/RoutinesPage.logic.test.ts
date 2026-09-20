@@ -35,6 +35,7 @@ import {
   isRoutineEditorDraftComplete,
   isRoutineEditorScheduleTrigger,
   keepDeletedRoutineInEditor,
+  linearTriggerFiltersComplete,
   libraryRoutinesAfterChange,
   newRoutineDraftId,
   newRoutineRequestId,
@@ -668,6 +669,12 @@ describe("Linear event triggers", () => {
         true,
       ),
     ).toBeNull();
+    expect(
+      linearTriggerFiltersComplete({ ...linearScope, event: "status_changed", stateId: "" }),
+    ).toBe(false);
+    expect(
+      linearTriggerFiltersComplete({ ...linearScope, event: "label_added", labelId: "   " }),
+    ).toBe(false);
     expect(
       routineDraftForGenerationInput(
         {

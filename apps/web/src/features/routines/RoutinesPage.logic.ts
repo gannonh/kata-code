@@ -330,8 +330,18 @@ export function isCompleteLinearTrigger(
 /** Update events are complete only after the user selects their transition filter. */
 export function linearTriggerFiltersComplete(trigger: RoutineEditorTrigger): boolean {
   if (trigger.kind !== "linear") return true;
-  if (trigger.event === "status_changed") return "stateId" in trigger;
-  if (trigger.event === "label_added") return "labelId" in trigger;
+  if (trigger.event === "status_changed")
+    return (
+      "stateId" in trigger &&
+      typeof trigger.stateId === "string" &&
+      trigger.stateId.trim().length > 0
+    );
+  if (trigger.event === "label_added")
+    return (
+      "labelId" in trigger &&
+      typeof trigger.labelId === "string" &&
+      trigger.labelId.trim().length > 0
+    );
   return true;
 }
 

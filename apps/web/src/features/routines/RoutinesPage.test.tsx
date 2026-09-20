@@ -1092,6 +1092,12 @@ describe("RoutinesPage Linear trigger setup", () => {
         .props.onChange({ target: { value: "state-1" } });
     });
     expect(buttonWithText(renderer, "Save").props.disabled).toBe(false);
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-state" })
+        .props.onChange({ target: { value: "" } });
+    });
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
 
     await act(async () => {
       renderer!.root
@@ -1110,6 +1116,91 @@ describe("RoutinesPage Linear trigger setup", () => {
         .props.onChange({ target: { value: "label-eng" } });
     });
     expect(buttonWithText(renderer, "Save").props.disabled).toBe(false);
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-label" })
+        .props.onChange({ target: { value: "" } });
+    });
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
+  });
+
+  it("limits Linear statuses and labels to the selected project's teams", async () => {
+    testState.listData.push(linearRoutineFor("routine-linear-project-scope"));
+    testState.connectionsData.push(
+      linearConnectionFor("connection-linear", { teamIds: [], allTeams: true, status: "verified" }),
+    );
+    testState.linearMetadataData = {
+      workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
+      teams: [
+        { id: "team-1", name: "Engineering", key: "ENG", visibility: "public" },
+        { id: "team-2", name: "Design", key: "DES", visibility: "public" },
+      ],
+      projects: [
+        { id: "project-eng", name: "Engineering roadmap", teamIds: ["team-1"] },
+        { id: "project-design", name: "Design system", teamIds: ["team-2"] },
+      ],
+      states: [
+        { id: "state-1", name: "Engineering in progress", teamId: "team-1", type: "started" },
+        { id: "state-2", name: "Design in progress", teamId: "team-2", type: "started" },
+      ],
+      labels: [
+        { id: "label-shared", name: "Shared", teamId: null },
+        { id: "label-eng", name: "Backend", teamId: "team-1" },
+        { id: "label-design", name: "Figma", teamId: "team-2" },
+      ],
+    };
+    renderer = await openRoutineEditor("Linear brief");
+
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-event" })
+        .props.onChange({ target: { value: "status_changed" } });
+    });
+    expect(nodeText(renderer.root.findByProps({ id: "routine-linear-state" }))).toContain(
+      "Design in progress",
+    );
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-state" })
+        .props.onChange({ target: { value: "state-2" } });
+    });
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(false);
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-project" })
+        .props.onChange({ target: { value: "project-eng" } });
+    });
+    const states = nodeText(renderer.root.findByProps({ id: "routine-linear-state" }));
+    expect(states).toContain("Engineering in progress");
+    expect(states).not.toContain("Design in progress");
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
+
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-event" })
+        .props.onChange({ target: { value: "label_added" } });
+    });
+    const labels = nodeText(renderer.root.findByProps({ id: "routine-linear-label" }));
+    expect(labels).toContain("Shared");
+    expect(labels).toContain("Backend");
+    expect(labels).not.toContain("Figma");
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-project" })
+        .props.onChange({ target: { value: "" } });
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-label" })
+        .props.onChange({ target: { value: "label-design" } });
+    });
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(false);
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-project" })
+        .props.onChange({ target: { value: "project-eng" } });
+    });
+    expect(buttonWithText(renderer, "Save").props.disabled).toBe(true);
   });
 
   it("replaces the Linear pickers with the metadata error when access is revoked", async () => {

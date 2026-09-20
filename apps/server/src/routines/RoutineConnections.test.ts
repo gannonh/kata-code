@@ -8,6 +8,7 @@ import {
   type RoutineLinearMetadata,
 } from "@kata-sh/code-contracts";
 import type { RelayLinearAccessToken } from "@kata-sh/code-contracts/relay";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -213,12 +214,15 @@ type WebhookCreateInput = Parameters<LinearWebhookAdminShape["createWebhook"]>[0
 const webhookCreates: Array<WebhookCreateInput> = [];
 const webhookDeletes: Array<{ accessToken: string; webhookId: string }> = [];
 let webhookCreateStatus: "ok" | "failure" = "ok";
+const defaultLinearWebhookCreate: LinearWebhookAdminShape["createWebhook"] = () =>
+  webhookCreateStatus === "ok"
+    ? Effect.succeed({ webhookId: "linear-webhook-1", secret: "linear-signing-secret" })
+    : Effect.fail(new RoutineError({ code: "blocked", message: "Linear refused the webhook." }));
+let linearWebhookCreate: LinearWebhookAdminShape["createWebhook"] = defaultLinearWebhookCreate;
 const linearWebhookAdminLayer = Layer.mock(LinearWebhookAdmin)({
   createWebhook: (input) => {
     webhookCreates.push(input);
-    return webhookCreateStatus === "ok"
-      ? Effect.succeed({ webhookId: "linear-webhook-1", secret: "linear-signing-secret" })
-      : Effect.fail(new RoutineError({ code: "blocked", message: "Linear refused the webhook." }));
+    return linearWebhookCreate(input);
   },
   deleteWebhook: (input) =>
     Effect.sync(() => {
@@ -582,6 +586,43 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
         allTeams: true,
         teamId: undefined,
       });
+    }),
+  );
+
+  it.effect("creates only one webhook when duplicate Linear creates race", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const id = RoutineConnectionId.make("connection-linear-concurrent");
+      yield* storeBundle(id);
+      const firstEnteredProvider = yield* Deferred.make<void>();
+      const releaseFirst = yield* Deferred.make<void>();
+      const createsBefore = webhookCreates.length;
+      linearWebhookCreate = () =>
+        Deferred.succeed(firstEnteredProvider, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseFirst)),
+          Effect.andThen(
+            Effect.succeed({ webhookId: "linear-webhook-concurrent", secret: "concurrent-secret" }),
+          ),
+        );
+
+      const first = yield* connections.create(linearCreate(id)).pipe(Effect.forkChild);
+      yield* Deferred.await(firstEnteredProvider);
+      const duplicate = yield* connections.create(linearCreate(id)).pipe(Effect.flip);
+      assert.equal(duplicate.code, "conflict");
+      assert.equal(webhookCreates.length, createsBefore + 1);
+
+      yield* Deferred.succeed(releaseFirst, undefined);
+      const created = yield* Fiber.join(first).pipe(
+        Effect.ensuring(Effect.sync(() => (linearWebhookCreate = defaultLinearWebhookCreate))),
+      );
+      assert.equal(created.id, id);
+      assert.equal(
+        new TextDecoder().decode(
+          Option.getOrThrow(yield* secrets.get(routineConnectionSecretName(id))),
+        ),
+        "concurrent-secret",
+      );
     }),
   );
 

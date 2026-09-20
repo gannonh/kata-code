@@ -389,21 +389,18 @@ export function buildRoutineDraftPrompt(input: RoutineDraftPromptInput) {
     ? JSON.stringify(input.availableModels, null, 2)
     : "(No execution models are available.)";
   const eventSourceList = input.eventSources.length
-    ? limitSection(
-        JSON.stringify(
-          input.eventSources.map((source) => ({
-            connectionId: source.connectionId,
-            workspaceId: source.workspaceId,
-            workspaceName: source.workspaceName,
-            teams: source.teams.slice(0, 50),
-            projects: source.projects.slice(0, 50),
-            states: source.states.slice(0, 100),
-            labels: source.labels.slice(0, 100),
-          })),
-          null,
-          2,
-        ),
-        40_000,
+    ? JSON.stringify(
+        input.eventSources.map((source) => ({
+          connectionId: source.connectionId,
+          workspaceId: source.workspaceId,
+          workspaceName: source.workspaceName,
+          teams: source.teams,
+          projects: source.projects,
+          states: source.states,
+          labels: source.labels,
+        })),
+        null,
+        2,
       )
     : "(No Linear event connections are available.)";
   const currentDraft = input.currentDraft

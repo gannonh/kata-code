@@ -240,6 +240,17 @@ const makeRoutineConnections = Effect.gen(function* () {
     if (unknownTeam !== undefined)
       return yield* failure("validation", "A selected team is not in this Linear workspace.");
     const secretName = routineConnectionSecretName(input.id);
+    // Atomically reserve the ID before the provider creates an external
+    // resource. Linear returns the real signing secret with the webhook.
+    yield* secrets
+      .create(secretName, yield* secretBytes())
+      .pipe(
+        Effect.mapError((error) =>
+          ServerSecretStore.isSecretAlreadyExistsError(error)
+            ? failure("conflict", "A routine connection with this ID already exists.")
+            : failure("persistence", "Could not reserve the routine connection ID."),
+        ),
+      );
     const createdWebhookId = yield* Ref.make<string | null>(null);
     return yield* Effect.gen(function* () {
       const callbackUrl = `${baseUrl}${routineLinearWebhookCallbackPath(input.id)}`;
@@ -251,14 +262,8 @@ const makeRoutineConnections = Effect.gen(function* () {
       });
       yield* Ref.set(createdWebhookId, webhook.webhookId);
       yield* secrets
-        .create(secretName, new TextEncoder().encode(webhook.secret))
-        .pipe(
-          Effect.mapError((error) =>
-            ServerSecretStore.isSecretAlreadyExistsError(error)
-              ? failure("conflict", "A routine connection with this ID already exists.")
-              : failure("persistence", "Could not store the signing secret."),
-          ),
-        );
+        .set(secretName, new TextEncoder().encode(webhook.secret))
+        .pipe(Effect.mapError(() => failure("persistence", "Could not store the signing secret.")));
       const now = yield* isoNow;
       const connection: RoutineConnection = {
         id: input.id,
@@ -282,14 +287,9 @@ const makeRoutineConnections = Effect.gen(function* () {
       yield* store.saveConnection(connection);
       return connection;
     }).pipe(
-      // A failed setup releases the reserved secret and removes the created
-      // webhook so the id can be retried instead of delivering to nothing.
+      // This request owns the reserved secret and any recorded webhook.
       Effect.onError(() =>
         Effect.gen(function* () {
-          const persisted = yield* store
-            .findConnection(input.id)
-            .pipe(Effect.orElseSucceed(() => null));
-          if (persisted !== null) return;
           yield* secrets.remove(secretName).pipe(
             Effect.catch((error) =>
               Effect.logWarning("routine Linear signing secret cleanup failed", {

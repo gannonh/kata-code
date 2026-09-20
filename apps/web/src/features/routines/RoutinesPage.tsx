@@ -768,16 +768,19 @@ function LinearTriggerFields({
       project.teamIds.some((id) => authorizedTeamIds.has(id)) &&
       (trigger.teamId === undefined || project.teamIds.includes(trigger.teamId)),
   );
+  const selectedProject = availableProjects.find((project) => project.id === trigger.projectId);
+  const selectedProjectTeamIds = new Set(selectedProject?.teamIds ?? []);
+  const matchesSelectedScope = (candidateTeamId: string): boolean =>
+    trigger.teamId !== undefined
+      ? candidateTeamId === trigger.teamId
+      : selectedProject === undefined || selectedProjectTeamIds.has(candidateTeamId);
   const availableStates = (metadata.data?.states ?? []).filter(
-    (state) =>
-      authorizedTeamIds.has(state.teamId) &&
-      (trigger.teamId === undefined || state.teamId === trigger.teamId),
+    (state) => authorizedTeamIds.has(state.teamId) && matchesSelectedScope(state.teamId),
   );
   const availableLabels = (metadata.data?.labels ?? []).filter(
     (label) =>
       label.teamId === null ||
-      (authorizedTeamIds.has(label.teamId) &&
-        (trigger.teamId === undefined || label.teamId === trigger.teamId)),
+      (authorizedTeamIds.has(label.teamId) && matchesSelectedScope(label.teamId)),
   );
 
   const startAuthorization = async () => {
@@ -1135,6 +1138,8 @@ function LinearTriggerFields({
               onChange={(event) =>
                 onTriggerChange({
                   projectId: event.target.value === "" ? undefined : event.target.value,
+                  stateId: undefined,
+                  labelId: undefined,
                 })
               }
             >
@@ -1154,7 +1159,11 @@ function LinearTriggerFields({
                 className={ROUTINE_CONTROL_CLASS}
                 value={stateId ?? ""}
                 disabled={disabled}
-                onChange={(event) => onTriggerChange({ stateId: event.target.value })}
+                onChange={(event) =>
+                  onTriggerChange({
+                    stateId: event.target.value === "" ? undefined : event.target.value,
+                  })
+                }
               >
                 <option value="">Choose a status</option>
                 {availableStates.map((state) => (
@@ -1178,7 +1187,11 @@ function LinearTriggerFields({
                 className={ROUTINE_CONTROL_CLASS}
                 value={labelId ?? ""}
                 disabled={disabled}
-                onChange={(event) => onTriggerChange({ labelId: event.target.value })}
+                onChange={(event) =>
+                  onTriggerChange({
+                    labelId: event.target.value === "" ? undefined : event.target.value,
+                  })
+                }
               >
                 <option value="">Choose a label</option>
                 {availableLabels.map((label) => (
