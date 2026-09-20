@@ -309,6 +309,7 @@ export function makeLinearRoutineMetadata(dependencies: {
         if (pageInfos.some(([, pageInfo]) => pageInfo.hasNextPage && pageInfo.endCursor === null))
           return yield* Effect.fail(invalid("Linear returned an invalid metadata page cursor."));
 
+        const previousCursors = cursors;
         active = {
           teams: active.teams && decoded.data.teams.pageInfo.hasNextPage,
           projects: active.projects && decoded.data.projects.pageInfo.hasNextPage,
@@ -323,6 +324,14 @@ export function makeLinearRoutineMetadata(dependencies: {
             : null,
           issueLabelsAfter: active.issueLabels ? decoded.data.issueLabels.pageInfo.endCursor : null,
         };
+        if (
+          (active.teams && cursors.teamsAfter === previousCursors.teamsAfter) ||
+          (active.projects && cursors.projectsAfter === previousCursors.projectsAfter) ||
+          (active.workflowStates &&
+            cursors.workflowStatesAfter === previousCursors.workflowStatesAfter) ||
+          (active.issueLabels && cursors.issueLabelsAfter === previousCursors.issueLabelsAfter)
+        )
+          return yield* Effect.fail(invalid("Linear repeated a metadata page cursor."));
       }
 
       if (workspace === undefined)
@@ -334,6 +343,7 @@ export function makeLinearRoutineMetadata(dependencies: {
         while (pageInfo.hasNextPage) {
           if (pageInfo.endCursor === null)
             return yield* Effect.fail(invalid("Linear returned an invalid project team cursor."));
+          const previousCursor = pageInfo.endCursor;
           const raw = yield* dependencies.graphql({
             accessToken,
             query: PROJECT_TEAMS_QUERY,
@@ -348,6 +358,8 @@ export function makeLinearRoutineMetadata(dependencies: {
             );
           teamIds.push(...decoded.data.project.teams.nodes.map((team) => team.id));
           pageInfo = decoded.data.project.teams.pageInfo;
+          if (pageInfo.hasNextPage && pageInfo.endCursor === previousCursor)
+            return yield* Effect.fail(invalid("Linear repeated a project team cursor."));
         }
         mappedProjects.push({ id: project.id, name: project.name, teamIds });
       }

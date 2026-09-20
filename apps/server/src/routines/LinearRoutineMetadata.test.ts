@@ -275,6 +275,78 @@ describe("Linear metadata reads", () => {
     }),
   );
 
+  it.effect("rejects a repeated metadata page cursor", () =>
+    Effect.gen(function* () {
+      let requestCount = 0;
+      const metadata = makeLinearRoutineMetadata({
+        graphql: () => {
+          requestCount += 1;
+          return Effect.succeed({
+            data: {
+              ...response.data,
+              teams: {
+                nodes: [response.data.teams.nodes[0]!],
+                pageInfo: { hasNextPage: true, endCursor: "repeated-cursor" },
+              },
+            },
+          });
+        },
+      });
+
+      const failure = yield* Effect.flip(metadata.read("lin_oauth_access_token"));
+
+      assert.equal(failure._tag, "invalid");
+      assert.equal(failure.message, "Linear repeated a metadata page cursor.");
+      assert.equal(requestCount, 2);
+    }),
+  );
+
+  it.effect("rejects a repeated project team cursor", () =>
+    Effect.gen(function* () {
+      let requestCount = 0;
+      const metadata = makeLinearRoutineMetadata({
+        graphql: () => {
+          requestCount += 1;
+          if (requestCount === 1)
+            return Effect.succeed({
+              data: {
+                ...response.data,
+                projects: {
+                  nodes: [
+                    {
+                      id: "project-1",
+                      name: "Roadmap",
+                      teams: {
+                        nodes: [{ id: "team-1" }],
+                        pageInfo: { hasNextPage: true, endCursor: "repeated-cursor" },
+                      },
+                    },
+                  ],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            });
+          return Effect.succeed({
+            data: {
+              project: {
+                teams: {
+                  nodes: [{ id: "team-2" }],
+                  pageInfo: { hasNextPage: true, endCursor: "repeated-cursor" },
+                },
+              },
+            },
+          });
+        },
+      });
+
+      const failure = yield* Effect.flip(metadata.read("lin_oauth_access_token"));
+
+      assert.equal(failure._tag, "invalid");
+      assert.equal(failure.message, "Linear repeated a project team cursor.");
+      assert.equal(requestCount, 2);
+    }),
+  );
+
   it.effect("classifies revoked credentials as access errors", () =>
     Effect.gen(function* () {
       const failure = yield* Effect.flip(
