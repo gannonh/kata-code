@@ -191,6 +191,50 @@ it.effect("checkpoint recovery discovers nested HEAD independently of inherited 
   }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
 );
 
+it.effect("git commands act on their own cwd instead of an inherited GIT_DIR", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const driver = yield* GitVcsDriver.makeVcsDriverShape();
+    const git = (cwd: string, args: ReadonlyArray<string>) =>
+      driver.execute({ operation: "inherited-git-dir-test", cwd, args });
+    const inherited = yield* fs.makeTempDirectoryScoped({ prefix: "t3-inherited-git-dir-" });
+    const target = yield* fs.makeTempDirectoryScoped({ prefix: "t3-inherited-git-dir-target-" });
+    yield* git(inherited, ["init"]);
+    yield* git(inherited, [
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@test.com",
+      "commit",
+      "--allow-empty",
+      "-m",
+      "initial",
+    ]);
+
+    yield* Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = process.env.GIT_DIR;
+        process.env.GIT_DIR = path.join(inherited, ".git");
+        return previous;
+      }),
+      () => git(target, ["init", "--bare"]),
+      (previous) =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env.GIT_DIR;
+          else process.env.GIT_DIR = previous;
+        }),
+    );
+
+    assert.strictEqual((yield* git(inherited, ["config", "--get", "core.bare"])).stdout, "false\n");
+    assert.strictEqual(
+      (yield* git(target, ["rev-parse", "--is-bare-repository"])).stdout,
+      "true\n",
+    );
+    assert.isTrue(yield* fs.exists(path.join(target, "HEAD")));
+  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+);
+
 it.effect("checkpoint capture still fails when a clean filter rejects a file", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
