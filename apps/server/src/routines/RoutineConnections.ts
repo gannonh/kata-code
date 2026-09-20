@@ -161,17 +161,19 @@ export function cleanupUncommittedLinearConnection(input: {
       return;
     }
     if (persisted.success !== null) return;
+    // Delete the provider webhook before releasing the reservation. Keep the
+    // reservation when deletion fails so a retry cannot create a second webhook.
+    const webhookDeleted = yield* input.deleteWebhook().pipe(Effect.result);
+    if (webhookDeleted._tag === "Failure") {
+      yield* Effect.logWarning("routine Linear webhook cleanup failed", {
+        connectionId: input.connectionId,
+        detail: String(webhookDeleted.failure),
+      });
+      return;
+    }
     yield* input.removeSecret().pipe(
       Effect.catch((error) =>
         Effect.logWarning("routine Linear signing secret cleanup failed", {
-          connectionId: input.connectionId,
-          detail: String(error),
-        }),
-      ),
-    );
-    yield* input.deleteWebhook().pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("routine Linear webhook cleanup failed", {
           connectionId: input.connectionId,
           detail: String(error),
         }),
@@ -324,8 +326,9 @@ const makeRoutineConnections = Effect.gen(function* () {
       yield* store.saveConnection(connection);
       return connection;
     }).pipe(
-      // A failed setup releases the reservation and provider resource only
-      // when the durable connection was never committed. A failure after the
+      // A failed setup deletes the provider webhook first, then releases the
+      // reservation, and only when the durable connection was never committed.
+      // A webhook deletion failure keeps the reservation. A failure after the
       // store commit must leave the connection usable for recovery.
       Effect.onError(() =>
         cleanupUncommittedLinearConnection({
@@ -472,6 +475,15 @@ const makeRoutineConnections = Effect.gen(function* () {
   )(function* (input) {
     const id = yield* validateConnectionId(input.id);
     if ((yield* store.findConnection(id)) !== null)
+      return yield* failure("conflict", "A routine connection with this ID already exists.");
+    const reserved = yield* secrets
+      .get(routineConnectionSecretName(id))
+      .pipe(
+        Effect.mapError(() =>
+          failure("persistence", "Could not read the routine connection ID reservation."),
+        ),
+      );
+    if (Option.isSome(reserved))
       return yield* failure("conflict", "A routine connection with this ID already exists.");
     return yield* linearOAuthRelay.start({
       environmentId: input.environmentId,

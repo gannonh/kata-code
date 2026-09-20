@@ -162,6 +162,16 @@ const make = Effect.gen(function* () {
         environmentId: binding.environmentId,
         connectionId: binding.connectionId,
       };
+      const inFlight = { ...connection, ...bundle };
+      // The consumed row is the in-flight handle. A newer begin() deletes it;
+      // claiming it here is the last gate before replacing stored tokens.
+      const claimed = yield* states
+        .claim({ state: input.state })
+        .pipe(Effect.tapError(() => revokeDiscarded(inFlight)));
+      if (!claimed) {
+        yield* revokeDiscarded(inFlight);
+        return yield* new LinearOAuthStates.LinearOAuthStateRejected({ reason: "superseded" });
+      }
       // Reauthorizing replaces the stored grant; end the one it replaces.
       const replaced = yield* tokens.get(connection);
       const discard = revokeDiscarded({ ...connection, ...bundle });

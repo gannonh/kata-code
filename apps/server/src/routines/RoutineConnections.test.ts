@@ -305,6 +305,35 @@ it.effect("keeps Linear resources when cleanup finds a committed connection", ()
   }),
 );
 
+it.effect("deletes the Linear webhook before releasing the signing secret", () =>
+  Effect.gen(function* () {
+    const order: string[] = [];
+    yield* cleanupUncommittedLinearConnection({
+      connectionId: RoutineConnectionId.make("connection-linear-cleanup-order"),
+      findConnection: () => Effect.succeed(null),
+      removeSecret: () => Effect.sync(() => order.push("secret")),
+      deleteWebhook: () => Effect.sync(() => order.push("webhook")),
+    });
+    assert.deepEqual(order, ["webhook", "secret"]);
+  }),
+);
+
+it.effect("keeps the Linear signing secret when webhook cleanup fails", () =>
+  Effect.gen(function* () {
+    let removedSecret = false;
+    yield* cleanupUncommittedLinearConnection({
+      connectionId: RoutineConnectionId.make("connection-linear-cleanup-webhook-failure"),
+      findConnection: () => Effect.succeed(null),
+      removeSecret: () => Effect.sync(() => (removedSecret = true)),
+      deleteWebhook: () =>
+        Effect.fail(
+          new RoutineError({ code: "blocked", message: "Linear refused the webhook deletion." }),
+        ),
+    });
+    assert.isFalse(removedSecret);
+  }),
+);
+
 it.layer(layer)("RoutineConnections", (it) => {
   it.effect("refuses setup without a public callback URL", () =>
     Effect.gen(function* () {
@@ -784,6 +813,35 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
       }),
   );
 
+  it.effect("keeps the signing secret when webhook cleanup fails after a failed save", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const sql = yield* SqlClient.SqlClient;
+      const id = RoutineConnectionId.make("connection-linear-cleanup-keep-secret");
+      yield* storeBundle(id);
+      webhookDeleteStatus = "failure";
+      yield* sql`CREATE TEMP TRIGGER fail_linear_connection_keep_secret BEFORE INSERT ON routine_connections
+        WHEN NEW.id='connection-linear-cleanup-keep-secret'
+        BEGIN SELECT RAISE(FAIL, 'simulated save failure'); END`;
+      const failed = yield* connections.create(linearCreate(id)).pipe(
+        Effect.flip,
+        Effect.ensuring(
+          Effect.sync(() => {
+            webhookDeleteStatus = "ok";
+          }).pipe(
+            Effect.andThen(sql`DROP TRIGGER fail_linear_connection_keep_secret`.pipe(Effect.orDie)),
+          ),
+        ),
+      );
+      assert.equal(failed.code, "persistence");
+      assert.isTrue(Option.isSome(yield* secrets.get(routineConnectionSecretName(id))));
+      const retry = yield* connections.create(linearCreate(id)).pipe(Effect.flip);
+      assert.equal(retry.code, "conflict");
+      assert.equal(retry.message, "A routine connection with this ID already exists.");
+    }),
+  );
+
   it.effect(
     "reads workspace metadata from the stored OAuth bundle without a connection record",
     () =>
@@ -1029,6 +1087,23 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
       const id = RoutineConnectionId.make("connection-linear-existing");
       yield* storeBundle(id);
       yield* connections.create(linearCreate(id));
+      lastStartInput = null;
+      const error = yield* connections.beginAuthorization({ environmentId, id }).pipe(Effect.flip);
+      assert.equal(error.code, "conflict");
+      assert.equal(error.message, "A routine connection with this ID already exists.");
+      assert.isNull(lastStartInput);
+    }),
+  );
+
+  it.effect("rejects Linear authorization while create holds the signing-secret reservation", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const id = RoutineConnectionId.make("connection-linear-reserved");
+      yield* secrets.create(
+        routineConnectionSecretName(id),
+        new TextEncoder().encode("reserved-signing-secret"),
+      );
       lastStartInput = null;
       const error = yield* connections.beginAuthorization({ environmentId, id }).pipe(Effect.flip);
       assert.equal(error.code, "conflict");

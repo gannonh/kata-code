@@ -22,7 +22,7 @@ export interface LinearOAuthStateBinding {
 export class LinearOAuthStateRejected extends Schema.TaggedError<LinearOAuthStateRejected>()(
   "LinearOAuthStateRejected",
   {
-    reason: Schema.Literals(["unknown", "expired", "already_consumed"]),
+    reason: Schema.Literals(["unknown", "expired", "already_consumed", "superseded"]),
   },
 ) {
   override get message(): string {
@@ -45,7 +45,7 @@ export class LinearOAuthStateCreatePersistenceError extends Schema.TaggedError<L
 export class LinearOAuthStateConsumePersistenceError extends Schema.TaggedError<LinearOAuthStateConsumePersistenceError>()(
   "LinearOAuthStateConsumePersistenceError",
   {
-    stage: Schema.Literals(["hash-state", "consume-state", "lookup-state"]),
+    stage: Schema.Literals(["hash-state", "consume-state", "lookup-state", "claim-state"]),
     cause: Schema.Defect(),
   },
 ) {
@@ -80,6 +80,13 @@ export class LinearOAuthStates extends Context.Service<
       LinearOAuthStateBinding,
       LinearOAuthStateRejected | LinearOAuthStateConsumePersistenceError
     >;
+    /**
+     * Deletes the consumed row so a later begin cannot race this callback.
+     * Returns false when a newer authorization already superseded it.
+     */
+    readonly claim: (input: {
+      readonly state: string;
+    }) => Effect.Effect<boolean, LinearOAuthStateConsumePersistenceError>;
     /** Removes expired rows, consumed or not, so no PKCE verifier outlives its state. */
     readonly pruneExpired: Effect.Effect<void, LinearOAuthStatePrunePersistenceError>;
   }
@@ -106,13 +113,15 @@ const make = Effect.gen(function* () {
         ),
       );
       const now = DateTime.formatIso(input.now);
+      // Drop every prior state for this connection, including consumed rows
+      // whose callbacks are still exchanging. complete() claims its row
+      // before saving, so a superseded callback aborts instead of overwriting.
       yield* db
         .delete(relayLinearOAuthStates)
         .where(
           and(
             eq(relayLinearOAuthStates.environmentId, input.environmentId),
             eq(relayLinearOAuthStates.connectionId, input.connectionId),
-            isNull(relayLinearOAuthStates.consumedAt),
           ),
         )
         .pipe(
@@ -197,6 +206,24 @@ const make = Effect.gen(function* () {
       return yield* new LinearOAuthStateRejected({
         reason: consumed.length > 0 ? "already_consumed" : "unknown",
       });
+    }),
+
+    claim: Effect.fn("relay.linear_oauth_states.claim")(function* (input) {
+      const stateHash = yield* hashState(input.state).pipe(
+        Effect.mapError(
+          (cause) => new LinearOAuthStateConsumePersistenceError({ stage: "hash-state", cause }),
+        ),
+      );
+      const rows = yield* db
+        .delete(relayLinearOAuthStates)
+        .where(eq(relayLinearOAuthStates.stateHash, stateHash))
+        .returning({ stateHash: relayLinearOAuthStates.stateHash })
+        .pipe(
+          Effect.mapError(
+            (cause) => new LinearOAuthStateConsumePersistenceError({ stage: "claim-state", cause }),
+          ),
+        );
+      return rows.length > 0;
     }),
 
     pruneExpired: Effect.gen(function* () {

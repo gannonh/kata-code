@@ -145,6 +145,12 @@ function makeLinearTestServices(options?: {
         consumedStates.add(state);
         return Effect.succeed(binding);
       }),
+    claim: ({ state }) =>
+      Effect.sync(() => {
+        const existed = states.has(state);
+        states.delete(state);
+        return existed;
+      }),
     pruneExpired: Effect.die("unused pruneExpired"),
   });
 
@@ -894,6 +900,45 @@ describe("relay Linear OAuth callback", () => {
       expect(body).not.toContain(LINEAR_BUNDLE.accessToken);
       expect(body).not.toContain(LINEAR_BUNDLE.refreshToken);
       expect(services.storedTokens.size).toBe(0);
+      expect(services.revoked).toEqual([LINEAR_BUNDLE.refreshToken]);
+    }).pipe(Effect.scoped);
+  });
+
+  it.effect("revokes a callback whose state was superseded after consume", () => {
+    let states: Map<string, LinearOAuthStates.LinearOAuthStateBinding> | undefined;
+    const services = makeLinearTestServices({
+      oauthExchange: () =>
+        Effect.sync(() => {
+          states?.delete("state-1");
+          return LINEAR_BUNDLE;
+        }),
+    });
+    states = services.states;
+    services.states.set("state-1", {
+      userId: "user-1",
+      environmentId: "environment-1",
+      connectionId: "connection-1",
+      codeVerifier: "code-verifier",
+    });
+    return Effect.gen(function* () {
+      const app = yield* Effect.acquireRelease(makeCallbackHandler(services), (app) =>
+        Effect.promise(() => app.dispose()),
+      );
+      const response = yield* Effect.promise(() =>
+        app.handler(
+          new Request(
+            "https://relay.example.test/v1/oauth/linear/callback?code=linear-code&state=state-1",
+          ),
+        ),
+      );
+
+      expect(response.status).toBe(400);
+      const body = yield* Effect.promise(() => response.text());
+      expect(body).toContain("invalid, expired, or already used");
+      expect(body).not.toContain(LINEAR_BUNDLE.accessToken);
+      expect(body).not.toContain(LINEAR_BUNDLE.refreshToken);
+      expect(services.storedTokens.size).toBe(0);
+      expect(services.delivered).toEqual([]);
       expect(services.revoked).toEqual([LINEAR_BUNDLE.refreshToken]);
     }).pipe(Effect.scoped);
   });

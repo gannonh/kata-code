@@ -110,7 +110,7 @@ describe("LinearOAuthStates", () => {
         const query = new PgDialect().sqlToQuery(invalidated[0] as never);
         expect(query.sql).toContain('"relay_linear_oauth_states"."environment_id" = $1');
         expect(query.sql).toContain('"relay_linear_oauth_states"."connection_id" = $2');
-        expect(query.sql).toContain('"relay_linear_oauth_states"."consumed_at" is null');
+        expect(query.sql).not.toContain("consumed_at");
         expect(query.params).toEqual(["env-1", "connection-1"]);
       }).pipe(Effect.provide(provider(fakeDb)));
     },
@@ -230,6 +230,40 @@ describe("LinearOAuthStates", () => {
       expect(error.message).not.toContain("unknown-state");
     }).pipe(Effect.provide(provider(fakeDb)));
   });
+
+  it.effect(
+    "claims a live state and reports when a newer authorization already superseded it",
+    () => {
+      const claimedWhere: Array<unknown> = [];
+      const claimDb = (rows: ReadonlyArray<{ stateHash: string }>) => ({
+        delete: (table: unknown) => {
+          expect(table).toBe(relayLinearOAuthStates);
+          return {
+            where: (condition: unknown) => {
+              claimedWhere.push(condition);
+              return {
+                returning: () => Effect.succeed([...rows]),
+              };
+            },
+          };
+        },
+      });
+      const claim = (rows: ReadonlyArray<{ stateHash: string }>) =>
+        LinearOAuthStates.LinearOAuthStates.pipe(
+          Effect.flatMap((states) => states.claim({ state: "state-token" })),
+          Effect.provide(provider(claimDb(rows))),
+        );
+
+      return Effect.gen(function* () {
+        expect(yield* claim([{ stateHash: sha256Hex("state-token") }])).toBe(true);
+        expect(yield* claim([])).toBe(false);
+
+        const query = new PgDialect().sqlToQuery(claimedWhere[0] as never);
+        expect(query.sql).toContain('"relay_linear_oauth_states"."state_hash" = $1');
+        expect(query.params).toEqual([sha256Hex("state-token")]);
+      });
+    },
+  );
 
   it.effect("retains persistence failures without retaining state or verifier material", () => {
     const cause = new Error("database unavailable");
