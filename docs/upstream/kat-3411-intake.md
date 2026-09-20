@@ -142,8 +142,20 @@ In every case the retained behaviour itself survives and is asserted, in the fro
 `.upstream.test.ts` companion, or both. What fails is byte-identity, the gate's proxy for
 "upstream did not quietly delete Kata's assertions".
 
-`ci.yml` already carries a precedent: one named waiver for
-`sandbox-route-driver-registration` on `server.test.ts`, guarded by a check that exactly one
-`FAIL` is present. Extending that to seven named checks is a materially larger relaxation of an
-acceptance gate, so this run does not make that edit. Gannon decides between extending the
-waiver to this enumerated list, or re-baselining these seven frozen paths on `main` first.
+`ci.yml` already carried one named waiver for `sandbox-route-driver-registration` on
+`server.test.ts`, guarded by a check that exactly one `FAIL` was present. Gannon chose to extend
+it on 2026-09-20. The count guard is replaced by an explicit allowlist of the eight exact report
+lines, the original plus these seven. Any failure line absent from that list still fails the job,
+so the waiver cannot absorb a new regression. Proved both ways against the real report: today's
+seven leave no unwaived lines, and an eighth synthetic failure leaves one and exits non-zero.
+
+Re-baselining on `main` first was not available. These assertions track whichever side of the
+upstream change the tree is on, and `main` is still on the pre-upstream side. `ElectronApp` there
+still declares `isDefaultProtocolClient`, so deleting that stub on `main` would not compile.
+
+One verification fixture moved with the dependency floor. `withHistoricalBaselineWorktree` runs
+the real gate commands inside its checkout against the repository's installed `node_modules`, and
+its 2026-era pin predates the effect `rc.115` upgrade, so those commands no longer run there. It
+now checks out a candidate from this branch. `currentSha` stays historical because the sandbox
+regression fixture copies today's checker over that checkout and needs the difference to have
+something to commit.

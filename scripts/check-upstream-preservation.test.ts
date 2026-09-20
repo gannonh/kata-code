@@ -30,6 +30,11 @@ const repositoryRoot = NodePath.resolve(new URL("..", import.meta.url).pathname)
 const scriptPath = NodePath.join(repositoryRoot, "scripts/check-upstream-preservation.ts");
 const currentSha = "251a6bcb5cfad04999a6bdd4c7dbb5bb4c983ff9";
 const upstreamSha = "12391bd0d38eef6655b7a9f8945d0cb5febadc2b";
+// withHistoricalBaselineWorktree runs the gate commands inside its checkout against
+// the repository's installed node_modules, so its candidate has to track the
+// dependency floor. currentSha predates the effect rc.115 upgrade and no longer runs
+// there. Its FORK.md pin is currentUpstreamSha.
+const baselineCandidateSha = "00406934429021e47d3cb60e16491febb46742b4";
 const currentUpstreamSha = "c14f6015bfe479d313355cb234af1a5c16dbb15f";
 const upstreamBaseSha = "6a687ee43bf222672ab8d3f4c0bab3d8d174f79f";
 
@@ -100,7 +105,7 @@ const withHistoricalBaselineWorktree = <A>(run: (temporaryRoot: string) => A): A
   const temporaryRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kat-3307-baseline-"));
   const add = NodeChildProcess.spawnSync(
     "git",
-    ["worktree", "add", "--detach", temporaryRoot, currentSha],
+    ["worktree", "add", "--detach", temporaryRoot, baselineCandidateSha],
     { cwd: repositoryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
   );
   if (add.status !== 0) {
@@ -387,11 +392,11 @@ describe("upstream preservation CLI", () => {
             "--inventory",
             NodePath.join(repositoryRoot, "docs/upstream/retained-behavior.v1.json"),
             "--candidate",
-            currentSha,
+            baselineCandidateSha,
             "--base",
-            currentSha,
+            baselineCandidateSha,
             "--upstream",
-            upstreamSha,
+            currentUpstreamSha,
             "--upstream-base",
             upstreamBaseSha,
           ],
@@ -400,7 +405,7 @@ describe("upstream preservation CLI", () => {
 
         expect(result.status).toBe(0);
         expect(result.stdout).toContain(
-          `UPSTREAM_PRESERVATION mode=baseline candidate=${currentSha} base=${currentSha}`,
+          `UPSTREAM_PRESERVATION mode=baseline candidate=${baselineCandidateSha} base=${baselineCandidateSha}`,
         );
         expect(result.stdout).toContain("INVENTORY status=PASS");
         expect(result.stdout).toContain("CHECK id=icon-composer-live-evidence status=NOT RUN");
