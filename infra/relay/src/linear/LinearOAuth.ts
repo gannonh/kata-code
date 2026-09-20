@@ -15,7 +15,7 @@ export const LINEAR_TOKEN_ENDPOINT = "https://api.linear.app/oauth/token";
 export const LINEAR_REVOKE_ENDPOINT = "https://api.linear.app/oauth/revoke";
 // Below the relay request deadline, so a stalled Linear call fails as unavailable.
 export const LINEAR_OAUTH_REQUEST_TIMEOUT_MS = 5_000;
-export const LINEAR_OAUTH_SCOPES = "read,admin";
+export const LINEAR_OAUTH_SCOPES = "read,write,admin";
 export const LINEAR_OAUTH_CALLBACK_PATH = "/v1/oauth/linear/callback";
 
 const linearOAuthRedirectUri = (relayIssuer: string): string =>
@@ -92,6 +92,8 @@ export function makeLinearOAuth(dependencies: {
   readonly redirectUri: string;
   readonly fetch: typeof fetch;
 }): LinearOAuthShape {
+  // workerd requires the ambient fetch receiver to stay undefined or globalThis.
+  const executeFetch = dependencies.fetch;
   const post = (
     operation: LinearOAuthRequestFailed["operation"],
     endpoint: string,
@@ -100,7 +102,7 @@ export function makeLinearOAuth(dependencies: {
     Effect.tryPromise({
       // The signal aborts the request when the relay deadline interrupts the handler.
       try: (signal) =>
-        dependencies.fetch(endpoint, {
+        executeFetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/x-www-form-urlencoded" },
           body: form.toString(),
@@ -202,7 +204,7 @@ export function makeLinearOAuth(dependencies: {
         url.searchParams.set("client_id", dependencies.clientId);
         url.searchParams.set("redirect_uri", dependencies.redirectUri);
         url.searchParams.set("scope", LINEAR_OAUTH_SCOPES);
-        url.searchParams.set("actor", "application");
+        url.searchParams.set("actor", "user");
         url.searchParams.set("prompt", "consent");
         url.searchParams.set("state", input.state);
         url.searchParams.set("code_challenge", input.codeChallenge);

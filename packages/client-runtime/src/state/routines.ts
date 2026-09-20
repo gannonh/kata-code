@@ -99,6 +99,12 @@ export function createRoutineEnvironmentAtoms<R, E>(
     staleTimeMs: 60_000,
   });
 
+  const linearMetadata = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:routines:linear-metadata",
+    tag: WS_METHODS.routinesLinearMetadata,
+    staleTimeMs: 60_000,
+  });
+
   const connectionConcurrency = {
     mode: "serial",
     key: ({ environmentId, input }: { environmentId: EnvironmentId; input: { id: string } }) =>
@@ -108,6 +114,12 @@ export function createRoutineEnvironmentAtoms<R, E>(
   const createConnection = createEnvironmentRpcCommand(runtime, {
     label: "environment-data:routines:connections:create",
     tag: WS_METHODS.routinesConnectionsCreate,
+    concurrency: connectionConcurrency,
+  });
+
+  const beginConnectionAuthorization = createEnvironmentRpcCommand(runtime, {
+    label: "environment-data:routines:connections:begin-authorization",
+    tag: WS_METHODS.routinesConnectionsBeginAuthorization,
     concurrency: connectionConcurrency,
   });
 
@@ -141,7 +153,9 @@ export function createRoutineEnvironmentAtoms<R, E>(
     test,
     connections,
     gitHubMetadata,
+    linearMetadata,
     createConnection,
+    beginConnectionAuthorization,
     verifyConnection,
     disableConnection,
     rotateConnectionSecret,

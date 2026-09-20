@@ -269,6 +269,42 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
     ),
   );
 
+  it.effect("normalizes strict nullable Linear scope fields", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          draft: {
+            ...ROUTINE_DRAFT_OUTPUT.draft,
+            trigger: {
+              kind: "linear",
+              connectionId: "connection-1",
+              workspaceId: "workspace-1",
+              teamId: null,
+              projectId: null,
+              event: "issue_created",
+            },
+          },
+          assistantMessage: "I drafted a Linear triage routine.",
+        }),
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const result = yield* textGeneration.generateRoutineDraft({
+            cwd: process.cwd(),
+            prompt: "Return one JSON object. Triage new Linear issues.",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          });
+
+          expect(result.draft?.trigger).toEqual({
+            kind: "linear",
+            connectionId: "connection-1",
+            workspaceId: "workspace-1",
+            event: "issue_created",
+          });
+        }),
+    ),
+  );
+
   for (const selectedModel of ["gpt-5.6-luna", "openai.gpt-5.6-luna"]) {
     it.effect(`dispatches the qualified live model for ${selectedModel}`, () =>
       withFakeCodexEnv(

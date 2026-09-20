@@ -81,6 +81,7 @@ describe("buildRoutineDraftPrompt", () => {
       projects: [{ id: "project-1", title: "Kata Code" }],
       availableModels: [{ instanceId: "codex", model: "gpt-6-astra", name: "GPT-6 Astra" }],
       generationModelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+      eventSources: [],
     });
 
     expect(result.prompt).toContain("exactly these keys: draft, assistantMessage");
@@ -92,6 +93,89 @@ describe("buildRoutineDraftPrompt", () => {
       "Copy modelSelection.instanceId and modelSelection.model verbatim",
     );
     expect(result.outputSchema).toBeDefined();
+  });
+
+  it("lists Linear event sources and states that other providers are unsupported", () => {
+    const result = buildRoutineDraftPrompt({
+      message: "When a Linear issue is created, triage it",
+      currentDraft: null,
+      history: [],
+      projectId: "project-1",
+      projects: [{ id: "project-1", title: "Kata Code" }],
+      availableModels: [{ instanceId: "codex", model: "gpt-6-astra", name: "GPT-6 Astra" }],
+      generationModelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+      eventSources: [
+        {
+          connectionId: "linear-connection-1",
+          provider: "linear",
+          workspaceId: "workspace-uuid",
+          workspaceName: "Acme",
+          teams: [{ id: "team-uuid", name: "Engineering", key: "ENG" }],
+          projects: [{ id: "project-uuid", name: "Roadmap", teamIds: ["team-uuid"] }],
+          states: [{ id: "state-uuid", name: "In Progress", teamId: "team-uuid", type: "started" }],
+          labels: [{ id: "label-uuid", name: "Bug", teamId: "team-uuid" }],
+        },
+      ],
+    });
+
+    expect(result.prompt).toContain("linear-connection-1");
+    expect(result.prompt).toContain("workspace-uuid");
+    expect(result.prompt).toContain("team-uuid");
+    expect(result.prompt).toContain("state-uuid");
+    expect(result.prompt).toMatch(/GitHub, Slack, Microsoft Teams, Sentry, PagerDuty.*unsupported/);
+    expect(result.prompt).toMatch(/status_changed requires stateId/);
+    expect(result.prompt).toMatch(/label_added requires labelId/);
+    expect(result.prompt).toContain("Always include teamId and projectId.");
+    expect(result.prompt).toContain("use null for an unscoped teamId or projectId");
+    expect(result.prompt).toContain(
+      "A null teamId or projectId means every team or project inside the connection scope.",
+    );
+  });
+
+  it("keeps every paginated Linear resource available to chat generation", () => {
+    const result = buildRoutineDraftPrompt({
+      message: "Use the last project, status, and label",
+      currentDraft: null,
+      history: [],
+      projectId: "project-1",
+      projects: [{ id: "project-1", title: "Kata Code" }],
+      availableModels: [{ instanceId: "codex", model: "gpt-6-astra", name: "GPT-6 Astra" }],
+      generationModelSelection: { instanceId: "codex", model: "gpt-6-astra" },
+      eventSources: [
+        {
+          connectionId: "linear-connection-1",
+          provider: "linear",
+          workspaceId: "workspace-uuid",
+          workspaceName: "Acme",
+          teams: Array.from({ length: 51 }, (_, index) => ({
+            id: `team-${index + 1}`,
+            name: `Team ${index + 1}`,
+            key: `T${index + 1}`,
+          })),
+          projects: Array.from({ length: 51 }, (_, index) => ({
+            id: `project-${index + 1}`,
+            name: `Project ${index + 1}`,
+            teamIds: [`team-${index + 1}`],
+          })),
+          states: Array.from({ length: 101 }, (_, index) => ({
+            id: `state-${index + 1}`,
+            name: `State ${index + 1}`,
+            teamId: "team-1",
+            type: "started",
+          })),
+          labels: Array.from({ length: 101 }, (_, index) => ({
+            id: `label-${index + 1}`,
+            name: `Label ${index + 1}`,
+            teamId: "team-1",
+          })),
+        },
+      ],
+    });
+
+    expect(result.prompt).toContain('"id": "team-51"');
+    expect(result.prompt).toContain('"id": "project-51"');
+    expect(result.prompt).toContain('"id": "state-101"');
+    expect(result.prompt).toContain('"id": "label-101"');
   });
 });
 

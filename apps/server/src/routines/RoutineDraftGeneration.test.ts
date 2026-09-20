@@ -7,7 +7,10 @@ import {
   type ModelSelection,
   type RoutineDraftGenerationInput,
 } from "@kata-sh/code-contracts";
-import { makeRoutineDraftGeneration } from "./RoutineDraftGeneration.ts";
+import {
+  makeRoutineDraftGeneration,
+  type RoutineDraftEventSource,
+} from "./RoutineDraftGeneration.ts";
 
 const projectId = ProjectId.make("project");
 const modelSelection = { instanceId: "codex", model: "model" } as ModelSelection;
@@ -30,10 +33,25 @@ const projects = [
   { id: projectId, title: "Project", workspaceRoot: "/project", repositoryIdentity: null },
 ];
 const models = [{ ...modelSelection, name: "Model" }];
-function service(output: unknown, allowedModels = models) {
+const linearEventSource: RoutineDraftEventSource = {
+  connectionId: "linear-connection-1",
+  provider: "linear",
+  workspaceId: "workspace-uuid",
+  workspaceName: "Acme",
+  teams: [{ id: "team-uuid", name: "Engineering", key: "ENG" }],
+  projects: [{ id: "project-uuid", name: "Roadmap", teamIds: ["team-uuid"] }],
+  states: [{ id: "state-uuid", name: "In Progress", teamId: "team-uuid", type: "started" }],
+  labels: [{ id: "label-uuid", name: "Bug", teamId: "team-uuid" }],
+};
+function service(
+  output: unknown,
+  allowedModels = models,
+  eventSources: ReadonlyArray<RoutineDraftEventSource> = [],
+) {
   return makeRoutineDraftGeneration({
     projects: Effect.succeed(projects),
     models: Effect.succeed(allowedModels),
+    eventSources: Effect.succeed(eventSources),
     generate: () => Effect.succeed(output),
   });
 }
@@ -102,6 +120,7 @@ describe("routine draft generation", () => {
       const generator = makeRoutineDraftGeneration({
         projects: Effect.succeed(projects),
         models: Effect.succeed(models),
+        eventSources: Effect.succeed([]),
         generate: () =>
           Effect.fail(new RoutineError({ code: "blocked", message: "unsupported by Grok" })),
       });
@@ -115,6 +134,7 @@ describe("routine draft generation", () => {
       const generator = makeRoutineDraftGeneration({
         projects: Effect.succeed(projects),
         models: Effect.succeed(models),
+        eventSources: Effect.succeed([]),
         generate: () => Effect.interrupt,
       });
       const exit = yield* Effect.exit(generator.generate(input));
@@ -143,6 +163,131 @@ describe("routine draft generation", () => {
       ).toEqual({ draft: null, assistantMessage: "Which schedule?", draftRevision: 3 });
     }),
   );
+  it.effect("resolves a generated Linear issue_created trigger against the event sources", () =>
+    Effect.gen(function* () {
+      const trigger = {
+        kind: "linear",
+        connectionId: "linear-connection-1",
+        workspaceId: "workspace-uuid",
+        event: "issue_created",
+      } as const;
+      const result = yield* service(
+        {
+          draft: { ...fields, trigger },
+          assistantMessage: "Ready to triage",
+        },
+        models,
+        [linearEventSource],
+      ).generate({ ...input, message: "When a Linear issue is created, triage it" });
+      expect(result.draft).toEqual({
+        ...fields,
+        trigger,
+        runtimeMode: "approval-required",
+        workspace: { kind: "shared", directory: "/project" },
+      });
+    }),
+  );
+  it.effect("clarifies a status_changed trigger naming an unknown state", () =>
+    Effect.gen(function* () {
+      const result = yield* service(
+        {
+          draft: {
+            ...fields,
+            trigger: {
+              kind: "linear",
+              connectionId: "linear-connection-1",
+              workspaceId: "workspace-uuid",
+              event: "status_changed",
+              stateId: "missing-state",
+            },
+          },
+          assistantMessage: "Ready",
+        },
+        models,
+        [linearEventSource],
+      ).generate({ ...input, message: "When a Linear issue moves to Review" });
+      expect(result.draft).toBeNull();
+      expect(result.assistantMessage).toMatch(/state.*unavailable/i);
+    }),
+  );
+  it.effect.each([
+    {
+      event: "status_changed" as const,
+      stateId: "state-other-team",
+    },
+    {
+      event: "label_added" as const,
+      labelId: "label-other-team",
+    },
+  ])("clarifies a generated Linear filter outside the selected project: %j", (eventFilter) =>
+    Effect.gen(function* () {
+      const source: RoutineDraftEventSource = {
+        ...linearEventSource,
+        teams: [...linearEventSource.teams, { id: "team-other", name: "Other", key: "OTHER" }],
+        states: [
+          ...linearEventSource.states,
+          {
+            id: "state-other-team",
+            name: "Other state",
+            teamId: "team-other",
+            type: "started",
+          },
+        ],
+        labels: [
+          ...linearEventSource.labels,
+          { id: "label-other-team", name: "Other label", teamId: "team-other" },
+        ],
+      };
+      const result = yield* service(
+        {
+          draft: {
+            ...fields,
+            trigger: {
+              kind: "linear",
+              connectionId: "linear-connection-1",
+              workspaceId: "workspace-uuid",
+              projectId: "project-uuid",
+              ...eventFilter,
+            },
+          },
+          assistantMessage: "Ready",
+        },
+        models,
+        [source],
+      ).generate({ ...input, message: "Use the selected Linear project" });
+      expect(result.draft).toBeNull();
+      expect(result.assistantMessage).toMatch(/not in project/i);
+    }),
+  );
+  it.effect("clarifies a Linear trigger whose connection disappears after generation", () =>
+    Effect.gen(function* () {
+      let active = true;
+      const generator = makeRoutineDraftGeneration({
+        projects: Effect.succeed(projects),
+        models: Effect.succeed(models),
+        eventSources: Effect.sync(() => (active ? [linearEventSource] : [])),
+        generate: () =>
+          Effect.sync(() => {
+            active = false;
+            return {
+              draft: {
+                ...fields,
+                trigger: {
+                  kind: "linear",
+                  connectionId: "linear-connection-1",
+                  workspaceId: "workspace-uuid",
+                  event: "issue_created",
+                },
+              },
+              assistantMessage: "Ready",
+            };
+          }),
+      });
+      const result = yield* generator.generate(input);
+      expect(result.draft).toBeNull();
+      expect(result.assistantMessage).toMatch(/connection.*unavailable/i);
+    }),
+  );
   it.effect("rejects missing generation model before invoking the provider", () =>
     Effect.gen(function* () {
       const error = yield* Effect.flip(service(null, []).generate(input));
@@ -155,6 +300,7 @@ describe("routine draft generation", () => {
       const generator = makeRoutineDraftGeneration({
         projects: Effect.sync(() => (active ? projects : [])),
         models: Effect.succeed(models),
+        eventSources: Effect.succeed([]),
         generate: () =>
           Effect.sync(() => {
             active = false;
@@ -172,6 +318,7 @@ describe("routine draft generation", () => {
       const generator = makeRoutineDraftGeneration({
         projects: Effect.succeed(projects),
         models: Effect.sync(() => (active ? models : [])),
+        eventSources: Effect.succeed([]),
         generate: () =>
           Effect.sync(() => {
             active = false;

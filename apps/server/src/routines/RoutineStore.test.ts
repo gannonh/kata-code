@@ -72,6 +72,68 @@ const githubConnection = (
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 });
+const linearConfiguration = (connectionId: RoutineConnectionId, teamId: string) => ({
+  ...configuration,
+  trigger: {
+    kind: "linear" as const,
+    connectionId,
+    workspaceId: "workspace-1",
+    teamId,
+    event: "issue_created" as const,
+  },
+});
+const linearConnection = (
+  id: RoutineConnectionId,
+  connectionEnvironmentId: EnvironmentId,
+  options: { readonly allTeams?: boolean; readonly teamIds?: ReadonlyArray<string> } = {},
+): RoutineConnection => ({
+  id,
+  environmentId: connectionEnvironmentId,
+  provider: "linear",
+  workspaceId: "workspace-1",
+  workspaceName: "Acme",
+  teamIds: [...(options.teamIds ?? [])],
+  allTeams: options.allTeams ?? true,
+  webhookId: "linear-webhook-1",
+  metadataAccess: "ok",
+  callbackUrl: `https://env.example/api/routines/webhooks/linear/${id}`,
+  status: "verified",
+  lastDelivery: null,
+  acceptedCount: 0,
+  ignoredCount: 0,
+  rejectedCount: 0,
+  createdAt: "2026-01-01T00:00:00.000Z",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+});
+const linearMetadata = {
+  workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
+  teams: [
+    { id: "team-public", name: "Public", key: "PUB", visibility: "public" as const },
+    { id: "team-public-b", name: "Public B", key: "PUBB", visibility: "public" as const },
+    { id: "team-private", name: "Private", key: "PRI", visibility: "private" as const },
+  ],
+  projects: [
+    { id: "project-public", name: "Public project", teamIds: ["team-public"] },
+    { id: "project-public-b", name: "Public B project", teamIds: ["team-public-b"] },
+    { id: "project-private", name: "Private project", teamIds: ["team-private"] },
+    {
+      id: "project-mixed",
+      name: "Mixed project",
+      teamIds: ["team-public", "team-private"],
+    },
+  ],
+  states: [
+    { id: "state-public", name: "Public state", teamId: "team-public", type: "started" },
+    { id: "state-public-b", name: "Public B state", teamId: "team-public-b", type: "started" },
+    { id: "state-private", name: "Private state", teamId: "team-private", type: "started" },
+  ],
+  labels: [
+    { id: "label-global", name: "Global label", teamId: null },
+    { id: "label-public", name: "Public label", teamId: "team-public" },
+    { id: "label-public-b", name: "Public B label", teamId: "team-public-b" },
+    { id: "label-private", name: "Private label", teamId: "team-private" },
+  ],
+};
 const prOpened = (number: number) =>
   summarizeGitHubEvent("pull_request", {
     action: "opened",
@@ -89,6 +151,282 @@ const prOpened = (number: number) =>
   });
 
 it.layer(storeLayer)("RoutineStore", (it) => {
+  it.effect("validates Linear resource filters against the connection team scope", () =>
+    Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const allPublicConnectionId = RoutineConnectionId.make("linear-all-public-save");
+      yield* store.saveConnection(linearConnection(allPublicConnectionId, environmentId));
+
+      const missingMetadata = yield* store
+        .save(
+          environmentId,
+          {
+            id: RoutineId.make("routine-linear-missing-public-metadata"),
+            expectedRevision: 0,
+            configuration: linearConfiguration(allPublicConnectionId, "team-public"),
+          },
+          1_000,
+        )
+        .pipe(Effect.flip);
+      assert.equal(missingMetadata.code, "validation");
+      assert.include(missingMetadata.message, "Refresh Linear workspace metadata");
+
+      const publicRoutine = yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-linear-public-team"),
+          expectedRevision: 0,
+          configuration: linearConfiguration(allPublicConnectionId, "team-public"),
+        },
+        1_001,
+        { linearMetadata },
+      );
+      assert.equal(publicRoutine.configuration.trigger.kind, "linear");
+
+      const privateTeam = yield* store
+        .save(
+          environmentId,
+          {
+            id: RoutineId.make("routine-linear-private-team"),
+            expectedRevision: 0,
+            configuration: linearConfiguration(allPublicConnectionId, "team-private"),
+          },
+          1_002,
+          { linearMetadata },
+        )
+        .pipe(Effect.flip);
+      assert.equal(privateTeam.code, "validation");
+      assert.include(privateTeam.message, "connection's scope");
+
+      const scopedConnectionId = RoutineConnectionId.make("linear-scoped-save");
+      yield* store.saveConnection(
+        linearConnection(scopedConnectionId, environmentId, {
+          allTeams: false,
+          teamIds: ["team-private"],
+        }),
+      );
+      const scopedRoutine = yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-linear-private-scoped"),
+          expectedRevision: 0,
+          configuration: linearConfiguration(scopedConnectionId, "team-private"),
+        },
+        1_003,
+        { linearMetadata },
+      );
+      assert.equal(scopedRoutine.configuration.trigger.kind, "linear");
+      if (scopedRoutine.configuration.trigger.kind === "linear")
+        assert.equal(scopedRoutine.configuration.trigger.teamId, "team-private");
+
+      const privateResourceTriggers = [
+        {
+          id: "project",
+          trigger: {
+            kind: "linear" as const,
+            connectionId: allPublicConnectionId,
+            workspaceId: "workspace-1",
+            projectId: "project-private",
+            event: "issue_created" as const,
+          },
+        },
+        {
+          id: "state",
+          trigger: {
+            kind: "linear" as const,
+            connectionId: allPublicConnectionId,
+            workspaceId: "workspace-1",
+            event: "status_changed" as const,
+            stateId: "state-private",
+          },
+        },
+        {
+          id: "label",
+          trigger: {
+            kind: "linear" as const,
+            connectionId: allPublicConnectionId,
+            workspaceId: "workspace-1",
+            event: "label_added" as const,
+            labelId: "label-private",
+          },
+        },
+      ];
+      for (const candidate of privateResourceTriggers) {
+        const rejected = yield* store
+          .save(
+            environmentId,
+            {
+              id: RoutineId.make(`routine-linear-private-${candidate.id}`),
+              expectedRevision: 0,
+              configuration: { ...configuration, trigger: candidate.trigger },
+            },
+            1_100,
+            { linearMetadata },
+          )
+          .pipe(Effect.flip);
+        assert.equal(rejected.code, "validation");
+        assert.include(rejected.message, "connection's scope");
+      }
+
+      for (const projectId of ["project-public", "project-mixed"]) {
+        const accepted = yield* store.save(
+          environmentId,
+          {
+            id: RoutineId.make(`routine-linear-${projectId}`),
+            expectedRevision: 0,
+            configuration: {
+              ...configuration,
+              trigger: {
+                kind: "linear",
+                connectionId: allPublicConnectionId,
+                workspaceId: "workspace-1",
+                projectId,
+                event: "issue_created",
+              },
+            },
+          },
+          1_101,
+          { linearMetadata },
+        );
+        assert.equal(accepted.configuration.trigger.kind, "linear");
+      }
+
+      const validResourceTriggers = [
+        {
+          id: "status",
+          trigger: {
+            kind: "linear" as const,
+            connectionId: allPublicConnectionId,
+            workspaceId: "workspace-1",
+            event: "status_changed" as const,
+            stateId: "state-public",
+          },
+        },
+        {
+          id: "global-label",
+          trigger: {
+            kind: "linear" as const,
+            connectionId: allPublicConnectionId,
+            workspaceId: "workspace-1",
+            event: "label_added" as const,
+            labelId: "label-global",
+          },
+        },
+      ];
+      for (const candidate of validResourceTriggers) {
+        const accepted = yield* store.save(
+          environmentId,
+          {
+            id: RoutineId.make(`routine-linear-public-${candidate.id}`),
+            expectedRevision: 0,
+            configuration: {
+              ...configuration,
+              trigger: candidate.trigger,
+            },
+          },
+          1_102,
+          { linearMetadata },
+        );
+        assert.equal(accepted.configuration.trigger.kind, "linear");
+      }
+
+      const outsideScopedTeam = yield* store
+        .save(
+          environmentId,
+          {
+            id: RoutineId.make("routine-linear-state-outside-scoped-team"),
+            expectedRevision: 0,
+            configuration: {
+              ...configuration,
+              trigger: {
+                kind: "linear",
+                connectionId: scopedConnectionId,
+                workspaceId: "workspace-1",
+                event: "status_changed",
+                stateId: "state-public",
+              },
+            },
+          },
+          1_103,
+          { linearMetadata },
+        )
+        .pipe(Effect.flip);
+      assert.equal(outsideScopedTeam.code, "validation");
+
+      const insideScopedTeam = yield* store.save(
+        environmentId,
+        {
+          id: RoutineId.make("routine-linear-state-inside-scoped-team"),
+          expectedRevision: 0,
+          configuration: {
+            ...configuration,
+            trigger: {
+              kind: "linear",
+              connectionId: scopedConnectionId,
+              workspaceId: "workspace-1",
+              event: "status_changed",
+              stateId: "state-private",
+            },
+          },
+        },
+        1_104,
+        { linearMetadata },
+      );
+      assert.equal(insideScopedTeam.configuration.trigger.kind, "linear");
+
+      const incompatibleTriggers = [
+        {
+          id: "team-project",
+          trigger: {
+            kind: "linear" as const,
+            connectionId: allPublicConnectionId,
+            workspaceId: "workspace-1",
+            teamId: "team-public",
+            projectId: "project-public-b",
+            event: "issue_created" as const,
+          },
+        },
+        {
+          id: "project-state",
+          trigger: {
+            kind: "linear" as const,
+            connectionId: allPublicConnectionId,
+            workspaceId: "workspace-1",
+            projectId: "project-public",
+            event: "status_changed" as const,
+            stateId: "state-public-b",
+          },
+        },
+        {
+          id: "project-label",
+          trigger: {
+            kind: "linear" as const,
+            connectionId: allPublicConnectionId,
+            workspaceId: "workspace-1",
+            projectId: "project-public",
+            event: "label_added" as const,
+            labelId: "label-public-b",
+          },
+        },
+      ];
+      for (const candidate of incompatibleTriggers) {
+        const rejected = yield* store
+          .save(
+            environmentId,
+            {
+              id: RoutineId.make(`routine-linear-incompatible-${candidate.id}`),
+              expectedRevision: 0,
+              configuration: { ...configuration, trigger: candidate.trigger },
+            },
+            1_105,
+            { linearMetadata },
+          )
+          .pipe(Effect.flip);
+        assert.equal(rejected.code, "validation");
+      }
+    }),
+  );
+
   it.effect("orders history by admission chronology and uses a stable composite cursor", () =>
     Effect.gen(function* () {
       const store = yield* RoutineStore;
@@ -1142,7 +1480,7 @@ it.layer(storeLayer)("RoutineStore", (it) => {
           deliveryId: "delivery-copied-event",
           digest: "digest-copied-event",
           eventName: "pull_request",
-          repositoryId: 42,
+          providerResourceId: 42,
           summary: prOpened(21),
           now: 100_400,
         });
@@ -1186,7 +1524,7 @@ it.layer(storeLayer)("RoutineStore", (it) => {
           deliveryId: "delivery-copied-replay",
           digest: "digest-copied-replay",
           eventName: "pull_request",
-          repositoryId: 42,
+          providerResourceId: 42,
           summary: prOpened(22),
           now: 100_501,
         };

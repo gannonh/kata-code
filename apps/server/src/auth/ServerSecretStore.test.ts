@@ -145,6 +145,42 @@ const makeConcurrentCreateSecretStoreLayer = () =>
     Layer.provideMerge(ConcurrentReadMissFileSystemLayer),
   );
 
+const CreateChmodOnceFailureFileSystemLayer = Layer.effect(
+  FileSystem.FileSystem,
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const failed = yield* Ref.make(false);
+
+    return {
+      ...fileSystem,
+      chmod: (path, mode) =>
+        mode === 0o600 && /[\\/]retry-secret\.bin$/.test(String(path))
+          ? Ref.getAndSet(failed, true).pipe(
+              Effect.flatMap((alreadyFailed) =>
+                alreadyFailed
+                  ? fileSystem.chmod(path, mode)
+                  : Effect.fail(
+                      PlatformError.systemError({
+                        _tag: "PermissionDenied",
+                        module: "FileSystem",
+                        method: "chmod",
+                        pathOrDescriptor: String(path),
+                        description: "Simulated failure after exclusive creation.",
+                      }),
+                    ),
+              ),
+            )
+          : fileSystem.chmod(path, mode),
+    } satisfies FileSystem.FileSystem;
+  }),
+).pipe(Layer.provide(NodeServices.layer));
+
+const makeCreateChmodOnceFailureSecretStoreLayer = () =>
+  ServerSecretStore.layer.pipe(
+    Layer.provide(makeServerConfigLayer()),
+    Layer.provideMerge(CreateChmodOnceFailureFileSystemLayer),
+  );
+
 it.layer(NodeServices.layer)("ServerSecretStore.layer", (it) => {
   it.effect("returns Option.none when a secret file does not exist", () =>
     Effect.gen(function* () {
@@ -184,6 +220,24 @@ it.layer(NodeServices.layer)("ServerSecretStore.layer", (it) => {
       assert.deepEqual(Array.from(first), Array.from(persistedBytes));
       assert.deepEqual(Array.from(second), Array.from(persistedBytes));
     }).pipe(Effect.provide(makeConcurrentCreateSecretStoreLayer())),
+  );
+
+  it.effect("removes a partially created secret so creation can be retried", () =>
+    Effect.gen(function* () {
+      const secretStore = yield* ServerSecretStore.ServerSecretStore;
+
+      const error = yield* Effect.flip(
+        secretStore.create("retry-secret", Uint8Array.from([1, 2, 3])),
+      );
+      assert.instanceOf(error, ServerSecretStore.SecretStorePersistError);
+      assert.isTrue(Option.isNone(yield* secretStore.get("retry-secret")));
+
+      yield* secretStore.create("retry-secret", Uint8Array.from([4, 5, 6]));
+      assert.deepEqual(
+        Array.from(Option.getOrThrow(yield* secretStore.get("retry-secret"))),
+        [4, 5, 6],
+      );
+    }).pipe(Effect.provide(makeCreateChmodOnceFailureSecretStoreLayer())),
   );
 
   it.effect("uses restrictive permissions for the secret directory and files", () =>

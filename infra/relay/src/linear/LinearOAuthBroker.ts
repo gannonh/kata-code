@@ -54,6 +54,7 @@ type Connection = {
 type LinearOAuthFailure =
   | LinearOAuth.LinearOAuthRequestFailed
   | LinearOAuth.LinearOAuthNotConfigured;
+export type LinearOAuthRevokeResult = "revoked" | "absent" | "owner-mismatch";
 
 export class LinearOAuthBroker extends Context.Service<
   LinearOAuthBroker,
@@ -96,7 +97,7 @@ export class LinearOAuthBroker extends Context.Service<
     readonly revoke: (
       input: Connection,
     ) => Effect.Effect<
-      boolean,
+      LinearOAuthRevokeResult,
       | LinearOAuthFailure
       | LinearTokens.LinearTokenLookupPersistenceError
       | LinearTokens.LinearTokenDeletePersistenceError
@@ -161,6 +162,16 @@ const make = Effect.gen(function* () {
         environmentId: binding.environmentId,
         connectionId: binding.connectionId,
       };
+      const inFlight = { ...connection, ...bundle };
+      // The consumed row is the in-flight handle. A newer begin() deletes it;
+      // claiming it here is the last gate before replacing stored tokens.
+      const claimed = yield* states
+        .claim({ state: input.state })
+        .pipe(Effect.tapError(() => revokeDiscarded(inFlight)));
+      if (!claimed) {
+        yield* revokeDiscarded(inFlight);
+        return yield* new LinearOAuthStates.LinearOAuthStateRejected({ reason: "superseded" });
+      }
       // Reauthorizing replaces the stored grant; end the one it replaces.
       const replaced = yield* tokens.get(connection);
       const discard = revokeDiscarded({ ...connection, ...bundle });
@@ -214,14 +225,13 @@ const make = Effect.gen(function* () {
     revoke: Effect.fn("relay.linear_oauth_broker.revoke")(function* (input) {
       yield* Effect.annotateCurrentSpan({ "relay.environment_id": input.environmentId });
       const record = yield* tokens.get(input);
-      if (record === null || record.userId !== input.userId) {
-        return false;
-      }
+      if (record === null) return "absent";
+      if (record.userId !== input.userId) return "owner-mismatch";
       // Revoke while the relay still holds the token, then discard it. A
       // failed revocation keeps the row so the caller can retry.
       yield* oauth.revoke(record);
       yield* tokens.delete(input);
-      return true;
+      return "revoked";
     }),
 
     revokeForEnvironment: Effect.fn("relay.linear_oauth_broker.revoke_for_environment")(
