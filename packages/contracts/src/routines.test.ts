@@ -452,7 +452,10 @@ describe("routine connection records", () => {
     const decodeMetadata = Schema.decodeUnknownSync(RoutineLinearMetadata);
     const metadata = decodeMetadata({
       workspace: { id: "workspace-uuid", name: "Acme", urlKey: "acme" },
-      teams: [{ id: "team-1", name: "Engineering", key: "ENG" }],
+      teams: [
+        { id: "team-1", name: "Engineering", key: "ENG", visibility: "public" },
+        { id: "team-2", name: "Platform", key: "PLAT", visibility: "restricted" },
+      ],
       projects: [{ id: "project-1", name: "Roadmap", teamIds: ["team-1"] }],
       states: [{ id: "state-1", name: "In Progress", teamId: "team-1", type: "started" }],
       labels: [
@@ -461,6 +464,7 @@ describe("routine connection records", () => {
       ],
     });
     expect(metadata.teams[0]?.key).toBe("ENG");
+    expect(metadata.teams[1]?.visibility).toBe("restricted");
     expect(metadata.states[0]?.type).toBe("started");
     expect(metadata.labels[1]?.teamId).toBeNull();
   });

@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import {
   makeLinearGraphqlRequest,
   makeLinearRoutineMetadata,
+  type LinearGraphqlRequest,
   type LinearMetadataError,
 } from "./LinearRoutineMetadata.ts";
 
@@ -13,21 +14,26 @@ const response = {
     organization: { id: "workspace-1", name: "Acme", urlKey: "acme" },
     teams: {
       nodes: [
-        { id: "team-1", name: "Engineering", key: "ENG" },
-        { id: "team-2", name: "Design", key: "DES" },
+        { id: "team-1", name: "Engineering", key: "ENG", visibility: "public" },
+        { id: "team-2", name: "Design", key: "DES", visibility: "private" },
+        { id: "team-3", name: "Platform", key: "PLAT", visibility: "restricted" },
       ],
+      pageInfo: { hasNextPage: false, endCursor: null },
     },
     projects: {
       nodes: [{ id: "project-1", name: "Roadmap", teams: { nodes: [{ id: "team-1" }] } }],
+      pageInfo: { hasNextPage: false, endCursor: null },
     },
     workflowStates: {
       nodes: [{ id: "state-1", name: "In Progress", type: "started", team: { id: "team-1" } }],
+      pageInfo: { hasNextPage: false, endCursor: null },
     },
     issueLabels: {
       nodes: [
         { id: "label-1", name: "Bug", team: { id: "team-1" } },
         { id: "label-2", name: "Workspace label", team: null },
       ],
+      pageInfo: { hasNextPage: false, endCursor: null },
     },
   },
 };
@@ -49,7 +55,12 @@ const expectFailure = (effect: Effect.Effect<unknown, LinearMetadataError>) =>
   });
 
 const decodeBodies = Schema.decodeUnknownSync(
-  Schema.fromJsonString(Schema.Struct({ query: Schema.String })),
+  Schema.fromJsonString(
+    Schema.Struct({
+      query: Schema.String,
+      variables: Schema.optional(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
+    }),
+  ),
 );
 
 describe("Linear metadata reads", () => {
@@ -57,7 +68,10 @@ describe("Linear metadata reads", () => {
     Effect.gen(function* () {
       const result = yield* metadataWith(response).read("lin_oauth_access_token");
       assert.deepEqual(result.workspace, { id: "workspace-1", name: "Acme", urlKey: "acme" });
-      assert.equal(result.teams.length, 2);
+      assert.equal(result.teams.length, 3);
+      assert.equal(result.teams[0]?.visibility, "public");
+      assert.equal(result.teams[1]?.visibility, "private");
+      assert.equal(result.teams[2]?.visibility, "restricted");
       assert.deepEqual(result.projects[0]?.teamIds, ["team-1"]);
       assert.deepEqual(result.states[0], {
         id: "state-1",
@@ -66,6 +80,121 @@ describe("Linear metadata reads", () => {
         type: "started",
       });
       assert.isNull(result.labels[1]?.teamId);
+    }),
+  );
+
+  it.effect("follows Relay cursors for every metadata collection", () =>
+    Effect.gen(function* () {
+      const requests: Array<LinearGraphqlRequest> = [];
+      const pages = [
+        {
+          data: {
+            ...response.data,
+            teams: {
+              nodes: [response.data.teams.nodes[0]!],
+              pageInfo: { hasNextPage: true, endCursor: "teams-cursor" },
+            },
+            projects: {
+              nodes: [response.data.projects.nodes[0]!],
+              pageInfo: { hasNextPage: true, endCursor: "projects-cursor" },
+            },
+            workflowStates: {
+              nodes: [response.data.workflowStates.nodes[0]!],
+              pageInfo: { hasNextPage: true, endCursor: "states-cursor" },
+            },
+            issueLabels: {
+              nodes: [response.data.issueLabels.nodes[0]!],
+              pageInfo: { hasNextPage: true, endCursor: "labels-cursor" },
+            },
+          },
+        },
+        {
+          data: {
+            ...response.data,
+            teams: {
+              nodes: [response.data.teams.nodes[1]!],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+            projects: {
+              nodes: [{ id: "project-2", name: "Design", teams: { nodes: [{ id: "team-2" }] } }],
+              pageInfo: { hasNextPage: true, endCursor: "projects-cursor-2" },
+            },
+            workflowStates: {
+              nodes: [{ id: "state-2", name: "Done", type: "completed", team: { id: "team-2" } }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+            issueLabels: {
+              nodes: [{ id: "label-3", name: "Design", team: { id: "team-2" } }],
+              pageInfo: { hasNextPage: true, endCursor: "labels-cursor-2" },
+            },
+          },
+        },
+        {
+          data: {
+            ...response.data,
+            teams: {
+              nodes: [response.data.teams.nodes[1]!],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+            projects: {
+              nodes: [{ id: "project-3", name: "Launch", teams: { nodes: [{ id: "team-1" }] } }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+            workflowStates: {
+              nodes: [{ id: "state-2", name: "Done", type: "completed", team: { id: "team-2" } }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+            issueLabels: {
+              nodes: [{ id: "label-4", name: "Launch", team: { id: "team-1" } }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      ];
+      const metadata = makeLinearRoutineMetadata({
+        graphql: (request) => {
+          requests.push(request);
+          return Effect.succeed(pages[requests.length - 1] ?? pages[1]);
+        },
+      });
+
+      const result = yield* metadata.read("lin_oauth_access_token");
+
+      assert.equal(requests.length, 3);
+      assert.deepEqual(requests[0]?.variables, {
+        teamsAfter: null,
+        projectsAfter: null,
+        workflowStatesAfter: null,
+        issueLabelsAfter: null,
+      });
+      assert.deepEqual(requests[1]?.variables, {
+        teamsAfter: "teams-cursor",
+        projectsAfter: "projects-cursor",
+        workflowStatesAfter: "states-cursor",
+        issueLabelsAfter: "labels-cursor",
+      });
+      assert.deepEqual(requests[2]?.variables, {
+        teamsAfter: null,
+        projectsAfter: "projects-cursor-2",
+        workflowStatesAfter: null,
+        issueLabelsAfter: "labels-cursor-2",
+      });
+      assert.deepEqual(
+        result.teams.map((team) => team.id),
+        ["team-1", "team-2"],
+      );
+      assert.deepEqual(
+        result.projects.map((project) => project.id),
+        ["project-1", "project-2", "project-3"],
+      );
+      assert.deepEqual(
+        result.states.map((state) => state.id),
+        ["state-1", "state-2"],
+      );
+      assert.deepEqual(
+        result.labels.map((label) => label.id),
+        ["label-1", "label-3", "label-4"],
+      );
     }),
   );
 
@@ -110,6 +239,22 @@ describe("Linear GraphQL transport", () => {
         "Bearer lin_oauth_access_token",
       );
       assert.equal(decodeBodies(captured.init.body).query, "query X { viewer { id } }");
+    }),
+  );
+
+  it.effect("encodes Relay cursor variables in the GraphQL request body", () =>
+    Effect.gen(function* () {
+      const seen: Array<RequestInit> = [];
+      const fetchImpl: typeof fetch = async (_url, init) => {
+        seen.push(init ?? {});
+        return new Response(JSON.stringify({ data: { organization: {} } }), { status: 200 });
+      };
+      yield* makeLinearGraphqlRequest(fetchImpl)({
+        accessToken: "lin_oauth_access_token",
+        query: "query X($cursor: String) { teams(after: $cursor) { nodes { id } } }",
+        variables: { cursor: "opaque-cursor" },
+      });
+      assert.deepEqual(decodeBodies(seen[0]!.body).variables, { cursor: "opaque-cursor" });
     }),
   );
 

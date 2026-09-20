@@ -654,6 +654,38 @@ describe("Linear event triggers", () => {
     expect(
       routineDraftForGenerationInput({ ...draft(), trigger: defaultLinearTriggerDraft() }, true),
     ).toBeNull();
+
+    const linearScope = defaultLinearTrigger(linearConnection());
+    expect(
+      routineDraftForGenerationInput(
+        { ...draft(), trigger: { ...linearScope, event: "status_changed" } },
+        true,
+      ),
+    ).toBeNull();
+    expect(
+      routineDraftForGenerationInput(
+        { ...draft(), trigger: { ...linearScope, event: "label_added" } },
+        true,
+      ),
+    ).toBeNull();
+    expect(
+      routineDraftForGenerationInput(
+        {
+          ...draft(),
+          trigger: { ...linearScope, event: "status_changed", stateId: "state-1" },
+        },
+        true,
+      )?.trigger,
+    ).toEqual({ ...linearScope, event: "status_changed", stateId: "state-1" });
+    expect(
+      routineDraftForGenerationInput(
+        {
+          ...draft(),
+          trigger: { ...linearScope, event: "label_added", labelId: "label-1" },
+        },
+        true,
+      )?.trigger,
+    ).toEqual({ ...linearScope, event: "label_added", labelId: "label-1" });
   });
 
   it("defaults a new Linear trigger to issue created on a single scoped team", () => {

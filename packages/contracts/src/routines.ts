@@ -509,6 +509,7 @@ export const RoutineLinearMetadata = Schema.Struct({
       id: TrimmedNonEmptyString,
       name: TrimmedNonEmptyString,
       key: TrimmedNonEmptyString,
+      visibility: Schema.Literals(["public", "private", "restricted"]),
     }),
   ),
   projects: Schema.Array(

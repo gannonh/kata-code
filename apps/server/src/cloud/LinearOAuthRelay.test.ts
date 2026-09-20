@@ -13,6 +13,7 @@ const ENVIRONMENT_ID = EnvironmentId.make("environment-linear-oauth");
 const CONNECTION_ID = "connection-linear-oauth";
 const CLIENT_ACCESS_TOKEN = "cli-access-token-secret";
 const ENVIRONMENT_CREDENTIAL = "environment-credential-secret";
+const LINKED_USER_ID = "user-linear-owner";
 
 const requestJson = (request: HttpClientRequest.HttpClientRequest): unknown => {
   const body = request.body;
@@ -34,6 +35,7 @@ interface HarnessDependencies {
   readonly relayUrl?: Option.Option<string>;
   readonly clientAccessToken?: Option.Option<string>;
   readonly environmentCredential?: Option.Option<string>;
+  readonly linkedUserId?: Option.Option<string>;
 }
 
 const makeHarness = (
@@ -55,6 +57,7 @@ const makeHarness = (
     environmentCredential: Effect.succeed(
       dependencies.environmentCredential ?? Option.some(ENVIRONMENT_CREDENTIAL),
     ),
+    linkedUserId: Effect.succeed(dependencies.linkedUserId ?? Option.some(LINKED_USER_ID)),
   });
   return { relay, requests };
 };
@@ -208,6 +211,23 @@ it.effect("blocks start when the environment holds no relay credential", () =>
   }),
 );
 
+it.effect("blocks start when the environment has no bound cloud owner", () =>
+  Effect.gen(function* () {
+    const { relay, requests } = makeHarness(
+      () => Response.json({ authorizeUrl: "https://linear.app/oauth/authorize" }),
+      { linkedUserId: Option.none() },
+    );
+
+    const error = yield* relay
+      .start({ environmentId: ENVIRONMENT_ID, connectionId: CONNECTION_ID })
+      .pipe(Effect.flip);
+
+    assert.equal(error.code, "blocked");
+    assert.include(error.message, "bound Kata Code Connect owner");
+    assert.deepEqual(requests, []);
+  }),
+);
+
 it.effect("blocks refresh when the environment holds no relay credential", () =>
   Effect.gen(function* () {
     const { relay, requests } = makeHarness(() => Response.json({}), {
@@ -302,10 +322,11 @@ it.effect("blocks revoke when the environment holds no cloud client credential",
   }),
 );
 
-it.effect("start asks the relay for a Linear authorize URL with the environment credential", () =>
+it.effect("start uses the linked owner without requiring a CLI credential", () =>
   Effect.gen(function* () {
-    const { relay, requests } = makeHarness(() =>
-      Response.json({ authorizeUrl: "https://linear.app/oauth/authorize?state=abc" }),
+    const { relay, requests } = makeHarness(
+      () => Response.json({ authorizeUrl: "https://linear.app/oauth/authorize?state=abc" }),
+      { clientAccessToken: Option.none() },
     );
 
     const result = yield* relay.start({
@@ -319,6 +340,9 @@ it.effect("start asks the relay for a Linear authorize URL with the environment 
     assert.equal(request.method, "POST");
     assert.equal(request.url, `${RELAY_URL}/v1/environments/${ENVIRONMENT_ID}/linear/oauth/start`);
     assert.equal(request.headers.authorization, `Bearer ${ENVIRONMENT_CREDENTIAL}`);
-    assert.deepEqual(requestJson(request), { connectionId: CONNECTION_ID });
+    assert.deepEqual(requestJson(request), {
+      connectionId: CONNECTION_ID,
+      userId: LINKED_USER_ID,
+    });
   }),
 );

@@ -192,7 +192,8 @@ export function routineDraftForGenerationInput(
 ): RoutineDraftConversationState | null {
   if (
     !initialized ||
-    (!isRoutineEditorScheduleTrigger(current.trigger) && !isCompleteLinearTrigger(current.trigger))
+    (!isRoutineEditorScheduleTrigger(current.trigger) &&
+      (!isCompleteLinearTrigger(current.trigger) || !linearTriggerFiltersComplete(current.trigger)))
   ) {
     return null;
   }
@@ -324,6 +325,14 @@ export function isCompleteLinearTrigger(
   trigger: RoutineEditorTrigger,
 ): trigger is LinearEventTrigger {
   return trigger.kind === "linear" && "connectionId" in trigger && "workspaceId" in trigger;
+}
+
+/** Update events are complete only after the user selects their transition filter. */
+export function linearTriggerFiltersComplete(trigger: RoutineEditorTrigger): boolean {
+  if (trigger.kind !== "linear") return true;
+  if (trigger.event === "status_changed") return "stateId" in trigger;
+  if (trigger.event === "label_added") return "labelId" in trigger;
+  return true;
 }
 
 export function isRoutineEditorDraftComplete(draft: RoutineEditorDraft): draft is RoutineDraft {

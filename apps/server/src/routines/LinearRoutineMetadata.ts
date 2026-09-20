@@ -21,6 +21,7 @@ export type LinearMetadataError =
 export interface LinearGraphqlRequest {
   readonly accessToken: string;
   readonly query: string;
+  readonly variables?: Readonly<Record<string, string | null>>;
 }
 
 export interface LinearRoutineMetadataShape {
@@ -32,13 +33,35 @@ export class LinearRoutineMetadata extends Context.Service<
   LinearRoutineMetadataShape
 >()("@kata-sh/code-cli/routines/LinearRoutineMetadata") {}
 
-const METADATA_QUERY = `query RoutineMetadata {
+const METADATA_QUERY = `query RoutineMetadata(
+  $teamsAfter: String
+  $projectsAfter: String
+  $workflowStatesAfter: String
+  $issueLabelsAfter: String
+) {
   organization { id name urlKey }
-  teams(first: 100) { nodes { id name key } }
-  projects(first: 100) { nodes { id name teams { nodes { id } } } }
-  workflowStates(first: 250) { nodes { id name type team { id } } }
-  issueLabels(first: 250) { nodes { id name team { id } } }
+  teams(first: 100, after: $teamsAfter) {
+    nodes { id name key visibility }
+    pageInfo { hasNextPage endCursor }
+  }
+  projects(first: 100, after: $projectsAfter) {
+    nodes { id name teams { nodes { id } } }
+    pageInfo { hasNextPage endCursor }
+  }
+  workflowStates(first: 250, after: $workflowStatesAfter) {
+    nodes { id name type team { id } }
+    pageInfo { hasNextPage endCursor }
+  }
+  issueLabels(first: 250, after: $issueLabelsAfter) {
+    nodes { id name team { id } }
+    pageInfo { hasNextPage endCursor }
+  }
 }`;
+
+const PageInfo = Schema.Struct({
+  hasNextPage: Schema.Boolean,
+  endCursor: Schema.NullOr(Schema.String),
+});
 
 const MetadataJson = Schema.Struct({
   data: Schema.Struct({
@@ -49,8 +72,14 @@ const MetadataJson = Schema.Struct({
     }),
     teams: Schema.Struct({
       nodes: Schema.Array(
-        Schema.Struct({ id: Schema.String, name: Schema.String, key: Schema.String }),
+        Schema.Struct({
+          id: Schema.String,
+          name: Schema.String,
+          key: Schema.String,
+          visibility: Schema.Literals(["public", "private", "restricted"]),
+        }),
       ),
+      pageInfo: PageInfo,
     }),
     projects: Schema.Struct({
       nodes: Schema.Array(
@@ -60,6 +89,7 @@ const MetadataJson = Schema.Struct({
           teams: Schema.Struct({ nodes: Schema.Array(Schema.Struct({ id: Schema.String })) }),
         }),
       ),
+      pageInfo: PageInfo,
     }),
     workflowStates: Schema.Struct({
       nodes: Schema.Array(
@@ -70,6 +100,7 @@ const MetadataJson = Schema.Struct({
           team: Schema.Struct({ id: Schema.String }),
         }),
       ),
+      pageInfo: PageInfo,
     }),
     issueLabels: Schema.Struct({
       nodes: Schema.Array(
@@ -79,6 +110,7 @@ const MetadataJson = Schema.Struct({
           team: Schema.NullOr(Schema.Struct({ id: Schema.String })),
         }),
       ),
+      pageInfo: PageInfo,
     }),
   }),
 });
@@ -103,7 +135,12 @@ const invalid = (message: string): LinearMetadataError => ({
 });
 
 const encodeGraphqlBody = Schema.encodeSync(
-  Schema.fromJsonString(Schema.Struct({ query: Schema.String })),
+  Schema.fromJsonString(
+    Schema.Struct({
+      query: Schema.String,
+      variables: Schema.optional(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
+    }),
+  ),
 );
 const decodeGraphqlBody = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
@@ -144,7 +181,7 @@ export function makeLinearGraphqlRequest(fetchImpl: typeof fetch) {
               authorization: `Bearer ${request.accessToken}`,
               "content-type": "application/json",
             },
-            body: encodeGraphqlBody({ query: request.query }),
+            body: encodeGraphqlBody({ query: request.query, variables: request.variables }),
             signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
           }),
         catch: () => unavailable("Linear did not respond. Check network access and try again."),
@@ -191,37 +228,96 @@ export function makeLinearRoutineMetadata(dependencies: {
 }): LinearRoutineMetadataShape {
   const decodeMetadata = Schema.decodeUnknownEffect(MetadataJson);
   const read: LinearRoutineMetadataShape["read"] = (accessToken) =>
-    dependencies.graphql({ accessToken, query: METADATA_QUERY }).pipe(
-      Effect.flatMap((raw) =>
-        decodeMetadata(raw).pipe(
+    Effect.gen(function* () {
+      const teams: Array<
+        Schema.Schema.Type<typeof MetadataJson>["data"]["teams"]["nodes"][number]
+      > = [];
+      const projects: Array<
+        Schema.Schema.Type<typeof MetadataJson>["data"]["projects"]["nodes"][number]
+      > = [];
+      const states: Array<
+        Schema.Schema.Type<typeof MetadataJson>["data"]["workflowStates"]["nodes"][number]
+      > = [];
+      const labels: Array<
+        Schema.Schema.Type<typeof MetadataJson>["data"]["issueLabels"]["nodes"][number]
+      > = [];
+      let cursors = {
+        teamsAfter: null as string | null,
+        projectsAfter: null as string | null,
+        workflowStatesAfter: null as string | null,
+        issueLabelsAfter: null as string | null,
+      };
+      let active = {
+        teams: true,
+        projects: true,
+        workflowStates: true,
+        issueLabels: true,
+      };
+      let workspace: Schema.Schema.Type<typeof MetadataJson>["data"]["organization"] | undefined;
+
+      while (active.teams || active.projects || active.workflowStates || active.issueLabels) {
+        const raw = yield* dependencies.graphql({
+          accessToken,
+          query: METADATA_QUERY,
+          variables: cursors,
+        });
+        const decoded = yield* decodeMetadata(raw).pipe(
           Effect.mapError(() => invalid("Linear returned an unexpected metadata response.")),
-        ),
-      ),
-      Effect.map(({ data }) => ({
-        workspace: {
-          id: data.organization.id,
-          name: data.organization.name,
-          urlKey: data.organization.urlKey,
-        },
-        teams: data.teams.nodes,
-        projects: data.projects.nodes.map((project) => ({
+        );
+        workspace ??= decoded.data.organization;
+        if (active.teams) teams.push(...decoded.data.teams.nodes);
+        if (active.projects) projects.push(...decoded.data.projects.nodes);
+        if (active.workflowStates) states.push(...decoded.data.workflowStates.nodes);
+        if (active.issueLabels) labels.push(...decoded.data.issueLabels.nodes);
+
+        const pageInfos = [
+          ["teams", decoded.data.teams.pageInfo],
+          ["projects", decoded.data.projects.pageInfo],
+          ["workflow states", decoded.data.workflowStates.pageInfo],
+          ["issue labels", decoded.data.issueLabels.pageInfo],
+        ] as const;
+        if (pageInfos.some(([, pageInfo]) => pageInfo.hasNextPage && pageInfo.endCursor === null))
+          return yield* Effect.fail(invalid("Linear returned an invalid metadata page cursor."));
+
+        active = {
+          teams: active.teams && decoded.data.teams.pageInfo.hasNextPage,
+          projects: active.projects && decoded.data.projects.pageInfo.hasNextPage,
+          workflowStates: active.workflowStates && decoded.data.workflowStates.pageInfo.hasNextPage,
+          issueLabels: active.issueLabels && decoded.data.issueLabels.pageInfo.hasNextPage,
+        };
+        cursors = {
+          teamsAfter: active.teams ? decoded.data.teams.pageInfo.endCursor : null,
+          projectsAfter: active.projects ? decoded.data.projects.pageInfo.endCursor : null,
+          workflowStatesAfter: active.workflowStates
+            ? decoded.data.workflowStates.pageInfo.endCursor
+            : null,
+          issueLabelsAfter: active.issueLabels ? decoded.data.issueLabels.pageInfo.endCursor : null,
+        };
+      }
+
+      if (workspace === undefined)
+        return yield* Effect.fail(invalid("Linear returned no workspace metadata."));
+      return {
+        workspace,
+        teams,
+        projects: projects.map((project) => ({
           id: project.id,
           name: project.name,
           teamIds: project.teams.nodes.map((team) => team.id),
         })),
-        states: data.workflowStates.nodes.map((state) => ({
+        states: states.map((state) => ({
           id: state.id,
           name: state.name,
           teamId: state.team.id,
           type: state.type,
         })),
-        labels: data.issueLabels.nodes.map((label) => ({
+        labels: labels.map((label) => ({
           id: label.id,
           name: label.name,
           teamId: label.team?.id ?? null,
         })),
-      })),
-    );
+      };
+    });
   return { read };
 }
 

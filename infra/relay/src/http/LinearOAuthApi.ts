@@ -84,22 +84,23 @@ export const linearServerApi = HttpApiBuilder.group(
             if (principal.environmentId !== args.params.environmentId) {
               return yield* new HttpApiError.Unauthorized({});
             }
-            const users = yield* links.listUsersForEnvironmentPublicKey({
+            const link = yield* links.getForUser({
+              userId: args.payload.userId,
               environmentId: args.params.environmentId,
-              environmentPublicKey: principal.environmentPublicKey,
             });
-            if (users.length !== 1) {
+            if (link?.environmentPublicKey !== principal.environmentPublicKey) {
               return yield* new HttpApiError.Unauthorized({});
             }
             return {
               authorizeUrl: yield* broker.begin({
-                userId: users[0]!,
+                userId: args.payload.userId,
                 environmentId: args.params.environmentId,
                 connectionId: args.payload.connectionId,
               }),
             };
           },
           mapErrorTags({
+            EnvironmentLinkLookupPersistenceError: internalError,
             LinearOAuthNotConfigured: notConfigured,
             LinearOAuthEnvironmentNotLinked: notAuthorized,
             PlatformError: internalError,

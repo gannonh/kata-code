@@ -87,6 +87,7 @@ import {
   libraryRoutinesAfterChange,
   LINEAR_PROVIDER_REMOVAL_NOTE,
   LINEAR_RETRY_NOTE,
+  linearTriggerFiltersComplete,
   linearTriggerConnectionId,
   newRoutineDraftId,
   newRoutineRequestId,
@@ -347,17 +348,6 @@ type GitHubTriggerPatch = {
   readonly includeDrafts?: boolean;
   readonly issueLabelId?: number | undefined;
 };
-
-/**
- * `isRoutineEditorDraftComplete` accepts any scoped Linear trigger, but the
- * saved contract requires the filter each event acts on.
- */
-function linearTriggerFiltersComplete(trigger: RoutineEditorDraft["trigger"]): boolean {
-  if (trigger.kind !== "linear") return true;
-  if (trigger.event === "status_changed") return "stateId" in trigger;
-  if (trigger.event === "label_added") return "labelId" in trigger;
-  return true;
-}
 
 /** A key set to `undefined` clears that filter; an absent key leaves it alone. */
 type LinearTriggerPatch = {
@@ -743,6 +733,8 @@ function LinearTriggerFields({
   const [allTeams, setAllTeams] = useState(true);
   const [teamId, setTeamId] = useState("");
   const [createdConnection, setCreatedConnection] = useState<LinearRoutineConnection | null>(null);
+  const [authorizationUrl, setAuthorizationUrl] = useState<string | null>(null);
+  const [authorizationPopupBlocked, setAuthorizationPopupBlocked] = useState(false);
   const [setupMessage, setSetupMessage] = useState<string | null>(null);
   const [setupBusy, setSetupBusy] = useState(false);
   const [showSetup, setShowSetup] = useState(connections.length === 0);
@@ -767,39 +759,75 @@ function LinearTriggerFields({
   const stateId = "stateId" in trigger ? trigger.stateId : undefined;
   const labelId = "labelId" in trigger ? trigger.labelId : undefined;
   const connectionTeamIds = connection?.teamIds ?? [];
-  const connectionTeams =
-    connectionTeamIds.length === 0
-      ? (metadata.data?.teams ?? [])
-      : (metadata.data?.teams ?? []).filter((team) => connectionTeamIds.includes(team.id));
-  const availableProjects =
-    trigger.teamId === undefined
-      ? (metadata.data?.projects ?? [])
-      : (metadata.data?.projects ?? []).filter((project) =>
-          project.teamIds.includes(trigger.teamId!),
-        );
-  const availableStates =
-    trigger.teamId === undefined
-      ? (metadata.data?.states ?? [])
-      : (metadata.data?.states ?? []).filter((state) => state.teamId === trigger.teamId);
+  const connectionTeams = (metadata.data?.teams ?? []).filter((team) =>
+    connection?.allTeams ? team.visibility === "public" : connectionTeamIds.includes(team.id),
+  );
+  const authorizedTeamIds = new Set(connectionTeams.map((team) => team.id));
+  const availableProjects = (metadata.data?.projects ?? []).filter(
+    (project) =>
+      project.teamIds.some((id) => authorizedTeamIds.has(id)) &&
+      (trigger.teamId === undefined || project.teamIds.includes(trigger.teamId)),
+  );
+  const availableStates = (metadata.data?.states ?? []).filter(
+    (state) =>
+      authorizedTeamIds.has(state.teamId) &&
+      (trigger.teamId === undefined || state.teamId === trigger.teamId),
+  );
   const availableLabels = (metadata.data?.labels ?? []).filter(
     (label) =>
-      label.teamId === null || trigger.teamId === undefined || label.teamId === trigger.teamId,
+      label.teamId === null ||
+      (authorizedTeamIds.has(label.teamId) &&
+        (trigger.teamId === undefined || label.teamId === trigger.teamId)),
   );
 
   const startAuthorization = async () => {
     if (disabled) return;
+    let authorizationWindow: Window | null = null;
+    try {
+      authorizationWindow = window.open("about:blank", "_blank");
+      if (authorizationWindow != null) authorizationWindow.opener = null;
+    } catch {
+      authorizationWindow?.close();
+      authorizationWindow = null;
+      // Treat a shell or browser that refuses the popup as a blocked popup and
+      // keep the authorization URL available in the editor below.
+    }
     setSetupBusy(true);
     setSetupMessage(null);
+    setAuthorizationUrl(null);
+    setAuthorizationPopupBlocked(false);
     const id = RoutineConnectionId.make("connection-" + Date.now().toString(36));
-    const result = await beginConnectionAuthorization({ environmentId, input: { id } });
-    setSetupBusy(false);
-    if (result._tag === "Failure") {
-      setSetupMessage(errorMessage(result.cause));
+    try {
+      const result = await beginConnectionAuthorization({ environmentId, input: { id } });
+      setSetupBusy(false);
+      if (result._tag === "Failure") {
+        authorizationWindow?.close();
+        setSetupMessage(errorMessage(result.cause));
+        return;
+      }
+      setAuthorizationUrl(result.value.authorizeUrl);
+      let popupAvailable = authorizationWindow != null && !authorizationWindow.closed;
+      if (popupAvailable && authorizationWindow != null) {
+        try {
+          authorizationWindow.location.href = result.value.authorizeUrl;
+        } catch {
+          authorizationWindow.close();
+          popupAvailable = false;
+        }
+      }
+      setAuthorizationPopupBlocked(!popupAvailable);
+      setPendingConnectionId(id);
+      setSetupMessage(
+        popupAvailable
+          ? "Authorize Kata Code in the Linear window, then check the connection."
+          : "The Linear authorization window was blocked. Open the authorization link below, then check the connection.",
+      );
+    } catch (error) {
+      authorizationWindow?.close();
+      setSetupBusy(false);
+      setSetupMessage(errorMessage(error));
       return;
     }
-    window.open(result.value.authorizeUrl, "_blank", "noopener,noreferrer");
-    setPendingConnectionId(id);
-    setSetupMessage("Authorize Kata Code in the Linear window, then check the connection.");
   };
 
   const runCreateConnection = async () => {
@@ -871,7 +899,10 @@ function LinearTriggerFields({
           disabled={disabled}
           onChange={(event) => {
             const next = connections.find((candidate) => candidate.id === event.target.value);
-            if (next) onTriggerChange(defaultLinearTrigger(next));
+            if (next) {
+              setCreatedConnection(null);
+              onTriggerChange(defaultLinearTrigger(next));
+            }
           }}
         >
           {connections.length === 0 ? <option value="">No connected workspace</option> : null}
@@ -995,6 +1026,16 @@ function LinearTriggerFields({
         <p className="text-xs text-muted-foreground" role="status">
           {setupMessage}
         </p>
+      ) : null}
+      {authorizationPopupBlocked && authorizationUrl ? (
+        <a
+          className="text-xs text-primary hover:underline"
+          href={authorizationUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open Linear authorization link
+        </a>
       ) : null}
       {connection ? (
         <div

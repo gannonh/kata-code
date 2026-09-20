@@ -663,16 +663,28 @@ const makeWsRpcLayer = (
             linear,
             (connection) =>
               connections.value.linearMetadata({ environmentId, connectionId: connection.id }).pipe(
-                Effect.map((metadata) => ({
-                  connectionId: connection.id,
-                  provider: "linear" as const,
-                  workspaceId: connection.workspaceId,
-                  workspaceName: connection.workspaceName,
-                  teams: metadata.teams,
-                  projects: metadata.projects,
-                  states: metadata.states,
-                  labels: metadata.labels,
-                })),
+                Effect.map((metadata) => {
+                  const teams = metadata.teams.filter((team) =>
+                    connection.allTeams
+                      ? team.visibility === "public"
+                      : connection.teamIds.includes(team.id),
+                  );
+                  const teamIds = new Set(teams.map((team) => team.id));
+                  return {
+                    connectionId: connection.id,
+                    provider: "linear" as const,
+                    workspaceId: connection.workspaceId,
+                    workspaceName: connection.workspaceName,
+                    teams: teams.map(({ id, name, key }) => ({ id, name, key })),
+                    projects: metadata.projects.filter((project) =>
+                      project.teamIds.some((teamId) => teamIds.has(teamId)),
+                    ),
+                    states: metadata.states.filter((state) => teamIds.has(state.teamId)),
+                    labels: metadata.labels.filter(
+                      (label) => label.teamId === null || teamIds.has(label.teamId),
+                    ),
+                  };
+                }),
                 Effect.orElseSucceed(() => null),
               ),
             { concurrency: "unbounded" },

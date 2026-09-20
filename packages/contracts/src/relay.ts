@@ -1206,10 +1206,16 @@ export const RelayLinearOAuthRevokeRequest = Schema.Struct({
 });
 export type RelayLinearOAuthRevokeRequest = typeof RelayLinearOAuthRevokeRequest.Type;
 
-export const RelayLinearOAuthConnectionRequest = Schema.Struct({
+export const RelayLinearOAuthRefreshRequest = Schema.Struct({
   connectionId: RelayLinearConnectionId,
 });
-export type RelayLinearOAuthConnectionRequest = typeof RelayLinearOAuthConnectionRequest.Type;
+export type RelayLinearOAuthRefreshRequest = typeof RelayLinearOAuthRefreshRequest.Type;
+
+export const RelayLinearOAuthServerStartRequest = Schema.Struct({
+  connectionId: RelayLinearConnectionId,
+  userId: TrimmedNonEmptyString,
+});
+export type RelayLinearOAuthServerStartRequest = typeof RelayLinearOAuthServerStartRequest.Type;
 
 const RelayLinearOAuthStartEndpoint = HttpApiEndpoint.post(
   "linearOAuthStart",
@@ -1238,7 +1244,7 @@ const RelayLinearOAuthRefreshEndpoint = HttpApiEndpoint.post(
   "/v1/environments/:environmentId/linear/oauth/refresh",
   {
     params: Schema.Struct({ environmentId: EnvironmentId }),
-    payload: RelayLinearOAuthConnectionRequest,
+    payload: RelayLinearOAuthRefreshRequest,
     success: RelayLinearAccessToken,
     error: [...RelayLinearOAuthErrors, RelayLinearOAuthReauthorizationRequiredError],
   },
@@ -1249,11 +1255,11 @@ const RelayLinearOAuthServerStartEndpoint = HttpApiEndpoint.post(
   "/v1/environments/:environmentId/linear/oauth/start",
   {
     params: Schema.Struct({ environmentId: EnvironmentId }),
-    payload: RelayLinearOAuthConnectionRequest,
+    payload: RelayLinearOAuthServerStartRequest,
     success: RelayLinearOAuthStartResponse,
     error: RelayLinearOAuthErrors,
   },
-).annotate(OpenApi.Summary, "Start a Linear OAuth authorization for a linked environment");
+).annotate(OpenApi.Summary, "Start Linear OAuth for the environment's bound owner");
 
 const RelayLinearClientGroup = HttpApiGroup.make("linearClient")
   .add(RelayLinearOAuthStartEndpoint, RelayLinearOAuthRevokeEndpoint)
@@ -1262,10 +1268,7 @@ const RelayLinearClientGroup = HttpApiGroup.make("linearClient")
 
 const RelayLinearServerGroup = HttpApiGroup.make("linearServer")
   .add(RelayLinearOAuthServerStartEndpoint, RelayLinearOAuthRefreshEndpoint)
-  .annotate(
-    OpenApi.Description,
-    "Environment-authenticated Linear OAuth authorization and refresh.",
-  )
+  .annotate(OpenApi.Description, "Environment-authenticated Linear authorization and refresh.")
   .middleware(RelayEnvironmentAuth);
 
 export const RelayApi = HttpApi.make("RelayApi")

@@ -18,7 +18,11 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import { LinearOAuthRelay, type LinearOAuthRelayShape } from "../cloud/LinearOAuthRelay.ts";
+import {
+  LINEAR_OAUTH_REAUTHORIZATION_REQUIRED_MESSAGE,
+  LinearOAuthRelay,
+  type LinearOAuthRelayShape,
+} from "../cloud/LinearOAuthRelay.ts";
 import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
 import * as CloudManagedEndpointRuntime from "../cloud/ManagedEndpointRuntime.ts";
 import * as ServerConfig from "../config.ts";
@@ -163,7 +167,7 @@ const endpointRuntimeLayer = Layer.succeed(
 );
 const linearMetadataFixture: RoutineLinearMetadata = {
   workspace: { id: "workspace-1", name: "Acme", urlKey: "acme" },
-  teams: [{ id: "team-1", name: "Engineering", key: "ENG" }],
+  teams: [{ id: "team-1", name: "Engineering", key: "ENG", visibility: "public" }],
   projects: [{ id: "project-1", name: "Roadmap", teamIds: ["team-1"] }],
   states: [{ id: "state-1", name: "In Progress", teamId: "team-1", type: "started" }],
   labels: [{ id: "label-1", name: "Bug", teamId: "team-1" }],
@@ -723,6 +727,40 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
       assert.equal(lastLinearMetadataCredential, "refreshed-access-token");
       const stored = Option.getOrThrow(yield* readLinearAccessToken({ secrets, connectionId: id }));
       assert.equal(stored.accessToken, "refreshed-access-token");
+    }),
+  );
+
+  it.effect("marks metadata access revoked when Linear rejects a token refresh", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const store = yield* RoutineStore;
+      const id = RoutineConnectionId.make("connection-linear-refresh-revoked");
+      yield* storeBundle(id);
+      yield* connections.create(linearCreate(id));
+      yield* saveLinearAccessToken({
+        secrets,
+        connectionId: id,
+        token: freshAccessToken({ accessToken: "revoked-access-token", expiresAt: 30_000 }),
+      });
+      linearOAuthRefresh = () =>
+        Effect.fail(
+          new RoutineError({
+            code: "blocked",
+            message: LINEAR_OAUTH_REAUTHORIZATION_REQUIRED_MESSAGE,
+          }),
+        );
+
+      const error = yield* connections
+        .linearMetadata({ environmentId, connectionId: id })
+        .pipe(
+          Effect.flip,
+          Effect.ensuring(Effect.sync(() => (linearOAuthRefresh = unusedRefresh))),
+        );
+
+      assert.include(error.message, "revoked");
+      const connection = yield* store.getConnection(environmentId, id);
+      assert.equal(connection.provider === "linear" ? connection.metadataAccess : null, "revoked");
     }),
   );
 

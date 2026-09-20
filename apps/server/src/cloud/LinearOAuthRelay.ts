@@ -17,10 +17,14 @@ import * as HttpApiClient from "effect/unstable/httpapi/HttpApiClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
-import { RELAY_ENVIRONMENT_CREDENTIAL_SECRET, RELAY_URL_SECRET } from "./config.ts";
+import {
+  CLOUD_LINKED_USER_ID,
+  RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
+  RELAY_URL_SECRET,
+} from "./config.ts";
 
 export interface LinearOAuthRelayShape {
-  /** Environment-authenticated: starts an authorization for this environment. */
+  /** Environment-authenticated: starts authorization for the locally bound cloud owner. */
   readonly start: (input: {
     readonly environmentId: EnvironmentId;
     readonly connectionId: string;
@@ -45,6 +49,7 @@ export interface LinearOAuthRelayDependencies {
   readonly relayUrl: Effect.Effect<Option.Option<string>>;
   readonly clientAccessToken: Effect.Effect<Option.Option<string>>;
   readonly environmentCredential: Effect.Effect<Option.Option<string>>;
+  readonly linkedUserId: Effect.Effect<Option.Option<string>>;
 }
 
 export class LinearOAuthRelay extends Context.Service<LinearOAuthRelay, LinearOAuthRelayShape>()(
@@ -60,6 +65,13 @@ const MISSING_CLIENT_CREDENTIAL =
   "No Kata Code Connect cloud credential is stored. Run `katacode connect login`, then try again.";
 const MISSING_ENVIRONMENT_CREDENTIAL =
   "This environment has no Kata Code Connect relay credential. Link the environment, then try again.";
+const MISSING_LINKED_USER =
+  "This environment has no bound Kata Code Connect owner. Relink the environment, then try again.";
+export const LINEAR_OAUTH_REAUTHORIZATION_REQUIRED_MESSAGE =
+  "Linear no longer accepts this connection's authorization. Connect Linear again.";
+
+export const isLinearOAuthReauthorizationRequired = (error: RoutineError): boolean =>
+  error.code === "blocked" && error.message === LINEAR_OAUTH_REAUTHORIZATION_REQUIRED_MESSAGE;
 
 const isRelayAuthInvalidError = Schema.is(RelayAuthInvalidError);
 const isRelayLinearOAuthNotConfiguredError = Schema.is(RelayLinearOAuthNotConfiguredError);
@@ -78,9 +90,7 @@ const relayFailure =
       );
     }
     if (isRelayLinearOAuthReauthorizationRequiredError(cause)) {
-      return blocked(
-        "Linear no longer accepts this connection's authorization. Connect Linear again.",
-      );
+      return blocked(LINEAR_OAUTH_REAUTHORIZATION_REQUIRED_MESSAGE);
     }
     if (isRelayLinearOAuthNotConfiguredError(cause)) {
       return blocked(
@@ -145,6 +155,7 @@ export function makeLinearOAuthRelay(
         dependencies.environmentCredential,
         MISSING_ENVIRONMENT_CREDENTIAL,
       );
+      const userId = yield* requireValue(dependencies.linkedUserId, MISSING_LINKED_USER);
       const client = yield* makeRelayClient({
         httpClient: dependencies.httpClient,
         relayUrl,
@@ -153,7 +164,7 @@ export function makeLinearOAuthRelay(
       return yield* client.linearServer
         .linearOAuthStart({
           params: { environmentId: input.environmentId },
-          payload: { connectionId: input.connectionId },
+          payload: { connectionId: input.connectionId, userId },
         })
         .pipe(Effect.mapError(relayFailure("authorize")));
     },
@@ -231,6 +242,7 @@ export const LinearOAuthRelayLive: Layer.Layer<
         Effect.orElseSucceed(() => Option.none()),
       ),
       environmentCredential: readSecretString(secrets, RELAY_ENVIRONMENT_CREDENTIAL_SECRET),
+      linkedUserId: readSecretString(secrets, CLOUD_LINKED_USER_ID),
     });
   }),
 );

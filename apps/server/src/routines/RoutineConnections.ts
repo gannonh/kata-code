@@ -18,7 +18,10 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import { LinearOAuthRelay } from "../cloud/LinearOAuthRelay.ts";
+import {
+  isLinearOAuthReauthorizationRequired,
+  LinearOAuthRelay,
+} from "../cloud/LinearOAuthRelay.ts";
 import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
 import * as CloudManagedEndpointRuntime from "../cloud/ManagedEndpointRuntime.ts";
@@ -677,15 +680,8 @@ const makeRoutineConnections = Effect.gen(function* () {
     "RoutineConnections.linearMetadata",
   )(function* (input) {
     const id = yield* validateConnectionId(input.connectionId);
-    const bundle = yield* ensureFreshLinearAccessToken({
-      secrets,
-      relay: linearOAuthRelay,
-      environmentId: input.environmentId,
-      connectionId: id,
-    });
     const found = yield* store.findConnection(id);
     const connection = found !== null && found.environmentId === input.environmentId ? found : null;
-    const result = yield* linearMetadataClient.read(bundle.accessToken).pipe(Effect.result);
     const stampMetadataAccess = (metadataAccess: "ok" | "revoked") =>
       store
         .updateConnection(id, (current) =>
@@ -698,6 +694,25 @@ const makeRoutineConnections = Effect.gen(function* () {
             Effect.logWarning("routine Linear metadata status update failed", { cause }),
           ),
         );
+    const bundleResult = yield* ensureFreshLinearAccessToken({
+      secrets,
+      relay: linearOAuthRelay,
+      environmentId: input.environmentId,
+      connectionId: id,
+    }).pipe(Effect.result);
+    if (bundleResult._tag === "Failure") {
+      if (connection !== null && isLinearOAuthReauthorizationRequired(bundleResult.failure)) {
+        yield* stampMetadataAccess("revoked");
+        return yield* failure(
+          "blocked",
+          "Linear metadata access was revoked. Disable this connection and connect Linear again.",
+        );
+      }
+      return yield* bundleResult.failure;
+    }
+    const result = yield* linearMetadataClient
+      .read(bundleResult.success.accessToken)
+      .pipe(Effect.result);
     if (result._tag === "Failure") {
       if (result.failure._tag === "access") {
         // Revoked access is a named connection state, not an empty picker.
