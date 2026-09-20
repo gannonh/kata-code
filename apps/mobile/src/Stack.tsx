@@ -245,13 +245,6 @@ const SettingsContentStack = createNativeStackNavigator({
         title: "Appearance",
       },
     }),
-    SettingsProjectGrouping: createNativeStackScreen({
-      screen: SettingsProjectGroupingRouteScreen,
-      linking: "project-grouping",
-      options: {
-        title: "Organization",
-      },
-    }),
     SettingsOrganization: createNativeStackScreen({
       screen: SettingsProjectGroupingRouteScreen,
       linking: "organization",

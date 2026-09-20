@@ -97,6 +97,7 @@ on:
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -203,14 +204,38 @@ jobs:
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ inputs.version }}"
 
-      # The artifact root is `apps/` (upload-artifact keeps the least common
-      # ancestor of its paths), so extracting into `apps` restores
-      # apps/server/dist and apps/desktop/dist-electron at their build paths.
-      - name: Download JS bundle
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: js-bundle
-          path: apps
+      - name: Download and validate JS bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          artifact_id="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?name=js-bundle" \
+            --jq '[.artifacts[] | select(.name == "js-bundle" and .expired == false) | .id] | if length == 1 then .[0] else error("expected exactly one unexpired js-bundle artifact") end')"
+          archive="$RUNNER_TEMP/js-bundle.zip"
+          staged="$RUNNER_TEMP/js-bundle-staged"
+
+          gh api \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+            > "$archive"
+
+          python_command=python3
+          if ! command -v "$python_command" >/dev/null 2>&1; then
+            python_command=python
+          fi
+          "$python_command" -B .github/scripts/stage-preview-bundle.py "$archive" "$staged"
+          for path in server/dist desktop/dist-electron; do
+            if [[ -e "apps/$path" || -L "apps/$path" ]]; then
+              echo "Refusing to overwrite checked-out path apps/$path" >&2
+              exit 1
+            fi
+          done
+          cp -R "$staged/server/dist" apps/server/
+          cp -R "$staged/desktop/dist-electron" apps/desktop/
 
       # The WSL backend runs the Linux CLI archive inside the distro, so the
       # Windows desktop embeds the same-arch archive the release attaches.

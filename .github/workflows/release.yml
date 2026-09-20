@@ -42,6 +42,7 @@ concurrency:
   queue: max
 
 permissions:
+  actions: read
   contents: read
   id-token: none
 

@@ -12,7 +12,6 @@ export type SettingsSheetTarget =
   | "SettingsEnvironmentAgentBehavior"
   | "SettingsEnvironmentMaintenance"
   | "SettingsKeyboard"
-  | "SettingsProjectGrouping"
   | "SettingsClientStorage"
   | "SettingsDiagnostics"
   | "SettingsOpenSourceLicenses"
