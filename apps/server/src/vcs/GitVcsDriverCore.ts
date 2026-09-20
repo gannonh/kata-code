@@ -29,6 +29,7 @@ import {
 import {
   dedupeRemoteBranchesWithLocalMatches,
   normalizeGitRemoteUrl,
+  withoutGitRepositoryEnv,
 } from "@kata-sh/code-shared/git";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { compactTraceAttributes } from "@kata-sh/code-shared/observability";
@@ -857,7 +858,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             ChildProcess.make("git", commandInput.args, {
               cwd: commandInput.cwd,
               env: {
-                ...process.env,
+                ...withoutGitRepositoryEnv(process.env),
                 ...input.env,
                 ...trace2Monitor.env,
               },
