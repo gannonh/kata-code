@@ -21,7 +21,16 @@ const response = {
       pageInfo: { hasNextPage: false, endCursor: null },
     },
     projects: {
-      nodes: [{ id: "project-1", name: "Roadmap", teams: { nodes: [{ id: "team-1" }] } }],
+      nodes: [
+        {
+          id: "project-1",
+          name: "Roadmap",
+          teams: {
+            nodes: [{ id: "team-1" }],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      ],
       pageInfo: { hasNextPage: false, endCursor: null },
     },
     workflowStates: {
@@ -116,7 +125,16 @@ describe("Linear metadata reads", () => {
               pageInfo: { hasNextPage: false, endCursor: null },
             },
             projects: {
-              nodes: [{ id: "project-2", name: "Design", teams: { nodes: [{ id: "team-2" }] } }],
+              nodes: [
+                {
+                  id: "project-2",
+                  name: "Design",
+                  teams: {
+                    nodes: [{ id: "team-2" }],
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                  },
+                },
+              ],
               pageInfo: { hasNextPage: true, endCursor: "projects-cursor-2" },
             },
             workflowStates: {
@@ -137,7 +155,16 @@ describe("Linear metadata reads", () => {
               pageInfo: { hasNextPage: false, endCursor: null },
             },
             projects: {
-              nodes: [{ id: "project-3", name: "Launch", teams: { nodes: [{ id: "team-1" }] } }],
+              nodes: [
+                {
+                  id: "project-3",
+                  name: "Launch",
+                  teams: {
+                    nodes: [{ id: "team-1" }],
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                  },
+                },
+              ],
               pageInfo: { hasNextPage: false, endCursor: null },
             },
             workflowStates: {
@@ -195,6 +222,56 @@ describe("Linear metadata reads", () => {
         result.labels.map((label) => label.id),
         ["label-1", "label-3", "label-4"],
       );
+    }),
+  );
+
+  it.effect("follows the nested team cursor for each Linear project", () =>
+    Effect.gen(function* () {
+      const requests: Array<LinearGraphqlRequest> = [];
+      const metadata = makeLinearRoutineMetadata({
+        graphql: (request) => {
+          requests.push(request);
+          if (requests.length === 1)
+            return Effect.succeed({
+              data: {
+                ...response.data,
+                projects: {
+                  nodes: [
+                    {
+                      id: "project-1",
+                      name: "Roadmap",
+                      teams: {
+                        nodes: [{ id: "team-1" }],
+                        pageInfo: { hasNextPage: true, endCursor: "project-teams-cursor" },
+                      },
+                    },
+                  ],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            });
+          return Effect.succeed({
+            data: {
+              project: {
+                teams: {
+                  nodes: [{ id: "team-2" }],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          });
+        },
+      });
+
+      const result = yield* metadata.read("lin_oauth_access_token");
+
+      assert.equal(requests.length, 2);
+      assert.include(requests[0]?.query ?? "", "teams(first: 50)");
+      assert.deepEqual(requests[1]?.variables, {
+        projectId: "project-1",
+        projectTeamsAfter: "project-teams-cursor",
+      });
+      assert.deepEqual(result.projects[0]?.teamIds, ["team-1", "team-2"]);
     }),
   );
 

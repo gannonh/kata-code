@@ -799,6 +799,7 @@ describe("RoutinesPage Linear trigger setup", () => {
       labels: [],
     };
     let authorizationStarted = false;
+    let connectionActionCount = 0;
     testState.command.mockImplementation(async (value: unknown) => {
       const input = (value as { input?: Record<string, unknown> }).input ?? {};
       if (input.provider === "linear") {
@@ -814,9 +815,13 @@ describe("RoutinesPage Linear trigger setup", () => {
         authorizationStarted = true;
         return { _tag: "Success", value: { authorizeUrl: "https://linear.app/oauth/authorize" } };
       }
+      connectionActionCount += 1;
       return {
         _tag: "Success",
-        value: { ...linearConnectionFor(input.id as string), status: "verified" },
+        value: {
+          ...linearConnectionFor(input.id as string),
+          status: connectionActionCount === 1 ? "verified" : "disabled",
+        },
       };
     });
     renderer = await openNewRoutineEditor();
@@ -877,6 +882,13 @@ describe("RoutinesPage Linear trigger setup", () => {
       await Promise.resolve();
     });
     expect(nodeText(renderer!.root)).toContain("First delivery received. The connection is ready.");
+    expect(
+      nodeText(
+        renderer!.root.findByProps({
+          "data-testid": "routine-linear-connection-diagnostics",
+        }),
+      ),
+    ).toContain("Verified");
 
     await act(async () => {
       buttonWithText(renderer!, "Disable").props.onClick?.();
@@ -887,6 +899,15 @@ describe("RoutinesPage Linear trigger setup", () => {
     expect(nodeText(renderer!.root)).toContain(
       "Delete the webhook in Linear's workspace settings to stop provider deliveries.",
     );
+    expect(
+      nodeText(
+        renderer!.root.findByProps({
+          "data-testid": "routine-linear-connection-diagnostics",
+        }),
+      ),
+    ).toContain("Disabled");
+    expect(buttonWithText(renderer!, "Verify").props.disabled).toBe(true);
+    expect(buttonWithText(renderer!, "Disable").props.disabled).toBe(true);
   });
 
   it("uses the selected workspace after creating a different Linear connection", async () => {

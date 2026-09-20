@@ -45,7 +45,11 @@ const METADATA_QUERY = `query RoutineMetadata(
     pageInfo { hasNextPage endCursor }
   }
   projects(first: 100, after: $projectsAfter) {
-    nodes { id name teams { nodes { id } } }
+    nodes {
+      id
+      name
+      teams(first: 50) { nodes { id } pageInfo { hasNextPage endCursor } }
+    }
     pageInfo { hasNextPage endCursor }
   }
   workflowStates(first: 250, after: $workflowStatesAfter) {
@@ -55,6 +59,15 @@ const METADATA_QUERY = `query RoutineMetadata(
   issueLabels(first: 250, after: $issueLabelsAfter) {
     nodes { id name team { id } }
     pageInfo { hasNextPage endCursor }
+  }
+}`;
+
+const PROJECT_TEAMS_QUERY = `query RoutineProjectTeams($projectId: String!, $projectTeamsAfter: String) {
+  project(id: $projectId) {
+    teams(first: 250, after: $projectTeamsAfter) {
+      nodes { id }
+      pageInfo { hasNextPage endCursor }
+    }
   }
 }`;
 
@@ -86,7 +99,10 @@ const MetadataJson = Schema.Struct({
         Schema.Struct({
           id: Schema.String,
           name: Schema.String,
-          teams: Schema.Struct({ nodes: Schema.Array(Schema.Struct({ id: Schema.String })) }),
+          teams: Schema.Struct({
+            nodes: Schema.Array(Schema.Struct({ id: Schema.String })),
+            pageInfo: PageInfo,
+          }),
         }),
       ),
       pageInfo: PageInfo,
@@ -112,6 +128,19 @@ const MetadataJson = Schema.Struct({
       ),
       pageInfo: PageInfo,
     }),
+  }),
+});
+
+const ProjectTeamsJson = Schema.Struct({
+  data: Schema.Struct({
+    project: Schema.NullOr(
+      Schema.Struct({
+        teams: Schema.Struct({
+          nodes: Schema.Array(Schema.Struct({ id: Schema.String })),
+          pageInfo: PageInfo,
+        }),
+      }),
+    ),
   }),
 });
 
@@ -227,6 +256,7 @@ export function makeLinearRoutineMetadata(dependencies: {
   readonly graphql: (request: LinearGraphqlRequest) => Effect.Effect<unknown, LinearMetadataError>;
 }): LinearRoutineMetadataShape {
   const decodeMetadata = Schema.decodeUnknownEffect(MetadataJson);
+  const decodeProjectTeams = Schema.decodeUnknownEffect(ProjectTeamsJson);
   const read: LinearRoutineMetadataShape["read"] = (accessToken) =>
     Effect.gen(function* () {
       const teams: Array<
@@ -297,14 +327,34 @@ export function makeLinearRoutineMetadata(dependencies: {
 
       if (workspace === undefined)
         return yield* Effect.fail(invalid("Linear returned no workspace metadata."));
+      const mappedProjects: RoutineLinearMetadata["projects"][number][] = [];
+      for (const project of projects) {
+        const teamIds = project.teams.nodes.map((team) => team.id);
+        let pageInfo = project.teams.pageInfo;
+        while (pageInfo.hasNextPage) {
+          if (pageInfo.endCursor === null)
+            return yield* Effect.fail(invalid("Linear returned an invalid project team cursor."));
+          const raw = yield* dependencies.graphql({
+            accessToken,
+            query: PROJECT_TEAMS_QUERY,
+            variables: { projectId: project.id, projectTeamsAfter: pageInfo.endCursor },
+          });
+          const decoded = yield* decodeProjectTeams(raw).pipe(
+            Effect.mapError(() => invalid("Linear returned an unexpected project team response.")),
+          );
+          if (decoded.data.project === null)
+            return yield* Effect.fail(
+              invalid("A Linear project disappeared while its teams were being read."),
+            );
+          teamIds.push(...decoded.data.project.teams.nodes.map((team) => team.id));
+          pageInfo = decoded.data.project.teams.pageInfo;
+        }
+        mappedProjects.push({ id: project.id, name: project.name, teamIds });
+      }
       return {
         workspace,
         teams,
-        projects: projects.map((project) => ({
-          id: project.id,
-          name: project.name,
-          teamIds: project.teams.nodes.map((team) => team.id),
-        })),
+        projects: mappedProjects,
         states: states.map((state) => ({
           id: state.id,
           name: state.name,

@@ -210,6 +210,55 @@ describe("routine draft generation", () => {
       expect(result.assistantMessage).toMatch(/state.*unavailable/i);
     }),
   );
+  it.effect.each([
+    {
+      event: "status_changed" as const,
+      stateId: "state-other-team",
+    },
+    {
+      event: "label_added" as const,
+      labelId: "label-other-team",
+    },
+  ])("clarifies a generated Linear filter outside the selected project: %j", (eventFilter) =>
+    Effect.gen(function* () {
+      const source: RoutineDraftEventSource = {
+        ...linearEventSource,
+        teams: [...linearEventSource.teams, { id: "team-other", name: "Other", key: "OTHER" }],
+        states: [
+          ...linearEventSource.states,
+          {
+            id: "state-other-team",
+            name: "Other state",
+            teamId: "team-other",
+            type: "started",
+          },
+        ],
+        labels: [
+          ...linearEventSource.labels,
+          { id: "label-other-team", name: "Other label", teamId: "team-other" },
+        ],
+      };
+      const result = yield* service(
+        {
+          draft: {
+            ...fields,
+            trigger: {
+              kind: "linear",
+              connectionId: "linear-connection-1",
+              workspaceId: "workspace-uuid",
+              projectId: "project-uuid",
+              ...eventFilter,
+            },
+          },
+          assistantMessage: "Ready",
+        },
+        models,
+        [source],
+      ).generate({ ...input, message: "Use the selected Linear project" });
+      expect(result.draft).toBeNull();
+      expect(result.assistantMessage).toMatch(/not in project/i);
+    }),
+  );
   it.effect("clarifies a Linear trigger whose connection disappears after generation", () =>
     Effect.gen(function* () {
       let active = true;

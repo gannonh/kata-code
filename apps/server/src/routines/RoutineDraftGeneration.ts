@@ -86,8 +86,11 @@ const linearTriggerClarification = (
     return `The Linear workspace "${trigger.workspaceId}" is unavailable for connection "${trigger.connectionId}". Which connected workspace should this routine use?`;
   if (trigger.teamId !== undefined && !source.teams.some((team) => team.id === trigger.teamId))
     return `The Linear team "${trigger.teamId}" is unavailable for connection "${trigger.connectionId}". Which team should this routine use?`;
+  const project =
+    trigger.projectId === undefined
+      ? undefined
+      : source.projects.find((candidate) => candidate.id === trigger.projectId);
   if (trigger.projectId !== undefined) {
-    const project = source.projects.find((candidate) => candidate.id === trigger.projectId);
     if (!project)
       return `The Linear project "${trigger.projectId}" is unavailable for connection "${trigger.connectionId}". Which project should this routine use?`;
     if (trigger.teamId !== undefined && !project.teamIds.includes(trigger.teamId))
@@ -99,6 +102,8 @@ const linearTriggerClarification = (
       return `The Linear state "${trigger.stateId}" is unavailable for connection "${trigger.connectionId}". Which state should trigger this routine?`;
     if (trigger.teamId !== undefined && state.teamId !== trigger.teamId)
       return `The Linear state "${trigger.stateId}" is not in team "${trigger.teamId}". Which state should trigger this routine?`;
+    if (project !== undefined && !project.teamIds.includes(state.teamId))
+      return `The Linear state "${trigger.stateId}" is not in project "${project.id}". Which state should trigger this routine?`;
   }
   if (trigger.event === "label_added") {
     const label = source.labels.find((candidate) => candidate.id === trigger.labelId);
@@ -106,6 +111,8 @@ const linearTriggerClarification = (
       return `The Linear label "${trigger.labelId}" is unavailable for connection "${trigger.connectionId}". Which label should trigger this routine?`;
     if (label.teamId !== null && trigger.teamId !== undefined && label.teamId !== trigger.teamId)
       return `The Linear label "${trigger.labelId}" is not in team "${trigger.teamId}". Which label should trigger this routine?`;
+    if (label.teamId !== null && project !== undefined && !project.teamIds.includes(label.teamId))
+      return `The Linear label "${trigger.labelId}" is not in project "${project.id}". Which label should trigger this routine?`;
   }
   return null;
 };

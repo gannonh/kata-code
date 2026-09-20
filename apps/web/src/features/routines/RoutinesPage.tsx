@@ -871,6 +871,8 @@ function LinearTriggerFields({
       setSetupMessage(errorMessage(result.cause));
       return;
     }
+    if (createdConnection?.id === result.value.id && result.value.provider === "linear")
+      setCreatedConnection(result.value);
     setSetupMessage(
       result.value.status === "verified"
         ? "First delivery received. The connection is ready."
@@ -884,9 +886,13 @@ function LinearTriggerFields({
     setSetupMessage(null);
     const result = await disableConnection({ environmentId, input: { id: connection.id } });
     setSetupBusy(false);
-    setSetupMessage(
-      result._tag === "Failure" ? errorMessage(result.cause) : LINEAR_PROVIDER_REMOVAL_NOTE,
-    );
+    if (result._tag === "Failure") {
+      setSetupMessage(errorMessage(result.cause));
+      return;
+    }
+    if (createdConnection?.id === result.value.id && result.value.provider === "linear")
+      setCreatedConnection(result.value);
+    setSetupMessage(LINEAR_PROVIDER_REMOVAL_NOTE);
   };
 
   const lastDelivery = connection?.lastDelivery ?? null;
