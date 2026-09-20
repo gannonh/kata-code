@@ -471,6 +471,8 @@ const makeRoutineConnections = Effect.gen(function* () {
     "RoutineConnections.beginAuthorization",
   )(function* (input) {
     const id = yield* validateConnectionId(input.id);
+    if ((yield* store.findConnection(id)) !== null)
+      return yield* failure("conflict", "A routine connection with this ID already exists.");
     return yield* linearOAuthRelay.start({
       environmentId: input.environmentId,
       connectionId: id,
@@ -528,12 +530,11 @@ const makeRoutineConnections = Effect.gen(function* () {
         // Persist the local stop before remote cleanup. This closes the
         // acceptance gate even if token refresh, provider deletion, or relay
         // revocation is interrupted.
-        const updated = yield* store.updateConnection(current.id, (connection) =>
+        let updated = yield* store.updateConnection(current.id, (connection) =>
           connection.provider === "linear"
             ? {
                 ...connection,
                 status: "disabled",
-                webhookId: null,
                 updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
               }
             : connection,
@@ -543,8 +544,9 @@ const makeRoutineConnections = Effect.gen(function* () {
           .pipe(
             Effect.mapError(() => failure("persistence", "Could not remove the signing secret.")),
           );
-        // Provider-side delete and revoke are best effort after the local
-        // disabled state is durable.
+        // Delete the provider webhook before revoking its credentials. Keep
+        // both cleanup handles when deletion fails so a later disable retries.
+        let webhookDeleted = current.webhookId === null;
         if (current.webhookId !== null) {
           const bundle = yield* ensureFreshLinearAccessToken({
             secrets,
@@ -553,20 +555,30 @@ const makeRoutineConnections = Effect.gen(function* () {
             connectionId: current.id,
           }).pipe(Effect.result);
           if (bundle._tag === "Success") {
-            yield* linearWebhookAdmin
+            const deletion = yield* linearWebhookAdmin
               .deleteWebhook({
                 accessToken: bundle.success.accessToken,
                 webhookId: current.webhookId,
               })
-              .pipe(
-                Effect.catch((error) =>
-                  Effect.logWarning("routine Linear webhook could not be deleted", {
-                    connectionId: current.id,
-                    webhookId: current.webhookId,
-                    detail: error.message,
-                  }),
-                ),
+              .pipe(Effect.result);
+            if (deletion._tag === "Success") {
+              webhookDeleted = true;
+              updated = yield* store.updateConnection(current.id, (connection) =>
+                connection.provider === "linear" && connection.webhookId === current.webhookId
+                  ? {
+                      ...connection,
+                      webhookId: null,
+                      updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
+                    }
+                  : connection,
               );
+            } else {
+              yield* Effect.logWarning("routine Linear webhook could not be deleted", {
+                connectionId: current.id,
+                webhookId: current.webhookId,
+                detail: deletion.failure.message,
+              });
+            }
           } else {
             yield* Effect.logWarning("routine Linear webhook delete skipped", {
               connectionId: current.id,
@@ -574,16 +586,17 @@ const makeRoutineConnections = Effect.gen(function* () {
             });
           }
         }
-        yield* linearOAuthRelay
+        if (!webhookDeleted) return updated;
+        const revocation = yield* linearOAuthRelay
           .revoke({ environmentId: input.environmentId, connectionId: current.id })
-          .pipe(
-            Effect.catch((error) =>
-              Effect.logWarning("routine Linear authorization could not be revoked", {
-                connectionId: current.id,
-                detail: error.message,
-              }),
-            ),
-          );
+          .pipe(Effect.result);
+        if (revocation._tag === "Failure") {
+          yield* Effect.logWarning("routine Linear authorization could not be revoked", {
+            connectionId: current.id,
+            detail: revocation.failure.message,
+          });
+          return updated;
+        }
         yield* secrets.remove(routineLinearOAuthSecretName(current.id)).pipe(
           Effect.catch((error) =>
             Effect.logWarning("routine Linear OAuth bundle cleanup failed", {

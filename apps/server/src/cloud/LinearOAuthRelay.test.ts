@@ -281,6 +281,20 @@ it.effect("revoke asks the relay to drop the Linear authorization", () =>
   }),
 );
 
+it.effect("fails when the relay does not revoke the Linear authorization", () =>
+  Effect.gen(function* () {
+    const { relay } = makeHarness(() => Response.json({ ok: false }));
+
+    const error = yield* relay
+      .revoke({ environmentId: ENVIRONMENT_ID, connectionId: CONNECTION_ID })
+      .pipe(Effect.flip);
+
+    assert.instanceOf(error, RoutineError);
+    assert.equal(error.code, "blocked");
+    assert.include(error.message, "could not revoke this Linear authorization");
+  }),
+);
+
 it.effect("maps a rejected Linear grant to blocked without leaking the response", () =>
   Effect.gen(function* () {
     const { relay } = makeHarness(() =>

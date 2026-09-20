@@ -57,7 +57,8 @@ export const linearClientApi = HttpApiBuilder.group(
         Effect.fn("relay.api.linearClient.linearOAuthRevoke")(
           function* (args) {
             const { userId } = yield* RelayClientPrincipal;
-            return { ok: yield* broker.revoke({ userId, ...args.payload }) };
+            const result = yield* broker.revoke({ userId, ...args.payload });
+            return { ok: result !== "owner-mismatch" };
           },
           mapErrorTags({
             LinearOAuthNotConfigured: notConfigured,

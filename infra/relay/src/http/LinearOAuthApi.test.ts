@@ -483,6 +483,30 @@ describe("relay Linear OAuth client API", () => {
     }).pipe(Effect.scoped);
   });
 
+  it.effect("treats an already absent Linear authorization as revoked", () => {
+    const services = makeLinearTestServices();
+    return Effect.gen(function* () {
+      const app = yield* Effect.acquireRelease(
+        Effect.sync(() => toWebHandler(makeApiApp(services))),
+        (app) => Effect.promise(() => app.dispose()),
+      );
+
+      const response = yield* Effect.promise(() =>
+        app.handler(
+          new Request("https://relay.example.test/v1/linear/oauth/revoke", {
+            method: "POST",
+            headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+            body: `{"environmentId":"environment-1","connectionId":"connection-1"}`,
+          }),
+        ),
+      );
+
+      expect(response.status).toBe(200);
+      expect(yield* Effect.promise(() => response.text())).toContain('"ok":true');
+      expect(services.revoked).toEqual([]);
+    }).pipe(Effect.scoped);
+  });
+
   it.effect("rejects starting an authorization when the relay has no Linear configuration", () => {
     const services = makeLinearTestServices({
       linearSettings: { ...relaySettings, linearOAuth: null },

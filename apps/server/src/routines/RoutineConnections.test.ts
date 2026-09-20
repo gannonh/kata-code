@@ -201,6 +201,7 @@ const unusedRefresh: LinearOAuthRelayShape["refresh"] = () =>
   Effect.die("LinearOAuthRelay.refresh is not used by this test");
 let linearOAuthRefresh: LinearOAuthRelayShape["refresh"] = unusedRefresh;
 const revokeCalls: Array<{ environmentId: string; connectionId: string }> = [];
+let revokeStatus: "ok" | "failure" = "ok";
 const linearOAuthRelayLayer = Layer.mock(LinearOAuthRelay)({
   start: (input) =>
     Effect.sync(() => {
@@ -208,8 +209,12 @@ const linearOAuthRelayLayer = Layer.mock(LinearOAuthRelay)({
     }).pipe(Effect.andThen(linearOAuthStart(input))),
   refresh: (input) => linearOAuthRefresh(input),
   revoke: (input) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       revokeCalls.push(input);
+      if (revokeStatus === "failure")
+        return yield* Effect.fail(
+          new RoutineError({ code: "blocked", message: "Relay refused the revocation." }),
+        );
     }),
 });
 type WebhookCreateInput = Parameters<LinearWebhookAdminShape["createWebhook"]>[0];
@@ -217,6 +222,7 @@ const webhookCreates: Array<WebhookCreateInput> = [];
 const webhookDeletes: Array<{ accessToken: string; webhookId: string }> = [];
 let inspectLinearCleanup: (() => Effect.Effect<void>) | null = null;
 let webhookCreateStatus: "ok" | "failure" = "ok";
+let webhookDeleteStatus: "ok" | "failure" = "ok";
 const defaultLinearWebhookCreate: LinearWebhookAdminShape["createWebhook"] = () =>
   webhookCreateStatus === "ok"
     ? Effect.succeed({ webhookId: "linear-webhook-1", secret: "linear-signing-secret" })
@@ -228,9 +234,14 @@ const linearWebhookAdminLayer = Layer.mock(LinearWebhookAdmin)({
     return linearWebhookCreate(input);
   },
   deleteWebhook: (input) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
       webhookDeletes.push(input);
-    }).pipe(Effect.andThen(() => inspectLinearCleanup?.() ?? Effect.void)),
+      if (webhookDeleteStatus === "failure")
+        return yield* Effect.fail(
+          new RoutineError({ code: "blocked", message: "Linear refused the webhook deletion." }),
+        );
+      yield* inspectLinearCleanup?.() ?? Effect.void;
+    }),
 });
 const layer = RoutineConnectionsLive.pipe(
   Layer.provideMerge(RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory))),
@@ -939,6 +950,69 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
       }),
   );
 
+  it.effect(
+    "keeps the Linear webhook handle and OAuth bundle when deletion fails so retry can finish cleanup",
+    () =>
+      Effect.gen(function* () {
+        const connections = yield* RoutineConnections;
+        const secrets = yield* ServerSecretStore.ServerSecretStore;
+        const store = yield* RoutineStore;
+        const id = RoutineConnectionId.make("connection-linear-disable-retry");
+        yield* storeBundle(id);
+        yield* connections.create(linearCreate(id));
+        const revokesBefore = revokeCalls.length;
+        webhookDeleteStatus = "failure";
+        const first = yield* connections
+          .disable({ environmentId, id })
+          .pipe(Effect.ensuring(Effect.sync(() => (webhookDeleteStatus = "ok"))));
+        assert.equal(first.status, "disabled");
+        assert.equal(first.provider, "linear");
+        if (first.provider !== "linear") return;
+        assert.equal(first.webhookId, "linear-webhook-1");
+        const persisted = yield* store.getConnection(environmentId, id);
+        assert.equal(persisted.status, "disabled");
+        assert.equal(persisted.provider, "linear");
+        if (persisted.provider !== "linear") return;
+        assert.equal(persisted.webhookId, "linear-webhook-1");
+        assert.isTrue(Option.isSome(yield* secrets.get(routineLinearOAuthSecretName(id))));
+        assert.equal(revokeCalls.length, revokesBefore);
+
+        const retried = yield* connections.disable({ environmentId, id });
+        assert.equal(retried.status, "disabled");
+        assert.equal(retried.provider, "linear");
+        if (retried.provider !== "linear") return;
+        assert.isNull(retried.webhookId);
+        assert.isTrue(Option.isNone(yield* secrets.get(routineLinearOAuthSecretName(id))));
+        assert.equal(revokeCalls.length, revokesBefore + 1);
+      }),
+  );
+
+  it.effect("keeps the Linear OAuth bundle when revocation fails so retry can finish cleanup", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const secrets = yield* ServerSecretStore.ServerSecretStore;
+      const id = RoutineConnectionId.make("connection-linear-revoke-retry");
+      yield* storeBundle(id);
+      yield* connections.create(linearCreate(id));
+      const revokesBefore = revokeCalls.length;
+      revokeStatus = "failure";
+      const first = yield* connections
+        .disable({ environmentId, id })
+        .pipe(Effect.ensuring(Effect.sync(() => (revokeStatus = "ok"))));
+      assert.equal(first.status, "disabled");
+      assert.equal(first.provider, "linear");
+      if (first.provider !== "linear") return;
+      assert.isNull(first.webhookId);
+      assert.isTrue(Option.isSome(yield* secrets.get(routineLinearOAuthSecretName(id))));
+      assert.equal(revokeCalls.length, revokesBefore + 1);
+
+      const retried = yield* connections.disable({ environmentId, id });
+      assert.equal(retried.status, "disabled");
+      assert.isTrue(Option.isNone(yield* secrets.get(routineLinearOAuthSecretName(id))));
+      assert.equal(revokeCalls.length, revokesBefore + 2);
+    }),
+  );
+
   it.effect("begins a Linear authorization through the relay for this environment", () =>
     Effect.gen(function* () {
       const connections = yield* RoutineConnections;
@@ -946,6 +1020,20 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
       const authorization = yield* connections.beginAuthorization({ environmentId, id });
       assert.deepEqual(authorization, { authorizeUrl: DEFAULT_AUTHORIZE_URL });
       assert.deepEqual(lastStartInput, { environmentId, connectionId: id });
+    }),
+  );
+
+  it.effect("rejects Linear authorization for an existing connection ID", () =>
+    Effect.gen(function* () {
+      const connections = yield* RoutineConnections;
+      const id = RoutineConnectionId.make("connection-linear-existing");
+      yield* storeBundle(id);
+      yield* connections.create(linearCreate(id));
+      lastStartInput = null;
+      const error = yield* connections.beginAuthorization({ environmentId, id }).pipe(Effect.flip);
+      assert.equal(error.code, "conflict");
+      assert.equal(error.message, "A routine connection with this ID already exists.");
+      assert.isNull(lastStartInput);
     }),
   );
 

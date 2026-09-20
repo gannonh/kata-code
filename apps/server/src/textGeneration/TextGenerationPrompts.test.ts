@@ -125,6 +125,11 @@ describe("buildRoutineDraftPrompt", () => {
     expect(result.prompt).toMatch(/GitHub, Slack, Microsoft Teams, Sentry, PagerDuty.*unsupported/);
     expect(result.prompt).toMatch(/status_changed requires stateId/);
     expect(result.prompt).toMatch(/label_added requires labelId/);
+    expect(result.prompt).toContain("Always include teamId and projectId.");
+    expect(result.prompt).toContain("use null for an unscoped teamId or projectId");
+    expect(result.prompt).toContain(
+      "A null teamId or projectId means every team or project inside the connection scope.",
+    );
   });
 
   it("keeps every paginated Linear resource available to chat generation", () => {

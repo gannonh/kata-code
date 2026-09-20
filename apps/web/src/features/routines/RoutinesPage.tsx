@@ -867,6 +867,7 @@ function LinearTriggerFields({
     setSetupMessage(null);
     setAuthorizationUrl(null);
     setAuthorizationPopupBlocked(false);
+    setCreatedConnection(null);
     const storedId = readPendingLinearConnectionId(environmentId);
     const reusableId = [storedId, pendingConnectionId].find(
       (candidate) =>
@@ -1099,9 +1100,10 @@ function LinearTriggerFields({
                   size="sm"
                   variant="ghost"
                   onClick={() => void runDisable()}
-                  disabled={disabled || connection.status === "disabled"}
+                  disabled={disabled}
                 >
-                  <Trash2Icon className="size-3.5 text-destructive" /> Disable
+                  <Trash2Icon className="size-3.5 text-destructive" />
+                  {connection.status === "disabled" ? "Retry cleanup" : "Disable"}
                 </Button>
               </div>
             </div>

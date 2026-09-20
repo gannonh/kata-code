@@ -67,6 +67,8 @@ const MISSING_ENVIRONMENT_CREDENTIAL =
   "This environment has no Kata Code Connect relay credential. Link the environment, then try again.";
 const MISSING_LINKED_USER =
   "This environment has no bound Kata Code Connect owner. Relink the environment, then try again.";
+const LINEAR_OAUTH_REVOKE_FAILED_MESSAGE =
+  "Kata Code Connect could not revoke this Linear authorization. Sign in with the account that linked the environment, then try again.";
 export const LINEAR_OAUTH_REAUTHORIZATION_REQUIRED_MESSAGE =
   "Linear no longer accepts this connection's authorization. Connect Linear again.";
 
@@ -203,12 +205,15 @@ export function makeLinearOAuthRelay(
         relayUrl,
         authorization: null,
       });
-      yield* client.linearClient
+      const result = yield* client.linearClient
         .linearOAuthRevoke({
           headers: { authorization: `Bearer ${accessToken}` },
           payload: { environmentId: input.environmentId, connectionId: input.connectionId },
         })
         .pipe(Effect.mapError(relayFailure("revoke")));
+      if (!result.ok) {
+        return yield* blocked(LINEAR_OAUTH_REVOKE_FAILED_MESSAGE);
+      }
     },
   );
 
