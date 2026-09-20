@@ -9,7 +9,11 @@ import {
   buildRoutineDraftPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
-import { normalizeCliError, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
+import {
+  normalizeCliError,
+  sanitizeThreadTitle,
+  toJsonSchemaObject,
+} from "./TextGenerationUtils.ts";
 import { TextGenerationError } from "@kata-sh/code-contracts";
 
 describe("buildCommitMessagePrompt", () => {
@@ -257,6 +261,14 @@ describe("buildBranchNamePrompt", () => {
 });
 
 describe("buildThreadTitlePrompt", () => {
+  it("requires each generated field in the strict response schema", () => {
+    const { outputSchema } = buildThreadTitlePrompt({ message: "Fix this" });
+    expect(toJsonSchemaObject(outputSchema)).toMatchObject({
+      required: ["title", "needsRefinement"],
+      properties: { title: { type: "string" }, needsRefinement: { type: "boolean" } },
+    });
+  });
+
   it("includes the user message without absent attachment metadata", () => {
     const result = buildThreadTitlePrompt({
       message: "Investigate reconnect regressions after session restore",
@@ -273,9 +285,6 @@ describe("buildThreadTitlePrompt", () => {
     );
     expect(result.prompt).toContain(
       "Name the product change, not the mock, plan, report, branch, or PR used to produce it.",
-    );
-    expect(result.prompt).not.toContain(
-      "Title should summarize the user's request, not restate it verbatim.",
     );
   });
 
@@ -365,15 +374,22 @@ describe("sanitizeThreadTitle", () => {
       sanitizeThreadTitle(
         '{"title": "Reconnect failures after restart because the session state does not recover"}',
       ),
-    ).toBe("Reconnect failures after restart because the se...");
+    ).toBe("Reconnect failures after restart because the session state does not recover");
   });
 
-  it("truncates long titles with the shared sidebar-safe limit", () => {
+  it("keeps complete titles for client display truncation", () => {
     expect(
       sanitizeThreadTitle(
         '  "Reconnect failures after restart because the session state does not recover"  ',
       ),
-    ).toBe("Reconnect failures after restart because the se...");
+    ).toBe("Reconnect failures after restart because the session state does not recover");
+  });
+
+  it("caps runaway titles so a paragraph cannot reach the sidebar", () => {
+    const words = Array.from({ length: 40 }, (_, index) => `word${index}`).join(" ");
+    const title = sanitizeThreadTitle(words);
+    expect(title.length).toBeLessThanOrEqual(120);
+    expect(title.endsWith("...")).toBe(true);
   });
 });
 

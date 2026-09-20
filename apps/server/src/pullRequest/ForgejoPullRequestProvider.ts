@@ -7,6 +7,7 @@ import type {
 } from "@kata-sh/code-contracts";
 import { decodeJsonResult } from "@kata-sh/code-shared/schemaJson";
 import { ForgejoCli, type ForgejoApiInput } from "../sourceControl/ForgejoCli.ts";
+import { parseDiffFileRevisions } from "./bitbucketDiffRevisions.ts";
 import {
   PullRequestProviderError,
   type ProviderChangeRequestDetail,
@@ -37,6 +38,7 @@ import {
 
 const CAPABILITIES: PullRequestCapabilities = {
   diff: true,
+  viewedFiles: "environment",
   comment: true,
   actions: ["merge", "close", "reopen", "update-branch"],
   mergeMethods: ["merge", "squash", "rebase"],
@@ -350,6 +352,17 @@ export const make = Effect.gen(function* () {
         };
       },
     ),
+    getFileRevisions: Effect.fn("ForgejoPullRequestProvider.getFileRevisions")(function* (input) {
+      const result = yield* request({ ...input, path: `${pullPath(input)}.diff` });
+      if (result.stdoutTruncated) {
+        return yield* failure("getFileRevisions", "Forgejo diff exceeded the output limit.");
+      }
+      const revisions = new Map(parseDiffFileRevisions(result.stdout));
+      for (const path of input.paths) {
+        if (!revisions.has(path)) revisions.set(path, "");
+      }
+      return { revisions, complete: true };
+    }),
     getDiff: (input) =>
       request({
         ...input,

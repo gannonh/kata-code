@@ -390,7 +390,7 @@ const stageLauncherPackage = Effect.fn("stageLauncherPackage")(function* (input:
   // Older service updaters and launchers run this exact path with Node.
   // Keep it in the package so they can preflight and start the new executable.
   yield* fs.makeDirectory(path.join(stageDir, "dist"));
-  yield* fs.writeFileString(path.join(stageDir, "dist/bin.mjs"), legacyCliLauncherScript("npm"));
+  yield* fs.writeFileString(path.join(stageDir, "dist/bin.mjs"), legacyCliLauncherScript());
   const readme = yield* path.fromFileUrl(new URL("../apps/server/README.md", import.meta.url));
   if (yield* fs.exists(readme)) {
     yield* fs.copyFile(readme, path.join(stageDir, "README.md"));
@@ -463,16 +463,16 @@ export const buildNpmPlatformPackages = Effect.fn("buildNpmPlatformPackages")(fu
 const command = Command.make(
   "build-npm-platform-packages",
   {
-    archivesDir: Flag.string("archives-dir").pipe(
+    archivesDir: Flag.String("archives-dir").pipe(
       Flag.withDescription("Directory holding the release's katacode archives."),
     ),
-    version: Flag.string("version").pipe(
+    version: Flag.String("version").pipe(
       Flag.withDescription(
         "Exact release version; selects the archives and versions the packages.",
       ),
     ),
-    outputDir: Flag.string("output-dir").pipe(Flag.withDefault("npm-packages")),
-    allowMissing: Flag.boolean("allow-missing").pipe(
+    outputDir: Flag.String("output-dir").pipe(Flag.withDefault("npm-packages")),
+    allowMissing: Flag.Boolean("allow-missing").pipe(
       Flag.withDefault(false),
       Flag.withDescription("Build a launcher that lists only the platforms present."),
     ),

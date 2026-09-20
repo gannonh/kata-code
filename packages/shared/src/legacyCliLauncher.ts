@@ -1,5 +1,5 @@
 /** Node entry point for service launchers installed before executable releases. */
-export function legacyCliLauncherScript(distribution: "npm" | "archive"): string {
+export function legacyCliLauncherScript(distribution: "npm" | "archive" = "npm"): string {
   const executable =
     distribution === "npm"
       ? 'join(dirname(require.resolve("@kata-sh/code-cli-" + process.platform + "-" + process.arch + "/package.json")), executableName)'

@@ -37,11 +37,12 @@ source-build default.
 In Clerk's OAuth applications settings:
 
 1. Create a public OAuth application for the Kata Code CLI, using authorization-code exchange with PKCE.
-2. Allow both redirect URIs: `http://127.0.0.1:34338/callback` and
-   `https://app.kata.sh/connect/callback`. A custom `KATACODE_HOSTED_APP_URL` needs its own
-   `/connect/callback` URL. Headless and SSH authorization depend on the hosted redirect.
-3. Enable the `openid`, `profile`, and `email` scopes.
-4. Set `KATACODE_CLERK_CLI_OAUTH_CLIENT_ID` to the generated public client ID in local and release
+2. Allow the redirect URI `http://127.0.0.1:34338/callback`.
+3. Enable the `openid`, `profile`, `email`, and `offline_access` scopes.
+4. Enable **Device authorization grant** on the application. Headless and SSH authorization use
+   it, and Clerk only advertises the device endpoint once it is on. The feature is in beta and
+   Clerk enables it per account on request.
+5. Set `KATACODE_CLERK_CLI_OAUTH_CLIENT_ID` to the generated public client ID in local and release
    build environments.
 
 ## JWT template

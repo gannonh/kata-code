@@ -1,0 +1,27 @@
+import {
+  PROTOCOL_SCHEME,
+  PROTOCOL_SCHEME_DEV,
+  PROTOCOL_SCHEME_PREVIEW,
+} from "@kata-sh/code-shared/branding";
+
+/**
+ * The Expo dev client launches the app via
+ * <scheme>://expo-development-client/?url=<packager> — that URL addresses
+ * the launcher, not app navigation. Without this filter it falls through
+ * to the NotFound wildcard route on every dev launch.
+ * expo-sharing uses a private lifecycle URL only to wake the app. The
+ * persisted share inbox in App.tsx owns navigation once the payload is durable.
+ * A scheme-only URL, as sent by iOS dictation keyboards returning to the app,
+ * only wakes the app and must not reset navigation to Home.
+ */
+const SCHEME_ONLY_URL = new RegExp(
+  `^(${[PROTOCOL_SCHEME, PROTOCOL_SCHEME_DEV, PROTOCOL_SCHEME_PREVIEW].join("|")}):\\/*$`,
+);
+
+export function shouldHandleAppLink(url: string): boolean {
+  return (
+    !url.includes("expo-development-client") &&
+    !url.includes("://expo-sharing") &&
+    !SCHEME_ONLY_URL.test(url)
+  );
+}

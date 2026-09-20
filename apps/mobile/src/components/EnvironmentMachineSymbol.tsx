@@ -1,9 +1,8 @@
 import type { EnvironmentMachineKind } from "@kata-sh/code-contracts";
-import type { SFSymbol } from "expo-symbols";
 
-import { SymbolView } from "./AppSymbol";
+import { SymbolView, type AppSymbolName } from "./AppSymbol";
 
-const SYMBOL_BY_KIND: Record<EnvironmentMachineKind, SFSymbol> = {
+const SYMBOL_BY_KIND: Record<EnvironmentMachineKind, AppSymbolName> = {
   server: "server.rack",
   cloud: "cloud",
   linux: "terminal",

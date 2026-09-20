@@ -23,6 +23,7 @@ import {
   healthApi,
   metadataApi,
   mobileApi,
+  RELAY_HTTP_ROUTER_CONFIG,
   relayClientAuthLayer,
   relayDpopClientAuthLayer,
   relayCors,
@@ -125,7 +126,7 @@ export class Api extends Cloudflare.Worker<Api, {}>()("Api") {}
 export const ApiLive = Api.make(
   Effect.gen(function* () {
     const { relayPublicDomain } = yield* RelayDeploymentConfig;
-    const deploymentRevision = yield* Config.string("RELAY_DEPLOYMENT_REVISION").pipe(
+    const deploymentRevision = yield* Config.String("RELAY_DEPLOYMENT_REVISION").pipe(
       Config.withDefault("local"),
     );
 
@@ -157,19 +158,19 @@ export const ApiLive = Api.make(
     //
     // 2. Create bindings
     //
-    const apnsEnabled = yield* Config.boolean("APNS_ENABLED").pipe(Config.withDefault(true));
+    const apnsEnabled = yield* Config.Boolean("APNS_ENABLED").pipe(Config.withDefault(true));
     const apnsCredentials = apnsEnabled
       ? {
           environment: yield* Config.schema(RelayConfiguration.ApnsEnvironment, "APNS_ENVIRONMENT"),
-          teamId: yield* Config.string("APNS_TEAM_ID"),
-          keyId: yield* Config.string("APNS_KEY_ID"),
-          bundleId: yield* Config.string("APNS_BUNDLE_ID"),
-          privateKey: yield* Config.redacted("APNS_PRIVATE_KEY"),
+          teamId: yield* Config.String("APNS_TEAM_ID"),
+          keyId: yield* Config.String("APNS_KEY_ID"),
+          bundleId: yield* Config.String("APNS_BUNDLE_ID"),
+          privateKey: yield* Config.Redacted("APNS_PRIVATE_KEY"),
         }
       : null;
     const fcmServiceAccount = Option.getOrUndefined(
       Option.filter(
-        yield* Config.option(Config.redacted("FCM_SERVICE_ACCOUNT")),
+        yield* Config.option(Config.Redacted("FCM_SERVICE_ACCOUNT")),
         (value) => Redacted.value(value).trim().length > 0,
       ),
     );
@@ -181,19 +182,19 @@ export const ApiLive = Api.make(
     const axiomIngestToken = yield* observability.workerIngestToken.token;
     const axiomTracesEndpoint = yield* observability.traces.otelTracesEndpoint;
 
-    const clerkSecretKey = yield* Config.redacted("CLERK_SECRET_KEY");
-    const clerkPublishableKey = yield* Config.string("CLERK_PUBLISHABLE_KEY");
-    const clerkJwtAudience = yield* Config.string("CLERK_JWT_AUDIENCE");
+    const clerkSecretKey = yield* Config.Redacted("CLERK_SECRET_KEY");
+    const clerkPublishableKey = yield* Config.String("CLERK_PUBLISHABLE_KEY");
+    const clerkJwtAudience = yield* Config.String("CLERK_JWT_AUDIENCE");
 
     const linearOAuthClientId = Option.getOrUndefined(
       Option.filter(
-        yield* Config.option(Config.string("LINEAR_OAUTH_CLIENT_ID")),
+        yield* Config.option(Config.String("LINEAR_OAUTH_CLIENT_ID")),
         (value) => value.trim().length > 0,
       ),
     );
     const linearOAuthClientSecret = Option.getOrUndefined(
       Option.filter(
-        yield* Config.option(Config.redacted("LINEAR_OAUTH_CLIENT_SECRET")),
+        yield* Config.option(Config.Redacted("LINEAR_OAUTH_CLIENT_SECRET")),
         (value) => Redacted.value(value).trim().length > 0,
       ),
     );
@@ -394,6 +395,7 @@ export const ApiLive = Api.make(
       relayNotFoundRoute,
     ).pipe(
       HttpRouter.toHttpEffect,
+      Effect.provideService(HttpRouter.RouterConfig, RELAY_HTTP_ROUTER_CONFIG),
       withoutCapturedParentSpan,
       Effect.flatMap((httpEffect) => traceRelayHttpRequestWith(httpEffect, relayTraceLayer)),
     );

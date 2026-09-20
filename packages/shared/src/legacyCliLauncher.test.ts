@@ -14,25 +14,22 @@ const hostPlatform = NodeOS.platform();
 const hostArch = NodeOS.arch();
 
 // The fixture executable uses a POSIX shebang. The wrapper itself also runs on Windows.
-it.skipIf(hostPlatform === "win32").each(["npm", "archive"] as const)(
-  "keeps %s service IPC, arguments, and termination connected",
-  async (distribution) => {
-    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "katacode-launcher-"));
+it.skipIf(hostPlatform === "win32")(
+  "keeps service IPC, arguments, and termination connected",
+  async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "katacode-legacy-launcher-"));
     const entry = NodePath.join(root, "node_modules/@kata-sh/code-cli/dist/bin.mjs");
-    const executable =
-      distribution === "archive"
-        ? NodePath.join(root, "katacode")
-        : NodePath.join(
-            root,
-            `node_modules/@kata-sh/code-cli-${hostPlatform}-${hostArch}/katacode`,
-          );
+    const executable = NodePath.join(
+      root,
+      `node_modules/@kata-sh/code-cli-${hostPlatform}-${hostArch}/katacode`,
+    );
     await NodeFSP.mkdir(NodePath.dirname(entry), { recursive: true });
     await NodeFSP.mkdir(NodePath.dirname(executable), { recursive: true });
     await NodeFSP.writeFile(
       NodePath.join(NodePath.dirname(executable), "package.json"),
       '{"type":"commonjs"}',
     );
-    await NodeFSP.writeFile(entry, legacyCliLauncherScript(distribution));
+    await NodeFSP.writeFile(entry, legacyCliLauncherScript());
     await NodeFSP.writeFile(
       executable,
       `#!${process.execPath}

@@ -212,10 +212,8 @@ function makeLinearTestServices(options?: {
 
   const linksService = EnvironmentLinks.EnvironmentLinks.of({
     upsert: () => Effect.die("unused upsert"),
-    listUsersForEnvironment: () => Effect.die("unused listUsersForEnvironment"),
     listUsersForEnvironmentPublicKey: () => Effect.die("unused listUsersForEnvironmentPublicKey"),
     listDeliveryUsersForEnvironment: () => Effect.die("unused listDeliveryUsersForEnvironment"),
-    listPublicKeysForEnvironment: () => Effect.die("unused listPublicKeysForEnvironment"),
     listForUser: () => Effect.die("unused listForUser"),
     getForUser: ({ userId, environmentId }) =>
       Effect.succeed(

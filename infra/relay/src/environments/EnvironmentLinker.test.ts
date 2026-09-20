@@ -124,10 +124,8 @@ function testLayer(input?: {
         }),
         Layer.succeed(EnvironmentLinks.EnvironmentLinks, {
           upsert: input?.upsert ?? (() => Effect.void),
-          listUsersForEnvironment: () => Effect.succeed([]),
           listUsersForEnvironmentPublicKey: () => Effect.succeed([]),
           listDeliveryUsersForEnvironment: () => Effect.succeed([]),
-          listPublicKeysForEnvironment: () => Effect.succeed([]),
           listForUser: () => Effect.succeed([]),
           getForUser: () => Effect.succeed(null),
           revokeForUser: () => Effect.succeed(false),

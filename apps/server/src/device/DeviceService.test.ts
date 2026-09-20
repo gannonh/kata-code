@@ -15,6 +15,7 @@ import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as DeviceHost from "./DeviceHost.ts";
+import { NodeRuntimeUnavailableError } from "@kata-sh/code-shared/nodeRuntime";
 
 import { type DeviceService, makeWithHosts, stateStream } from "./DeviceService.ts";
 
@@ -61,7 +62,8 @@ const fixture = Effect.fn("fixture")(function* (
   onBoot: Effect.Effect<void> = Effect.void,
   bootError?: string,
   failListAfterShutdown = false,
-  gridStartError?: string,
+  runtimeFailure?: NodeRuntimeUnavailableError,
+  streamAttachError?: string,
 ) {
   const settings = yield* Ref.make(DEFAULT_SERVER_SETTINGS);
   const starts: string[] = [];
@@ -89,12 +91,14 @@ const fixture = Effect.fn("fixture")(function* (
     platformAvailability: (platform) => Effect.succeed({ platform, available: true }),
     ensureReady: (onPhase) =>
       Effect.gen(function* () {
+        if (runtimeFailure) return yield* runtimeFailure;
         starts.push("start");
         yield* onPhase("starting");
         return ready;
       }),
     ensureAgentReady: (onPhase) =>
       Effect.gen(function* () {
+        if (runtimeFailure) return yield* runtimeFailure;
         agentStarts.push("start");
         yield* onPhase("starting");
         return {
@@ -142,6 +146,12 @@ const fixture = Effect.fn("fixture")(function* (
               new Response(new Uint8Array([137, 80, 78, 71])),
             );
           }
+          if (request.url.includes("/grid/api/start") && streamAttachError !== undefined) {
+            return HttpClientResponse.fromWeb(
+              request,
+              Response.json({ ok: false, error: streamAttachError }),
+            );
+          }
           if (request.url.endsWith("/shutdown")) {
             shutDown = true;
             booted = false;
@@ -163,17 +173,13 @@ const fixture = Effect.fn("fixture")(function* (
               ),
             );
           }
-          if (request.url.includes("/grid/api/start")) {
-            return HttpClientResponse.fromWeb(
-              request,
-              Response.json(gridStartError ? { ok: false, error: gridStartError } : { ok: true }),
-            );
-          }
           return HttpClientResponse.fromWeb(
             request,
             Response.json({
+              // The stream-attach case needs a listed simulator to get as far as
+              // the grid call; every other case asserts against an empty list.
               simulators:
-                gridStartError === undefined
+                streamAttachError === undefined
                   ? []
                   : [
                       {
@@ -207,6 +213,43 @@ const fixture = Effect.fn("fixture")(function* (
 });
 
 describe("device setup consent", () => {
+  it.effect(
+    "preserves missing-runtime guidance and causes through manual and agent readiness",
+    () =>
+      Effect.gen(function* () {
+        const underlying = new Error("private lookup diagnostics");
+        const runtimeFailure = new NodeRuntimeUnavailableError({
+          feature: "Local device support",
+          cause: underlying,
+        });
+        const { service, settings, requests } = yield* fixture(
+          Effect.void,
+          undefined,
+          false,
+          runtimeFailure,
+        );
+        yield* Ref.update(settings, (current) => ({
+          ...current,
+          enableDeviceSupport: true,
+          enableAgentDeviceAccess: true,
+        }));
+        for (const readiness of [service.readiness(), service.agentReadinessIfSupported()]) {
+          const error = yield* readiness.pipe(Effect.flip);
+          expect(error).toMatchObject({
+            _tag: "DeviceHostUnavailableError",
+            reason: expect.stringContaining("Install Node.js"),
+            cause: runtimeFailure,
+          });
+          expect(error.message).not.toContain(underlying.message);
+        }
+        expect((yield* service.state).hostStatuses[LOCAL_DEVICE_HOST_ID]).toMatchObject({
+          status: "failed",
+          detail: expect.stringContaining("Install Node.js"),
+        });
+        expect(requests).toEqual([]);
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("listing and provider startup do not start helpers before consent", () =>
     Effect.gen(function* () {
       const { service, starts, requests } = yield* fixture();
@@ -359,7 +402,13 @@ it.effect("keeps shutdown successful when subsequent discovery fails", () =>
 
 it.effect("rejects open when iOS stream attach returns ok false", () =>
   Effect.gen(function* () {
-    const { service, requests } = yield* fixture(Effect.void, undefined, false, "helper missing");
+    const { service, requests } = yield* fixture(
+      Effect.void,
+      undefined,
+      false,
+      undefined,
+      "helper missing",
+    );
     yield* service.configure({ enabled: true });
     const error = yield* service
       .open({

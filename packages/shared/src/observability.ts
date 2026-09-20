@@ -7,9 +7,14 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import * as Tracer from "effect/Tracer";
-import { OtlpResource, OtlpTracer } from "effect/unstable/observability";
+import { OtlpResource, OtlpTracer, OtlpSerialization } from "effect/unstable/observability";
 
 import { RotatingFileSink } from "./logging.ts";
+
+export const OtlpProtocol = Schema.Literals(["http/json", "http/protobuf"]);
+export type OtlpProtocol = typeof OtlpProtocol.Type;
+export const otlpSerializationLayer = (protocol: OtlpProtocol) =>
+  protocol === "http/protobuf" ? OtlpSerialization.layerProtobuf : OtlpSerialization.layerJson;
 
 const FLUSH_BUFFER_THRESHOLD = 256;
 const textEncoder = new TextEncoder();
@@ -697,7 +702,7 @@ function parseBigInt(input: string): bigint {
 export const OtlpHeadersFromString = Schema.String.pipe(
   Schema.decodeTo(
     Schema.Record(Schema.String, Schema.String),
-    SchemaTransformation.transformOrFail({
+    SchemaTransformation.transformEffect({
       decode: (input) => {
         const headers: Record<string, string> = {};
         for (const pair of input.split(",")) {
