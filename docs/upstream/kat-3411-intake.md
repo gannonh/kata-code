@@ -118,3 +118,32 @@ hand-set value, and it changed the bubble colour. Measured against the current l
 `#efeff1`, `#f0abfc` scores 1.53:1 and upstream's derived `#1b4ed8` scores 5.85:1. This fork's own
 `keeps the default user bubble readable in both appearances` test requires 4.5:1, so preserving the
 old accent would ship unreadable copy and fail that test. The SKIP is superseded by measurement.
+
+### Preservation gate: seven irreducible failures needing Gannon's decision
+
+`scripts/lib/upstream-preservation/checks.ts` builds each check with `vpTestCommand`, which
+passes the same paths as both `trustedPaths` (byte-frozen against the PR base) and the test
+command that must pass. For a file whose production API upstream changed, those two halves are
+mutually exclusive: keeping the base bytes makes the command fail, and making the command pass
+changes the bytes. Four of the eleven initial failures were reducible and are fixed. These seven
+are not:
+
+| Check                                | Frozen file                                                           | Production symbol upstream removed or changed                                                                                        |
+| ------------------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `sandbox-preview-default`            | `apps/server/src/serverSettings.test.ts`                              | `ObservabilitySettings` gained a required `otlpLogsUrl`, and the base assertion is a whole-object `deepEqual`                        |
+| `desktop-protocol-bundle-identity`   | `apps/desktop/src/app/DesktopAppIdentity.test.ts`                     | `isDefaultProtocolClient` deleted from the `ElectronApp` service                                                                     |
+| `desktop-window-behavior`            | `apps/desktop/src/app/DesktopLifecycle.test.ts`                       | same                                                                                                                                 |
+| `desktop-url-handler-backend-routes` | `apps/desktop/src/backend/DesktopBackendManager.test.ts`              | `handleControl` renamed to `handleControlForSource` on `DesktopTelemetryPublisher`                                                   |
+| `desktop-packaging-asset-identity`   | `scripts/build-desktop-artifact.test.ts`                              | `msgpackr-extract` removed from `CLI_RUNTIME_EXTERNAL_PREFIXES`, and from the dependency tree entirely                               |
+| `mobile-agent-awareness-teardown`    | `apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts` | live-activity control moved behind `./agentLiveActivity`; the module under test no longer imports `widgets/AgentActivity` as a value |
+| `mobile-theme-native-identity`       | `apps/mobile/src/lib/mobileTheme.test.ts`                             | the default palette is generated from shared roles rather than read from `global.css`, and gained twelve variables                   |
+
+In every case the retained behaviour itself survives and is asserted, in the frozen file, its
+`.upstream.test.ts` companion, or both. What fails is byte-identity, the gate's proxy for
+"upstream did not quietly delete Kata's assertions".
+
+`ci.yml` already carries a precedent: one named waiver for
+`sandbox-route-driver-registration` on `server.test.ts`, guarded by a check that exactly one
+`FAIL` is present. Extending that to seven named checks is a materially larger relaxation of an
+acceptance gate, so this run does not make that edit. Gannon decides between extending the
+waiver to this enumerated list, or re-baselining these seven frozen paths on `main` first.

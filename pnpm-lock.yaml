@@ -1122,9 +1122,6 @@ importers:
       pngjs:
         specifier: 7.0.0
         version: 7.0.0
-      sharp:
-        specifier: 0.35.4
-        version: 0.35.4(@types/node@24.12.4)
     devDependencies:
       '@effect/vitest':
         specifier: 4.0.0-rc.115
