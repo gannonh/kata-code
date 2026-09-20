@@ -118,7 +118,7 @@ Stable handles in this app:
 | Sidebar usage | button `Usage` |
 | Command palette | `data-testid="command-palette"` with `data-palette-mode="command"`, name `Command palette`, shortcut `mod+k` (⌘K on macOS, Ctrl+K elsewhere). The same testid serves File picker (`files`) and Search project contents (`content`) |
 | Usage page | heading `Usage`, nav `Usage breadcrumb`, menu `All environments`, groups `Usage metric` (`Cost` / `Tokens` / `Limits`) / `Usage period` / `Usage breakdown`, button `Refresh usage` or `Refresh limits` |
-| Settings | breadcrumb `Settings breadcrumb`, combobox `Search settings`, nav labels `General`, `Appearance`, `Projects`, `Keybindings`, `SnapShots`, `Providers`, `Integrations`, `Source Control`, `Connections`, `Archive` |
+| Settings | breadcrumb `Settings breadcrumb`, combobox `Search settings`, environment-scope nav labels `General`, `Appearance`, `Keybindings`, `SnapShots`, `Providers`, `Integrations`, `Source Control`, `Connections`, `Archive`; project or checkout scope also shows `Project` |
 
 Do not call internal atoms, test-only endpoints, or `t3-sqlite-state.ts exec` to claim a user path works. SQLite inspection is a side-effect check after a real UI action, and only against the disposable home.
 
@@ -134,6 +134,8 @@ Minimum for a pass:
 - one screenshot **before** the action and one **after**, or a snapshot pair that shows the same delta
 - an accessibility snapshot of the resulting screen (`agent-browser --session katacode-verify snapshot`) saved under `snapshots/`
 - `evidence.json` naming the feature id, entry point used, `WEB_ORIGIN` (no token), and the observable end state
+
+For a change with an open pull request, attach at least one representative UI screenshot or video from the run to the PR conversation before calling the change verified. Prefer the GitHub CLI's binary upload, for example `gh pr comment <number> --body "UI evidence for <feature>." --attach "$EVIDENCE_DIR/screenshots/<file>.png#<observable state>"`. An available GitHub integration that accepts binary uploads or the authenticated GitHub PR page may provide the same result. A local filesystem path, an inaccessible `file://` link, or a text-only claim does not count. Fetch the PR comment after uploading and require a rendered attachment URL, then record the PR URL, comment URL, and attached evidence filenames in `evidence.json`. Keep the original files under `uat-evidence/<RUN_ID>/` after upload. If the verification has no PR, keep the evidence locally and record `pullRequest: null`; do not create an empty PR only to host evidence.
 
 Proof standards:
 
