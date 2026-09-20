@@ -774,6 +774,10 @@ function LinearTriggerFields({
   const [createdConnection, setCreatedConnection] = useState<LinearRoutineConnection | null>(null);
   const [authorizationUrl, setAuthorizationUrl] = useState<string | null>(null);
   const [authorizationPopupBlocked, setAuthorizationPopupBlocked] = useState(false);
+  const [authorizationMetadataGate, setAuthorizationMetadataGate] = useState<
+    "ready" | "required" | "refreshing"
+  >("ready");
+  const authorizationRefreshSawPending = useRef(false);
   const [setupMessage, setSetupMessage] = useState<string | null>(null);
   const [setupBusy, setSetupBusy] = useState(false);
   const [showSetup, setShowSetup] = useState(connections.length === 0);
@@ -807,6 +811,16 @@ function LinearTriggerFields({
           input: { connectionId: pendingConnectionId },
         }),
   );
+  useEffect(() => {
+    if (authorizationMetadataGate !== "refreshing") return;
+    if (authorizationMetadata.isPending) {
+      authorizationRefreshSawPending.current = true;
+      return;
+    }
+    if (!authorizationRefreshSawPending.current) return;
+    authorizationRefreshSawPending.current = false;
+    setAuthorizationMetadataGate(authorizationMetadata.isSuccess ? "ready" : "required");
+  }, [authorizationMetadata.isPending, authorizationMetadata.isSuccess, authorizationMetadataGate]);
   const metadata = useEnvironmentQuery(
     selectedConnection
       ? routineEnvironment.linearMetadata({
@@ -874,6 +888,8 @@ function LinearTriggerFields({
         candidate !== null && !connections.some((connection) => connection.id === candidate),
     );
     const id = reusableId ?? RoutineConnectionId.make("connection-" + Date.now().toString(36));
+    authorizationRefreshSawPending.current = false;
+    setAuthorizationMetadataGate(reusableId === undefined ? "ready" : "required");
     savePendingLinearConnectionId(environmentId, id);
     setPendingAuthorization({ environmentId, connectionId: id });
     try {
@@ -910,7 +926,7 @@ function LinearTriggerFields({
   };
 
   const runCreateConnection = async () => {
-    if (disabled || pendingConnectionId === null) return;
+    if (disabled || pendingConnectionId === null || authorizationMetadataGate !== "ready") return;
     if (!allTeams && teamId.length === 0) return;
     setSetupBusy(true);
     setSetupMessage("Creating the Linear webhook…");
@@ -1020,7 +1036,8 @@ function LinearTriggerFields({
           >
             <SquareKanbanIcon className="size-3.5" /> Connect Linear
           </Button>
-          {pendingConnectionId !== null && authorizationMetadata.data === null ? (
+          {pendingConnectionId !== null &&
+          (authorizationMetadata.data === null || authorizationMetadataGate !== "ready") ? (
             <>
               {authorizationMetadata.error !== null &&
               authorizationMetadata.error !== LINEAR_AUTHORIZATION_REQUIRED_MESSAGE ? (
@@ -1036,14 +1053,22 @@ function LinearTriggerFields({
                 size="sm"
                 variant="outline"
                 className="justify-self-start"
-                onClick={() => authorizationMetadata.refresh()}
+                onClick={() => {
+                  if (authorizationMetadataGate === "required") {
+                    authorizationRefreshSawPending.current = false;
+                    setAuthorizationMetadataGate("refreshing");
+                  }
+                  authorizationMetadata.refresh();
+                }}
                 disabled={disabled}
               >
                 Check authorization
               </Button>
             </>
           ) : null}
-          {authorizationMetadata.data !== null && createdConnection === null ? (
+          {authorizationMetadata.data !== null &&
+          authorizationMetadataGate === "ready" &&
+          createdConnection === null ? (
             <div className="grid gap-1 text-xs text-muted-foreground">
               <span className="font-medium text-foreground">
                 {authorizationMetadata.data.workspace.name}

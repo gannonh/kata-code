@@ -283,6 +283,12 @@ export function makeLinearRoutineMetadata(dependencies: {
         workflowStates: true,
         issueLabels: true,
       };
+      const seenCursors = {
+        teams: new Set<string>(),
+        projects: new Set<string>(),
+        workflowStates: new Set<string>(),
+        issueLabels: new Set<string>(),
+      };
       let workspace: Schema.Schema.Type<typeof MetadataJson>["data"]["organization"] | undefined;
 
       while (active.teams || active.projects || active.workflowStates || active.issueLabels) {
@@ -309,7 +315,6 @@ export function makeLinearRoutineMetadata(dependencies: {
         if (pageInfos.some(([, pageInfo]) => pageInfo.hasNextPage && pageInfo.endCursor === null))
           return yield* Effect.fail(invalid("Linear returned an invalid metadata page cursor."));
 
-        const previousCursors = cursors;
         active = {
           teams: active.teams && decoded.data.teams.pageInfo.hasNextPage,
           projects: active.projects && decoded.data.projects.pageInfo.hasNextPage,
@@ -325,13 +330,20 @@ export function makeLinearRoutineMetadata(dependencies: {
           issueLabelsAfter: active.issueLabels ? decoded.data.issueLabels.pageInfo.endCursor : null,
         };
         if (
-          (active.teams && cursors.teamsAfter === previousCursors.teamsAfter) ||
-          (active.projects && cursors.projectsAfter === previousCursors.projectsAfter) ||
-          (active.workflowStates &&
-            cursors.workflowStatesAfter === previousCursors.workflowStatesAfter) ||
-          (active.issueLabels && cursors.issueLabelsAfter === previousCursors.issueLabelsAfter)
+          (cursors.teamsAfter !== null && seenCursors.teams.has(cursors.teamsAfter)) ||
+          (cursors.projectsAfter !== null && seenCursors.projects.has(cursors.projectsAfter)) ||
+          (cursors.workflowStatesAfter !== null &&
+            seenCursors.workflowStates.has(cursors.workflowStatesAfter)) ||
+          (cursors.issueLabelsAfter !== null &&
+            seenCursors.issueLabels.has(cursors.issueLabelsAfter))
         )
           return yield* Effect.fail(invalid("Linear repeated a metadata page cursor."));
+        if (cursors.teamsAfter !== null) seenCursors.teams.add(cursors.teamsAfter);
+        if (cursors.projectsAfter !== null) seenCursors.projects.add(cursors.projectsAfter);
+        if (cursors.workflowStatesAfter !== null)
+          seenCursors.workflowStates.add(cursors.workflowStatesAfter);
+        if (cursors.issueLabelsAfter !== null)
+          seenCursors.issueLabels.add(cursors.issueLabelsAfter);
       }
 
       if (workspace === undefined)
@@ -340,10 +352,13 @@ export function makeLinearRoutineMetadata(dependencies: {
       for (const project of projects) {
         const teamIds = project.teams.nodes.map((team) => team.id);
         let pageInfo = project.teams.pageInfo;
+        const seenProjectTeamCursors = new Set<string>();
         while (pageInfo.hasNextPage) {
           if (pageInfo.endCursor === null)
             return yield* Effect.fail(invalid("Linear returned an invalid project team cursor."));
-          const previousCursor = pageInfo.endCursor;
+          if (seenProjectTeamCursors.has(pageInfo.endCursor))
+            return yield* Effect.fail(invalid("Linear repeated a project team cursor."));
+          seenProjectTeamCursors.add(pageInfo.endCursor);
           const raw = yield* dependencies.graphql({
             accessToken,
             query: PROJECT_TEAMS_QUERY,
@@ -358,8 +373,6 @@ export function makeLinearRoutineMetadata(dependencies: {
             );
           teamIds.push(...decoded.data.project.teams.nodes.map((team) => team.id));
           pageInfo = decoded.data.project.teams.pageInfo;
-          if (pageInfo.hasNextPage && pageInfo.endCursor === previousCursor)
-            return yield* Effect.fail(invalid("Linear repeated a project team cursor."));
         }
         mappedProjects.push({ id: project.id, name: project.name, teamIds });
       }

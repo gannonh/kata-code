@@ -275,7 +275,7 @@ describe("Linear metadata reads", () => {
     }),
   );
 
-  it.effect("rejects a repeated metadata page cursor", () =>
+  it.effect("rejects a reused metadata page cursor", () =>
     Effect.gen(function* () {
       let requestCount = 0;
       const metadata = makeLinearRoutineMetadata({
@@ -286,7 +286,10 @@ describe("Linear metadata reads", () => {
               ...response.data,
               teams: {
                 nodes: [response.data.teams.nodes[0]!],
-                pageInfo: { hasNextPage: true, endCursor: "repeated-cursor" },
+                pageInfo: {
+                  hasNextPage: true,
+                  endCursor: requestCount === 2 ? "cursor-b" : "cursor-a",
+                },
               },
             },
           });
@@ -297,11 +300,11 @@ describe("Linear metadata reads", () => {
 
       assert.equal(failure._tag, "invalid");
       assert.equal(failure.message, "Linear repeated a metadata page cursor.");
-      assert.equal(requestCount, 2);
+      assert.equal(requestCount, 3);
     }),
   );
 
-  it.effect("rejects a repeated project team cursor", () =>
+  it.effect("rejects a reused project team cursor", () =>
     Effect.gen(function* () {
       let requestCount = 0;
       const metadata = makeLinearRoutineMetadata({
@@ -318,7 +321,7 @@ describe("Linear metadata reads", () => {
                       name: "Roadmap",
                       teams: {
                         nodes: [{ id: "team-1" }],
-                        pageInfo: { hasNextPage: true, endCursor: "repeated-cursor" },
+                        pageInfo: { hasNextPage: true, endCursor: "cursor-a" },
                       },
                     },
                   ],
@@ -331,7 +334,10 @@ describe("Linear metadata reads", () => {
               project: {
                 teams: {
                   nodes: [{ id: "team-2" }],
-                  pageInfo: { hasNextPage: true, endCursor: "repeated-cursor" },
+                  pageInfo: {
+                    hasNextPage: true,
+                    endCursor: requestCount === 2 ? "cursor-b" : "cursor-a",
+                  },
                 },
               },
             },
@@ -343,7 +349,7 @@ describe("Linear metadata reads", () => {
 
       assert.equal(failure._tag, "invalid");
       assert.equal(failure.message, "Linear repeated a project team cursor.");
-      assert.equal(requestCount, 2);
+      assert.equal(requestCount, 3);
     }),
   );
 

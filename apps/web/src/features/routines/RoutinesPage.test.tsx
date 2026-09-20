@@ -54,6 +54,7 @@ const testState = vi.hoisted(() => ({
   },
   linearMetadataData: null as null | Record<string, unknown>,
   linearMetadataError: null as string | null,
+  linearMetadataPending: false,
   linearMetadataRefresh: vi.fn(),
   queries: {
     list: Symbol("list"),
@@ -143,7 +144,7 @@ vi.mock("../../state/query", () => ({
       return {
         data: testState.linearMetadataData,
         error: testState.linearMetadataError,
-        isPending: false,
+        isPending: testState.linearMetadataPending,
         isSuccess: testState.linearMetadataError === null,
         refresh: testState.linearMetadataRefresh,
       };
@@ -1202,6 +1203,47 @@ describe("RoutinesPage Linear trigger setup", () => {
       throw new Error("Linear authorization did not return a connection id.");
     expect([...storage.values()]).toEqual([pendingId]);
 
+    testState.linearMetadataError = null;
+    testState.linearMetadataData = {
+      workspace: { id: "workspace-old", name: "Old workspace", urlKey: "old" },
+      teams: [],
+      projects: [],
+      states: [],
+      labels: [],
+    };
+    await act(async () => {
+      buttonWithText(renderer!, "Connect Linear").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(authorizationIds).toEqual([pendingId, pendingId]);
+    expect(nodeText(renderer!.root)).not.toContain("Old workspace");
+    expect(
+      renderer!.root.findAll((node) => nodeText(node).includes("Create webhook")),
+    ).toHaveLength(0);
+
+    testState.linearMetadataPending = true;
+    await act(async () => {
+      buttonWithText(renderer!, "Check authorization").props.onClick?.();
+      await Promise.resolve();
+    });
+    testState.linearMetadataPending = false;
+    testState.linearMetadataData = {
+      workspace: { id: "workspace-new", name: "New workspace", urlKey: "new" },
+      teams: [],
+      projects: [],
+      states: [],
+      labels: [],
+    };
+    await act(async () => {
+      renderer!.update(<RoutinesPage />);
+      await Promise.resolve();
+    });
+    expect(nodeText(renderer!.root)).toContain("New workspace");
+    expect(buttonWithText(renderer!, "Create webhook")).toBeDefined();
+
+    testState.linearMetadataData = null;
+    testState.linearMetadataError = "Connect Linear before reading workspace metadata.";
     await act(async () => renderer!.unmount());
     renderer = await openNewRoutineEditor();
     await act(async () => {
@@ -1216,7 +1258,7 @@ describe("RoutinesPage Linear trigger setup", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(authorizationIds).toEqual([pendingId, pendingId]);
+    expect(authorizationIds).toEqual([pendingId, pendingId, pendingId]);
     expect([...storage.values()]).toEqual([pendingId]);
 
     testState.connectionsData.push(linearConnectionFor(pendingId));
