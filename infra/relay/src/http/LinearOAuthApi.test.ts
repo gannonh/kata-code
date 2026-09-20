@@ -115,6 +115,13 @@ function makeLinearTestServices(options?: {
   const statesService = LinearOAuthStates.LinearOAuthStates.of({
     create: (input) =>
       Effect.sync(() => {
+        for (const [state, binding] of states) {
+          if (
+            binding.environmentId === input.environmentId &&
+            binding.connectionId === input.connectionId
+          )
+            states.delete(state);
+        }
         const state = `state-${++stateCounter}`;
         states.set(state, {
           userId: input.userId,
@@ -353,6 +360,42 @@ describe("relay Linear OAuth client API", () => {
         connectionId: "connection-1",
       });
       expect(binding?.codeVerifier.length).toBeGreaterThan(20);
+    }).pipe(Effect.scoped);
+  });
+
+  it.effect("invalidates an earlier authorization state when the same connection retries", () => {
+    const services = makeLinearTestServices();
+    return Effect.gen(function* () {
+      const app = yield* Effect.acquireRelease(
+        Effect.sync(() => toWebHandler(makeApiApp(services))),
+        (app) => Effect.promise(() => app.dispose()),
+      );
+      const start = () =>
+        Effect.promise(() =>
+          app.handler(
+            new Request("https://relay.example.test/v1/linear/oauth/start", {
+              method: "POST",
+              headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+              body: encodeStartRequest({
+                environmentId: EnvironmentId.make("environment-1"),
+                connectionId: "connection-1",
+              }),
+            }),
+          ),
+        ).pipe(
+          Effect.flatMap((response) => Effect.promise(() => response.text())),
+          Effect.map((body) =>
+            new URL(decodeStartResponse(body).authorizeUrl).searchParams.get("state"),
+          ),
+        );
+
+      const firstState = yield* start();
+      const secondState = yield* start();
+
+      expect(firstState).not.toBe(secondState);
+      expect(services.states.has(firstState ?? "")).toBe(false);
+      expect(services.states.has(secondState ?? "")).toBe(true);
+      expect(services.states.size).toBe(1);
     }).pipe(Effect.scoped);
   });
 

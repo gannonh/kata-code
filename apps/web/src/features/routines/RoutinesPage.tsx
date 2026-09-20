@@ -882,6 +882,8 @@ function LinearTriggerFields({
     setAuthorizationUrl(null);
     setAuthorizationPopupBlocked(false);
     setCreatedConnection(null);
+    setAllTeams(true);
+    setTeamId("");
     const storedId = readPendingLinearConnectionId(environmentId);
     const reusableId = [storedId, pendingConnectionId].find(
       (candidate) =>
@@ -965,8 +967,11 @@ function LinearTriggerFields({
       setSetupMessage(errorMessage(result.cause));
       return;
     }
-    if (createdConnection?.id === result.value.id && result.value.provider === "linear")
-      setCreatedConnection(result.value);
+    if (result.value.provider !== "linear") {
+      setSetupMessage("The environment did not return a Linear connection.");
+      return;
+    }
+    if (createdConnection?.id === result.value.id) setCreatedConnection(result.value);
     setSetupMessage(
       result.value.status === "verified"
         ? "First delivery received. The connection is ready."
@@ -984,9 +989,16 @@ function LinearTriggerFields({
       setSetupMessage(errorMessage(result.cause));
       return;
     }
-    if (createdConnection?.id === result.value.id && result.value.provider === "linear")
-      setCreatedConnection(result.value);
-    setSetupMessage(LINEAR_PROVIDER_REMOVAL_NOTE);
+    if (result.value.provider !== "linear") {
+      setSetupMessage("The environment did not return a Linear connection.");
+      return;
+    }
+    if (createdConnection?.id === result.value.id) setCreatedConnection(result.value);
+    setSetupMessage(
+      result.value.webhookId === null
+        ? "Linear connection disabled. The provider webhook was removed; retry cleanup if relay revocation is still pending."
+        : LINEAR_PROVIDER_REMOVAL_NOTE,
+    );
   };
 
   const lastDelivery = connection?.lastDelivery ?? null;
@@ -1178,7 +1190,7 @@ function LinearTriggerFields({
               : "none yet"}
           </span>
           <span className="text-muted-foreground">{LINEAR_RETRY_NOTE}</span>
-          {connection.status === "disabled" ? (
+          {connection.status === "disabled" && connection.webhookId !== null ? (
             <span className="text-muted-foreground">{LINEAR_PROVIDER_REMOVAL_NOTE}</span>
           ) : null}
           {connection.metadataAccess === "revoked" ? (

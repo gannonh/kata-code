@@ -33,7 +33,7 @@ export class LinearOAuthStateRejected extends Schema.TaggedError<LinearOAuthStat
 export class LinearOAuthStateCreatePersistenceError extends Schema.TaggedError<LinearOAuthStateCreatePersistenceError>()(
   "LinearOAuthStateCreatePersistenceError",
   {
-    stage: Schema.Literals(["generate-state", "hash-state", "insert-state"]),
+    stage: Schema.Literals(["generate-state", "hash-state", "invalidate-state", "insert-state"]),
     cause: Schema.Defect(),
   },
 ) {
@@ -106,6 +106,21 @@ const make = Effect.gen(function* () {
         ),
       );
       const now = DateTime.formatIso(input.now);
+      yield* db
+        .delete(relayLinearOAuthStates)
+        .where(
+          and(
+            eq(relayLinearOAuthStates.environmentId, input.environmentId),
+            eq(relayLinearOAuthStates.connectionId, input.connectionId),
+            isNull(relayLinearOAuthStates.consumedAt),
+          ),
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new LinearOAuthStateCreatePersistenceError({ stage: "invalidate-state", cause }),
+          ),
+        );
       yield* db
         .insert(relayLinearOAuthStates)
         .values({

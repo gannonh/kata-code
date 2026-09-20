@@ -15,6 +15,7 @@ import {
   uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const relayMobileDevices = pgTable(
   "relay_mobile_devices",
@@ -205,7 +206,12 @@ export const relayLinearOAuthStates = pgTable(
     createdAt: varchar("created_at", { length: 64 }).notNull(),
     updatedAt: varchar("updated_at", { length: 64 }).notNull(),
   },
-  (table) => [index("idx_relay_linear_oauth_states_expires_at").on(table.expiresAt)],
+  (table) => [
+    index("idx_relay_linear_oauth_states_expires_at").on(table.expiresAt),
+    uniqueIndex("idx_relay_linear_oauth_states_active_connection")
+      .on(table.environmentId, table.connectionId)
+      .where(sql`${table.consumedAt} is null`),
+  ],
 );
 
 export const relayLinearOAuthTokens = pgTable(

@@ -56,11 +56,24 @@ describe("LinearOAuthStates", () => {
     "stores a hashed single-use state bound to the user, environment, connection, and verifier",
     () => {
       const inserted: Array<Record<string, unknown>> = [];
+      const invalidated: Array<unknown> = [];
+      const operations: string[] = [];
       const fakeDb = {
+        delete: (table: unknown) => {
+          expect(table).toBe(relayLinearOAuthStates);
+          return {
+            where: (condition: unknown) => {
+              operations.push("invalidate");
+              invalidated.push(condition);
+              return Effect.succeed([]);
+            },
+          };
+        },
         insert: (table: unknown) => {
           expect(table).toBe(relayLinearOAuthStates);
           return {
             values: (values: Record<string, unknown>) => {
+              operations.push("insert");
               inserted.push(values);
               return Effect.succeed([]);
             },
@@ -93,6 +106,12 @@ describe("LinearOAuthStates", () => {
         expect(values.consumedAt).toBeNull();
         expect(values.createdAt).toBe("2026-09-18T12:00:00.000Z");
         expect(values.updatedAt).toBe("2026-09-18T12:00:00.000Z");
+        expect(operations).toEqual(["invalidate", "insert"]);
+        const query = new PgDialect().sqlToQuery(invalidated[0] as never);
+        expect(query.sql).toContain('"relay_linear_oauth_states"."environment_id" = $1');
+        expect(query.sql).toContain('"relay_linear_oauth_states"."connection_id" = $2');
+        expect(query.sql).toContain('"relay_linear_oauth_states"."consumed_at" is null');
+        expect(query.params).toEqual(["env-1", "connection-1"]);
       }).pipe(Effect.provide(provider(fakeDb)));
     },
   );
@@ -215,6 +234,7 @@ describe("LinearOAuthStates", () => {
   it.effect("retains persistence failures without retaining state or verifier material", () => {
     const cause = new Error("database unavailable");
     const fakeDb = {
+      delete: () => ({ where: () => Effect.succeed([]) }),
       insert: () => ({
         values: () => Effect.fail(cause),
       }),

@@ -899,6 +899,9 @@ describe("RoutinesPage Linear trigger setup", () => {
       await Promise.resolve();
     });
     expect(nodeText(renderer!.root)).toContain(
+      "Linear connection disabled. The provider webhook was removed; retry cleanup if relay revocation is still pending.",
+    );
+    expect(nodeText(renderer!.root)).not.toContain(
       "Delete the webhook in Linear's workspace settings to stop provider deliveries.",
     );
     expect(
@@ -961,6 +964,16 @@ describe("RoutinesPage Linear trigger setup", () => {
       await Promise.resolve();
     });
     await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-all-teams" })
+        .props.onChange({ target: { checked: false } });
+    });
+    await act(async () => {
+      renderer!.root
+        .findByProps({ id: "routine-linear-team-scope" })
+        .props.onChange({ target: { value: "team-1" } });
+    });
+    await act(async () => {
       buttonWithText(renderer!, "Create webhook").props.onClick?.();
       await Promise.resolve();
       await Promise.resolve();
@@ -975,6 +988,8 @@ describe("RoutinesPage Linear trigger setup", () => {
     });
 
     expect(buttonWithText(renderer!, "Create webhook")).toBeDefined();
+    expect(renderer!.root.findByProps({ id: "routine-linear-all-teams" }).props.checked).toBe(true);
+    expect(renderer!.root.findAllByProps({ id: "routine-linear-team-scope" })).toHaveLength(0);
     expect(authorizationIds).toHaveLength(2);
     expect(authorizationIds[1]).not.toBe(authorizationIds[0]);
   });
