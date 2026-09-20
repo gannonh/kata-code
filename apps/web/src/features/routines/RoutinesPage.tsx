@@ -696,6 +696,42 @@ function GitHubTriggerFields({
 
 /** The server names a missing OAuth bundle with this message; the UI shows it as waiting. */
 const LINEAR_AUTHORIZATION_REQUIRED_MESSAGE = "Connect Linear before reading workspace metadata.";
+const LINEAR_PENDING_CONNECTION_STORAGE_KEY = "kata-code:routines:linear-pending-connection:";
+
+function linearPendingConnectionStorageKey(environmentId: EnvironmentId): string {
+  return `${LINEAR_PENDING_CONNECTION_STORAGE_KEY}${environmentId}`;
+}
+
+function readPendingLinearConnectionId(environmentId: EnvironmentId): RoutineConnectionId | null {
+  try {
+    const value = window.localStorage.getItem(linearPendingConnectionStorageKey(environmentId));
+    return value !== null && /^[A-Za-z0-9_-]{1,128}$/u.test(value)
+      ? RoutineConnectionId.make(value)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePendingLinearConnectionId(
+  environmentId: EnvironmentId,
+  id: RoutineConnectionId,
+): void {
+  try {
+    window.localStorage.setItem(linearPendingConnectionStorageKey(environmentId), id);
+  } catch {
+    // The in-memory state still lets this authorization attempt complete when
+    // browser storage is unavailable.
+  }
+}
+
+function clearPendingLinearConnectionId(environmentId: EnvironmentId): void {
+  try {
+    window.localStorage.removeItem(linearPendingConnectionStorageKey(environmentId));
+  } catch {
+    // Storage may be disabled by the browser or shell.
+  }
+}
 
 function LinearTriggerFields({
   environmentId,
@@ -729,7 +765,10 @@ function LinearTriggerFields({
   const disableConnection = useAtomCommand(routineEnvironment.disableConnection, {
     reportFailure: false,
   });
-  const [pendingConnectionId, setPendingConnectionId] = useState<RoutineConnectionId | null>(null);
+  const [pendingAuthorization, setPendingAuthorization] = useState<{
+    readonly environmentId: EnvironmentId;
+    readonly connectionId: RoutineConnectionId;
+  } | null>(null);
   const [allTeams, setAllTeams] = useState(true);
   const [teamId, setTeamId] = useState("");
   const [createdConnection, setCreatedConnection] = useState<LinearRoutineConnection | null>(null);
@@ -738,6 +777,28 @@ function LinearTriggerFields({
   const [setupMessage, setSetupMessage] = useState<string | null>(null);
   const [setupBusy, setSetupBusy] = useState(false);
   const [showSetup, setShowSetup] = useState(connections.length === 0);
+  const pendingConnectionId =
+    pendingAuthorization?.environmentId === environmentId
+      ? pendingAuthorization.connectionId
+      : null;
+  const connectionIdSignature = connections.map((connection) => connection.id).join("\u0000");
+  useEffect(() => {
+    const persistedId = readPendingLinearConnectionId(environmentId);
+    if (persistedId === null) {
+      setPendingAuthorization((current) => (current === null ? current : null));
+      return;
+    }
+    if (connectionIdSignature.split("\u0000").includes(persistedId)) {
+      clearPendingLinearConnectionId(environmentId);
+      setPendingAuthorization((current) => (current === null ? current : null));
+      return;
+    }
+    setPendingAuthorization((current) =>
+      current?.environmentId === environmentId && current.connectionId === persistedId
+        ? current
+        : { environmentId, connectionId: persistedId },
+    );
+  }, [connectionIdSignature, environmentId]);
   const authorizationMetadata = useEnvironmentQuery(
     pendingConnectionId === null
       ? null
@@ -755,7 +816,14 @@ function LinearTriggerFields({
       : null,
   );
   const disabled = offline || busy || setupBusy;
-  const connection = createdConnection ?? selectedConnection;
+  const triggerConnectionId = linearTriggerConnectionId(trigger);
+  useEffect(() => {
+    if (createdConnection !== null && createdConnection.id !== triggerConnectionId) {
+      setCreatedConnection(null);
+    }
+  }, [createdConnection, triggerConnectionId]);
+  const connection =
+    createdConnection?.id === triggerConnectionId ? createdConnection : selectedConnection;
   const stateId = "stateId" in trigger ? trigger.stateId : undefined;
   const labelId = "labelId" in trigger ? trigger.labelId : undefined;
   const connectionTeamIds = connection?.teamIds ?? [];
@@ -799,7 +867,14 @@ function LinearTriggerFields({
     setSetupMessage(null);
     setAuthorizationUrl(null);
     setAuthorizationPopupBlocked(false);
-    const id = RoutineConnectionId.make("connection-" + Date.now().toString(36));
+    const storedId = readPendingLinearConnectionId(environmentId);
+    const reusableId = [storedId, pendingConnectionId].find(
+      (candidate) =>
+        candidate !== null && !connections.some((connection) => connection.id === candidate),
+    );
+    const id = reusableId ?? RoutineConnectionId.make("connection-" + Date.now().toString(36));
+    savePendingLinearConnectionId(environmentId, id);
+    setPendingAuthorization({ environmentId, connectionId: id });
     try {
       const result = await beginConnectionAuthorization({ environmentId, input: { id } });
       setSetupBusy(false);
@@ -819,7 +894,7 @@ function LinearTriggerFields({
         }
       }
       setAuthorizationPopupBlocked(!popupAvailable);
-      setPendingConnectionId(id);
+      setPendingAuthorization({ environmentId, connectionId: id });
       setSetupMessage(
         popupAvailable
           ? "Authorize Kata Code in the Linear window, then check the connection."
@@ -857,6 +932,8 @@ function LinearTriggerFields({
       return;
     }
     setCreatedConnection(result.value);
+    clearPendingLinearConnectionId(environmentId);
+    setPendingAuthorization(null);
     onConnectionCreated(result.value);
     setSetupMessage("Webhook created. Verify the first delivery when Linear sends one.");
   };

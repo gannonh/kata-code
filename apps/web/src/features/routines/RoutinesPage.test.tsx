@@ -163,6 +163,7 @@ vi.mock("../../components/ui/menu", () => ({
 }));
 
 import { RoutinesPage } from "./RoutinesPage";
+import { RoutineChat } from "./RoutineChat";
 
 function nodeText(node: ReactTestInstance): string {
   return node.children
@@ -991,6 +992,175 @@ describe("RoutinesPage Linear trigger setup", () => {
       environmentId: "environment-1",
       input: { id: "connection-existing" },
     });
+  });
+
+  it("synchronizes the displayed connection when chat changes the Linear trigger", async () => {
+    const existingConnection = linearConnectionFor("connection-existing", {
+      workspaceName: "Existing workspace",
+      status: "verified",
+    });
+    testState.connectionsData.push(existingConnection);
+    testState.linearMetadataData = {
+      workspace: { id: "workspace-1", name: "Existing workspace", urlKey: "existing" },
+      teams: [],
+      projects: [],
+      states: [],
+      labels: [],
+    };
+    const createdConnection = linearConnectionFor("connection-created", {
+      workspaceId: "workspace-2",
+      workspaceName: "Created workspace",
+      callbackUrl: "https://env.example/hooks/connection-created",
+      webhookId: "webhook-created",
+    });
+    vi.stubGlobal("window", {
+      open: vi.fn(() => ({
+        closed: false,
+        location: { href: "about:blank" },
+        close: vi.fn(),
+      })),
+    });
+    testState.command.mockImplementation(async (value: unknown) => {
+      const input = (value as { input?: Record<string, unknown> }).input ?? {};
+      if (input.provider === "linear") {
+        testState.connectionsData.push(createdConnection);
+        return { _tag: "Success", value: createdConnection };
+      }
+      if (input.id === "connection-existing") {
+        return { _tag: "Success", value: existingConnection };
+      }
+      return { _tag: "Success", value: { authorizeUrl: "https://linear.app/oauth/authorize" } };
+    });
+    renderer = await renderRoutinesPage();
+    await act(async () => {
+      menuItemWithText(renderer!, "Create in chat").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      buttonWithText(renderer!, "Linear event").props.onClick?.();
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Connect a workspace").props.onClick?.();
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Connect Linear").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Create webhook").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const chat = renderer!.root.findByType(RoutineChat);
+    const chatDraft = chat.props.draft.configuration as Record<string, unknown>;
+    await act(async () => {
+      chat.props.onDraftChange({
+        ...chatDraft,
+        trigger: {
+          kind: "linear",
+          connectionId: "connection-existing",
+          workspaceId: "workspace-1",
+          event: "issue_created",
+        },
+      });
+    });
+
+    const diagnostics = renderer!.root.findByProps({
+      "data-testid": "routine-linear-connection-diagnostics",
+    });
+    expect(nodeText(diagnostics)).toContain("Existing workspace");
+    expect(nodeText(diagnostics)).not.toContain("Created workspace");
+
+    await act(async () => {
+      buttonWithText(renderer!, "Verify").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const verifyCall = testState.command.mock.calls.find(
+      ([value]) => (value as { input?: { id?: string } }).input?.id === "connection-existing",
+    );
+    expect(verifyCall?.[0]).toEqual({
+      environmentId: "environment-1",
+      input: { id: "connection-existing" },
+    });
+  });
+
+  it("resumes a pending Linear authorization and reuses its connection id", async () => {
+    const storage = new Map<string, string>();
+    const localStorage = {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => void storage.set(key, value),
+      removeItem: (key: string) => void storage.delete(key),
+    };
+    vi.stubGlobal("window", {
+      localStorage,
+      open: vi.fn(() => ({
+        closed: false,
+        location: { href: "about:blank" },
+        close: vi.fn(),
+      })),
+    });
+    testState.linearMetadataError = "Connect Linear before reading workspace metadata.";
+    const authorizationIds: string[] = [];
+    testState.command.mockImplementation(async (value: unknown) => {
+      const input = (value as { input?: Record<string, unknown> }).input ?? {};
+      if (typeof input.id === "string" && input.provider === undefined) {
+        authorizationIds.push(input.id);
+        return {
+          _tag: "Success",
+          value: { authorizeUrl: "https://linear.app/oauth/authorize" },
+        };
+      }
+      return { _tag: "Success", value: linearConnectionFor(String(input.id)) };
+    });
+    renderer = await openNewRoutineEditor();
+
+    await act(async () => {
+      buttonWithText(renderer!, "Linear event").props.onClick?.();
+    });
+    await act(async () => {
+      buttonWithText(renderer!, "Connect Linear").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const pendingId = authorizationIds[0];
+    expect(pendingId).toMatch(/^connection-/);
+    if (pendingId === undefined)
+      throw new Error("Linear authorization did not return a connection id.");
+    expect([...storage.values()]).toEqual([pendingId]);
+
+    await act(async () => renderer!.unmount());
+    renderer = await openNewRoutineEditor();
+    await act(async () => {
+      buttonWithText(renderer!, "Linear event").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(nodeText(renderer!.root)).toContain("Waiting for authorization…");
+
+    await act(async () => {
+      buttonWithText(renderer!, "Connect Linear").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(authorizationIds).toEqual([pendingId, pendingId]);
+    expect([...storage.values()]).toEqual([pendingId]);
+
+    testState.connectionsData.push(linearConnectionFor(pendingId));
+    await act(async () => renderer!.unmount());
+    renderer = await openNewRoutineEditor();
+    await act(async () => {
+      buttonWithText(renderer!, "Linear event").props.onClick?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(storage.size).toBe(0);
   });
 
   it("offers only public teams for an all-public Linear webhook", async () => {

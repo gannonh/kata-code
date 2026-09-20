@@ -1765,7 +1765,28 @@ const makeWsRpcLayer = (
               Effect.gen(function* () {
                 const environmentId = yield* serverEnvironment.getEnvironmentId;
                 const now = DateTime.toEpochMillis(yield* DateTime.now);
-                return yield* store.save(environmentId, input, now);
+                const trigger = input.configuration.trigger;
+                const linearMetadata =
+                  trigger.kind === "linear" &&
+                  (trigger.teamId !== undefined ||
+                    trigger.projectId !== undefined ||
+                    trigger.event === "status_changed" ||
+                    trigger.event === "label_added")
+                    ? yield* Option.match(routineConnections, {
+                        onNone: () => Effect.succeed(undefined),
+                        onSome: (connections) =>
+                          connections.linearMetadata({
+                            environmentId,
+                            connectionId: trigger.connectionId,
+                          }),
+                      })
+                    : undefined;
+                return yield* store.save(
+                  environmentId,
+                  input,
+                  now,
+                  linearMetadata === undefined ? {} : { linearMetadata },
+                );
               }),
             ),
             { "rpc.aggregate": "routines" },

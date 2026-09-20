@@ -12,7 +12,7 @@ import {
   RoutineDelivery,
   RoutineError,
   RoutineHistoryInput,
-  RoutineList,
+  type RoutineLinearMetadata,
   RoutineProviderSubmission,
   RoutineRun,
   RoutineRunId,
@@ -92,6 +92,10 @@ export type RoutineClaim = {
   readonly setupComplete: boolean;
 };
 export type RoutineCursor = { readonly admittedAt: number; readonly id: string };
+export interface RoutineSaveOptions {
+  /** Current Linear resources fetched before the authoritative save transaction. */
+  readonly linearMetadata?: RoutineLinearMetadata;
+}
 const failure = (code: RoutineError["code"], message: string) =>
   new RoutineError({ code, message });
 const isRoutineError = Schema.is(RoutineError);
@@ -180,7 +184,11 @@ export const makeRoutineStore = Effect.gen(function* () {
     VALUES (${connection.id}, ${connection.environmentId}, ${connection.status}, ${encodeConnection(connection)})
     ON CONFLICT(id) DO UPDATE SET status=excluded.status, record=excluded.record`;
   /** An event trigger must name a live connection of this environment for the same resource. */
-  const checkTrigger = (environmentId: EnvironmentId, configuration: Routine["configuration"]) =>
+  const checkTrigger = (
+    environmentId: EnvironmentId,
+    configuration: Routine["configuration"],
+    options: RoutineSaveOptions,
+  ) =>
     Effect.gen(function* () {
       const trigger = configuration.trigger;
       if (isScheduleTrigger(trigger)) return;
@@ -217,14 +225,56 @@ export const makeRoutineStore = Effect.gen(function* () {
           "validation",
           "The selected workspace does not match the connection.",
         );
-      // A team-scoped webhook cannot silently expand: a saved team filter must
-      // stay inside the teams this connection was authorized for.
-      if (
-        trigger.teamId !== undefined &&
-        connection.teamIds.length > 0 &&
-        !connection.teamIds.includes(trigger.teamId)
-      )
+      const hasResourceFilter =
+        trigger.teamId !== undefined ||
+        trigger.projectId !== undefined ||
+        trigger.event === "status_changed" ||
+        trigger.event === "label_added";
+      if (!hasResourceFilter) return;
+      const metadata = options.linearMetadata;
+      if (metadata === undefined)
+        return yield* failure(
+          "validation",
+          "Refresh Linear workspace metadata before saving resource filters.",
+        );
+      const allowedTeamIds = new Set(
+        connection.allTeams
+          ? metadata.teams.filter((team) => team.visibility === "public").map((team) => team.id)
+          : connection.teamIds,
+      );
+      if (trigger.teamId !== undefined && !allowedTeamIds.has(trigger.teamId))
         return yield* failure("validation", "Choose a team inside this connection's scope.");
+      let selectedProjectTeamIds: ReadonlySet<string> | null = null;
+      if (trigger.projectId !== undefined) {
+        const project = metadata.projects.find((candidate) => candidate.id === trigger.projectId);
+        if (!project || !project.teamIds.some((teamId) => allowedTeamIds.has(teamId)))
+          return yield* failure("validation", "Choose a project inside this connection's scope.");
+        selectedProjectTeamIds = new Set(project.teamIds);
+        if (trigger.teamId !== undefined && !selectedProjectTeamIds.has(trigger.teamId))
+          return yield* failure("validation", "Choose a project in the selected team.");
+      }
+      const selectedResourceTeamIds =
+        trigger.teamId !== undefined
+          ? new Set([trigger.teamId])
+          : (selectedProjectTeamIds ?? allowedTeamIds);
+      if (trigger.event === "status_changed") {
+        const state = metadata.states.find((candidate) => candidate.id === trigger.stateId);
+        if (
+          !state ||
+          !allowedTeamIds.has(state.teamId) ||
+          !selectedResourceTeamIds.has(state.teamId)
+        )
+          return yield* failure("validation", "Choose a status inside this connection's scope.");
+      }
+      if (trigger.event === "label_added") {
+        const label = metadata.labels.find((candidate) => candidate.id === trigger.labelId);
+        if (
+          !label ||
+          (label.teamId !== null &&
+            (!allowedTeamIds.has(label.teamId) || !selectedResourceTeamIds.has(label.teamId)))
+        )
+          return yield* failure("validation", "Choose a label inside this connection's scope.");
+      }
     });
   const checkRevision = (routine: Routine, revision: number) =>
     routine.revision === revision
@@ -256,10 +306,15 @@ export const makeRoutineStore = Effect.gen(function* () {
       ),
       Effect.mapError(persistenceError),
     );
-  const save = (environmentId: EnvironmentId, input: typeof RoutineSaveInput.Type, now: number) =>
+  const save = (
+    environmentId: EnvironmentId,
+    input: typeof RoutineSaveInput.Type,
+    now: number,
+    options: RoutineSaveOptions = {},
+  ) =>
     transaction(
       Effect.gen(function* () {
-        yield* checkTrigger(environmentId, input.configuration);
+        yield* checkTrigger(environmentId, input.configuration, options);
         const nextDueAt = yield* nextDue(input.configuration, now);
         const owners = yield* sql<{
           environmentId: EnvironmentId;

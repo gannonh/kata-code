@@ -92,6 +92,8 @@ const validateConnectionId = (id: RoutineConnectionId) =>
       ),
   });
 
+type LinearCleanupError = RoutineError | ServerSecretStore.SecretStoreError;
+
 export interface RoutineConnectionsShape {
   readonly list: (
     environmentId: EnvironmentId,
@@ -141,6 +143,41 @@ export function parseRepositoryName(value: string): { owner: string; name: strin
     value.trim(),
   );
   return match ? { owner: match[1]!, name: match[2]! } : null;
+}
+
+export function cleanupUncommittedLinearConnection(input: {
+  readonly connectionId: RoutineConnectionId;
+  readonly findConnection: () => Effect.Effect<RoutineConnection | null, LinearCleanupError>;
+  readonly removeSecret: () => Effect.Effect<void, LinearCleanupError>;
+  readonly deleteWebhook: () => Effect.Effect<void, LinearCleanupError>;
+}): Effect.Effect<void> {
+  return Effect.gen(function* () {
+    const persisted = yield* input.findConnection().pipe(Effect.result);
+    if (persisted._tag === "Failure") {
+      yield* Effect.logWarning("routine Linear cleanup skipped after persistence lookup failed", {
+        connectionId: input.connectionId,
+        detail: String(persisted.failure),
+      });
+      return;
+    }
+    if (persisted.success !== null) return;
+    yield* input.removeSecret().pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("routine Linear signing secret cleanup failed", {
+          connectionId: input.connectionId,
+          detail: String(error),
+        }),
+      ),
+    );
+    yield* input.deleteWebhook().pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("routine Linear webhook cleanup failed", {
+          connectionId: input.connectionId,
+          detail: String(error),
+        }),
+      ),
+    );
+  });
 }
 
 const makeRoutineConnections = Effect.gen(function* () {
@@ -287,30 +324,23 @@ const makeRoutineConnections = Effect.gen(function* () {
       yield* store.saveConnection(connection);
       return connection;
     }).pipe(
-      // This request owns the reserved secret and any recorded webhook.
+      // A failed setup releases the reservation and provider resource only
+      // when the durable connection was never committed. A failure after the
+      // store commit must leave the connection usable for recovery.
       Effect.onError(() =>
-        Effect.gen(function* () {
-          yield* secrets.remove(secretName).pipe(
-            Effect.catch((error) =>
-              Effect.logWarning("routine Linear signing secret cleanup failed", {
-                connectionId: input.id,
-                detail: error.message,
-              }),
-            ),
-          );
-          const webhookId = yield* Ref.get(createdWebhookId);
-          if (webhookId === null) return;
-          yield* linearWebhookAdmin
-            .deleteWebhook({ accessToken: bundle.accessToken, webhookId })
-            .pipe(
-              Effect.catch((error) =>
-                Effect.logWarning("routine Linear webhook cleanup failed", {
-                  connectionId: input.id,
-                  webhookId,
-                  detail: error.message,
-                }),
-              ),
-            );
+        cleanupUncommittedLinearConnection({
+          connectionId: input.id,
+          findConnection: () => store.findConnection(input.id),
+          removeSecret: () => secrets.remove(secretName),
+          deleteWebhook: () =>
+            Effect.gen(function* () {
+              const webhookId = yield* Ref.get(createdWebhookId);
+              if (webhookId === null) return;
+              yield* linearWebhookAdmin.deleteWebhook({
+                accessToken: bundle.accessToken,
+                webhookId,
+              });
+            }),
         }),
       ),
     );
@@ -494,15 +524,27 @@ const makeRoutineConnections = Effect.gen(function* () {
     function* (input) {
       const id = yield* validateConnectionId(input.id);
       const current = yield* owned(input.environmentId, id);
-      // Local acceptance ends first; the provider-side delete is best effort.
-      yield* secrets
-        .remove(routineConnectionSecretName(current.id))
-        .pipe(
-          Effect.mapError(() => failure("persistence", "Could not remove the signing secret.")),
-        );
       if (current.provider === "linear") {
-        // The provider-side delete and revoke are best effort; local
-        // acceptance already ended with the signing secret above.
+        // Persist the local stop before remote cleanup. This closes the
+        // acceptance gate even if token refresh, provider deletion, or relay
+        // revocation is interrupted.
+        const updated = yield* store.updateConnection(current.id, (connection) =>
+          connection.provider === "linear"
+            ? {
+                ...connection,
+                status: "disabled",
+                webhookId: null,
+                updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
+              }
+            : connection,
+        );
+        yield* secrets
+          .remove(routineConnectionSecretName(current.id))
+          .pipe(
+            Effect.mapError(() => failure("persistence", "Could not remove the signing secret.")),
+          );
+        // Provider-side delete and revoke are best effort after the local
+        // disabled state is durable.
         if (current.webhookId !== null) {
           const bundle = yield* ensureFreshLinearAccessToken({
             secrets,
@@ -550,17 +592,14 @@ const makeRoutineConnections = Effect.gen(function* () {
             }),
           ),
         );
-        return yield* store.updateConnection(current.id, (connection) =>
-          connection.provider === "linear"
-            ? {
-                ...connection,
-                status: "disabled",
-                webhookId: null,
-                updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
-              }
-            : connection,
-        );
+        return updated;
       }
+      // Local acceptance ends first; the provider-side delete is best effort.
+      yield* secrets
+        .remove(routineConnectionSecretName(current.id))
+        .pipe(
+          Effect.mapError(() => failure("persistence", "Could not remove the signing secret.")),
+        );
       const updated = yield* store.updateConnection(current.id, (connection) =>
         connection.provider === "github"
           ? {

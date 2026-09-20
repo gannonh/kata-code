@@ -5,6 +5,7 @@ import {
   EnvironmentId,
   RoutineConnectionId,
   RoutineError,
+  type RoutineConnection,
   type RoutineLinearMetadata,
 } from "@kata-sh/code-contracts";
 import type { RelayLinearAccessToken } from "@kata-sh/code-contracts/relay";
@@ -39,6 +40,7 @@ import { summarizeLinearEvent } from "./LinearRoutineEvents.ts";
 import { LinearRoutineMetadata, type LinearMetadataError } from "./LinearRoutineMetadata.ts";
 import { LinearWebhookAdmin, type LinearWebhookAdminShape } from "./LinearRoutineWebhooks.ts";
 import {
+  cleanupUncommittedLinearConnection,
   RoutineConnections,
   RoutineConnectionsLive,
   parseRepositoryName,
@@ -213,6 +215,7 @@ const linearOAuthRelayLayer = Layer.mock(LinearOAuthRelay)({
 type WebhookCreateInput = Parameters<LinearWebhookAdminShape["createWebhook"]>[0];
 const webhookCreates: Array<WebhookCreateInput> = [];
 const webhookDeletes: Array<{ accessToken: string; webhookId: string }> = [];
+let inspectLinearCleanup: (() => Effect.Effect<void>) | null = null;
 let webhookCreateStatus: "ok" | "failure" = "ok";
 const defaultLinearWebhookCreate: LinearWebhookAdminShape["createWebhook"] = () =>
   webhookCreateStatus === "ok"
@@ -227,7 +230,7 @@ const linearWebhookAdminLayer = Layer.mock(LinearWebhookAdmin)({
   deleteWebhook: (input) =>
     Effect.sync(() => {
       webhookDeletes.push(input);
-    }),
+    }).pipe(Effect.andThen(() => inspectLinearCleanup?.() ?? Effect.void)),
 });
 const layer = RoutineConnectionsLive.pipe(
   Layer.provideMerge(RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory))),
@@ -239,6 +242,56 @@ const layer = RoutineConnectionsLive.pipe(
   Layer.provide(linearOAuthRelayLayer),
   Layer.provideMerge(configLayer),
   Layer.provide(NodeServices.layer),
+);
+
+it.effect("skips Linear resource cleanup when the persistence lookup fails", () =>
+  Effect.gen(function* () {
+    let removedSecret = false;
+    let deletedWebhook = false;
+    yield* cleanupUncommittedLinearConnection({
+      connectionId: RoutineConnectionId.make("connection-linear-cleanup-lookup-failure"),
+      findConnection: () =>
+        Effect.fail(new RoutineError({ code: "persistence", message: "database unavailable" })),
+      removeSecret: () => Effect.sync(() => (removedSecret = true)),
+      deleteWebhook: () => Effect.sync(() => (deletedWebhook = true)),
+    });
+    assert.isFalse(removedSecret);
+    assert.isFalse(deletedWebhook);
+  }),
+);
+
+it.effect("keeps Linear resources when cleanup finds a committed connection", () =>
+  Effect.gen(function* () {
+    let removedSecret = false;
+    let deletedWebhook = false;
+    const persisted: RoutineConnection = {
+      id: RoutineConnectionId.make("connection-linear-cleanup-committed"),
+      environmentId,
+      provider: "linear",
+      workspaceId: "workspace-1",
+      workspaceName: "Acme",
+      teamIds: [],
+      allTeams: true,
+      webhookId: "linear-webhook-committed",
+      metadataAccess: "ok",
+      callbackUrl: "https://env.example/api/routines/webhooks/linear/committed",
+      status: "pending",
+      lastDelivery: null,
+      acceptedCount: 0,
+      ignoredCount: 0,
+      rejectedCount: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    yield* cleanupUncommittedLinearConnection({
+      connectionId: persisted.id,
+      findConnection: () => Effect.succeed(persisted),
+      removeSecret: () => Effect.sync(() => (removedSecret = true)),
+      deleteWebhook: () => Effect.sync(() => (deletedWebhook = true)),
+    });
+    assert.isFalse(removedSecret);
+    assert.isFalse(deletedWebhook);
+  }),
 );
 
 it.layer(layer)("RoutineConnections", (it) => {
@@ -853,14 +906,27 @@ it.layer(layer)("RoutineConnections Linear", (it) => {
       Effect.gen(function* () {
         const connections = yield* RoutineConnections;
         const secrets = yield* ServerSecretStore.ServerSecretStore;
+        const store = yield* RoutineStore;
         const id = RoutineConnectionId.make("connection-linear-disable");
         yield* storeBundle(id);
         yield* connections.create(linearCreate(id));
         const deletesBefore = webhookDeletes.length;
         const revokesBefore = revokeCalls.length;
-        const disabled = yield* connections.disable({ environmentId, id });
+        const statusesDuringRemoteCleanup: Array<string> = [];
+        inspectLinearCleanup = () =>
+          store.getConnection(environmentId, id).pipe(
+            Effect.tap((connection) =>
+              Effect.sync(() => statusesDuringRemoteCleanup.push(connection.status)),
+            ),
+            Effect.asVoid,
+            Effect.orDie,
+          );
+        const disabled = yield* connections
+          .disable({ environmentId, id })
+          .pipe(Effect.ensuring(Effect.sync(() => (inspectLinearCleanup = null))));
         assert.equal(disabled.status, "disabled");
         assert.equal(disabled.provider === "linear" ? disabled.webhookId : "webhook", null);
+        assert.deepEqual(statusesDuringRemoteCleanup, ["disabled"]);
         assert.isTrue(Option.isNone(yield* secrets.get(routineConnectionSecretName(id))));
         assert.isTrue(Option.isNone(yield* secrets.get(routineLinearOAuthSecretName(id))));
         assert.equal(webhookDeletes.length, deletesBefore + 1);
