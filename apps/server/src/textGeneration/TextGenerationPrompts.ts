@@ -7,7 +7,7 @@
  * @module textGenerationPrompts
  */
 import * as Schema from "effect/Schema";
-import { RoutineDraftModelOutput } from "@kata-sh/code-contracts";
+import { RoutineDraftProviderOutput } from "@kata-sh/code-contracts";
 import type {
   ChatAttachment,
   RoutineDraftConversationMessage,
@@ -341,6 +341,22 @@ export interface RoutineDraftPromptModel {
   readonly name: string;
 }
 
+/**
+ * One verified Linear connection with the metadata the model may copy ids from.
+ * Ids are workspace-scoped UUIDs and survive renames, so the prompt never
+ * offers names as a substitute for an id.
+ */
+export interface RoutineDraftPromptEventSource {
+  readonly connectionId: string;
+  readonly provider: "linear";
+  readonly workspaceId: string;
+  readonly workspaceName: string;
+  readonly teams: ReadonlyArray<{ id: string; name: string; key: string }>;
+  readonly projects: ReadonlyArray<{ id: string; name: string; teamIds: ReadonlyArray<string> }>;
+  readonly states: ReadonlyArray<{ id: string; name: string; teamId: string; type: string }>;
+  readonly labels: ReadonlyArray<{ id: string; name: string; teamId: string | null }>;
+}
+
 export interface RoutineDraftPromptInput {
   readonly message: string;
   readonly currentDraft: RoutineDraftConversationState | null;
@@ -348,6 +364,7 @@ export interface RoutineDraftPromptInput {
   readonly projectId: string;
   readonly projects: ReadonlyArray<RoutineDraftPromptProject>;
   readonly availableModels: ReadonlyArray<RoutineDraftPromptModel>;
+  readonly eventSources: ReadonlyArray<RoutineDraftPromptEventSource>;
   readonly generationModelSelection: {
     readonly instanceId: string;
     readonly model: string;
@@ -356,7 +373,7 @@ export interface RoutineDraftPromptInput {
 
 /**
  * Build the bounded prompt used by conversational routine creation. The
- * model owns the routine's name, instruction, project, model and schedule;
+ * model owns the routine's name, instruction, project, model and trigger;
  * permission mode and workspace are intentionally excluded from the output
  * contract and are supplied by the server.
  */
@@ -371,6 +388,21 @@ export function buildRoutineDraftPrompt(input: RoutineDraftPromptInput) {
   const modelList = input.availableModels.length
     ? JSON.stringify(input.availableModels, null, 2)
     : "(No execution models are available.)";
+  const eventSourceList = input.eventSources.length
+    ? JSON.stringify(
+        input.eventSources.map((source) => ({
+          connectionId: source.connectionId,
+          workspaceId: source.workspaceId,
+          workspaceName: source.workspaceName,
+          teams: source.teams,
+          projects: source.projects,
+          states: source.states,
+          labels: source.labels,
+        })),
+        null,
+        2,
+      )
+    : "(No Linear event connections are available.)";
   const currentDraft = input.currentDraft
     ? JSON.stringify({
         name: input.currentDraft.name,
@@ -381,20 +413,23 @@ export function buildRoutineDraftPrompt(input: RoutineDraftPromptInput) {
       })
     : "(No draft exists yet.)";
   const prompt = [
-    "You create and refine scheduled routines for Kata Code.",
+    "You create and refine routines for Kata Code.",
     "Return one JSON object with exactly these keys: draft, assistantMessage.",
     "draft must be null when you need clarification. Otherwise draft must contain exactly these keys: name, instruction, projectId, modelSelection, trigger.",
     "Do not return runtimeMode, workspace, permissions, repository paths, tools, or any other keys.",
     "Rules:",
-    "- name is a concise label for the scheduled routine.",
+    "- name is a concise label for the routine.",
     "- instruction is the prompt that will run later; keep it explicit and actionable.",
     "- projectId must be one of the available project IDs below. If the user names a project absent from that list, return draft:null and ask them to choose an existing project; never substitute the target project.",
     "- modelSelection is the model that will execute the saved routine. Keep the current routine model unless the user explicitly asks to change it; the generation model is separate.",
     "- Copy modelSelection.instanceId and modelSelection.model verbatim from one entry in the execution models list. Never copy the display name and never paraphrase either field.",
     "- For a new draft, use the first entry in the execution models list unless the user explicitly requests another execution model. Do not change it merely to match the generation model.",
-    "- trigger must describe a schedule only: daily, weekdays, weekly, or a valid five-field cron expression with an IANA timezone.",
-    "- Do not create event triggers, GitHub triggers, webhooks, or one-off runs. For these requests return draft:null and explain that only schedules are supported.",
-    "- If the request is ambiguous or does not clearly describe a schedule, set draft to null and ask one concise clarification in assistantMessage. Never encode a clarification as an executable instruction.",
+    "- trigger is either a schedule or a Linear issue event. A schedule is daily, weekdays, weekly, or a valid five-field cron expression with an IANA timezone.",
+    "- A Linear event trigger must use kind:linear with connectionId, workspaceId, event, teamId, and projectId. Always include teamId and projectId. Copy connectionId, workspaceId, teamId, projectId, stateId, and labelId verbatim from the Linear event connections list below; use null for an unscoped teamId or projectId; never omit those fields or invent an id.",
+    "- issue_created needs no state or label. status_changed requires stateId. label_added requires labelId. A null teamId or projectId means every team or project inside the connection scope.",
+    "- GitHub, Slack, Microsoft Teams, Sentry, PagerDuty, generic webhooks, and every other provider are unsupported. For these return draft:null and explain that only schedules and the listed Linear events are supported.",
+    "- When the request names a Linear event without enough detail to pick the state or label, set draft to null and ask one concise clarification in assistantMessage.",
+    "- If the request is ambiguous or does not clearly describe a schedule or Linear event, set draft to null and ask one concise clarification in assistantMessage. Never encode a clarification as an executable instruction.",
     "",
     "Available projects:",
     projectList,
@@ -403,6 +438,9 @@ export function buildRoutineDraftPrompt(input: RoutineDraftPromptInput) {
     "",
     "Available routine execution models:",
     modelList,
+    "",
+    "Linear event connections (ids the trigger may reference):",
+    eventSourceList,
     "",
     `Generation model (used only for this conversation): ${input.generationModelSelection.instanceId}:${input.generationModelSelection.model}`,
     "",
@@ -414,5 +452,5 @@ export function buildRoutineDraftPrompt(input: RoutineDraftPromptInput) {
     limitSection(input.message, 12_000),
   ].join("\n");
 
-  return { prompt, outputSchema: RoutineDraftModelOutput };
+  return { prompt, outputSchema: RoutineDraftProviderOutput };
 }

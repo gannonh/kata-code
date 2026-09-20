@@ -52,6 +52,29 @@ and confirm the service account can read the Environment.
 
 Process environment variables override 1Password for the same key.
 
+## Link a source worktree
+
+A linked worktree uses its own `.katacode` data directory. Run the source Connect launcher from
+that worktree so authorization and relay state use the same directory as `vp run dev`:
+
+```sh
+vp run connect link --headless
+```
+
+Open the printed URL in a browser, complete Kata Code authorization, and enter the one-time code in
+the terminal. Restart the worktree's development server after the command succeeds. Server startup
+creates the local link proof, provisions the managed endpoint, and stores the relay configuration.
+
+Inspect or remove the worktree link with the same launcher:
+
+```sh
+vp run connect status --json
+vp run connect unlink
+```
+
+The launcher accepts only managed-link setup, status, unlink, and logout commands. It pins the data
+directory to the current linked worktree and rejects `--base-dir` and publish-only setup.
+
 ## Remote development servers
 
 Install the same beta CLI, export `OP_SERVICE_ACCOUNT_TOKEN`, clone the repo, `vp i`, then

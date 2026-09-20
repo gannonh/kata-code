@@ -230,9 +230,11 @@ export const make = Effect.gen(function* () {
           flag: "wx",
           mode: 0o600,
         });
-        yield* file.writeAll(value);
-        yield* file.sync;
-        yield* fileSystem.chmod(secretPath, 0o600);
+        yield* Effect.gen(function* () {
+          yield* file.writeAll(value);
+          yield* file.sync;
+          yield* fileSystem.chmod(secretPath, 0o600);
+        }).pipe(Effect.onError(() => fileSystem.remove(secretPath).pipe(Effect.ignore)));
       }),
     ).pipe(
       Effect.mapError(

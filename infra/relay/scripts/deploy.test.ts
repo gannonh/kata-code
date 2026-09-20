@@ -241,6 +241,24 @@ describe("release workflow tracing config propagation", () => {
   );
 });
 
+describe("production relay deployment workflow", () => {
+  it.effect("changes the Worker revision without forcing unrelated infrastructure", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workflowPath = yield* path.fromFileUrl(
+        new URL("../../../.github/workflows/deploy-relay.yml", import.meta.url),
+      );
+      const workflow = yield* fileSystem.readFileString(workflowPath);
+
+      expect(workflow).toContain(
+        "RELAY_DEPLOYMENT_REVISION: ${{ github.run_id }}-${{ github.run_attempt }}",
+      );
+      expect(workflow).not.toMatch(/deploy .*--force/);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
 describe("publicConfigFromOutput", () => {
   it("reads the complete public tracing config from persisted Alchemy output", () => {
     expect(

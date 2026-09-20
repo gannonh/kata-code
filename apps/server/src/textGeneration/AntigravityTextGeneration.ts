@@ -1,7 +1,7 @@
 import {
   type ModelSelection,
   type ProviderSetupError,
-  RoutineDraftModelOutput,
+  RoutineDraftProviderOutput,
   TextGenerationError,
 } from "@kata-sh/code-contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
@@ -411,7 +411,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       return yield* runAntigravityJson({
         operation: "generateRoutineDraft",
         prompt: input.prompt,
-        outputSchema: RoutineDraftModelOutput,
+        outputSchema: RoutineDraftProviderOutput,
         modelSelection: input.modelSelection,
         strictRoutineOutput: true,
       });

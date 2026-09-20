@@ -1,10 +1,12 @@
-import { RoutineError } from "@kata-sh/code-contracts";
+import { RoutineError, type EnvironmentId } from "@kata-sh/code-contracts";
 import { RelayLinearAccessToken } from "@kata-sh/code-contracts/relay";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import type { LinearOAuthRelayShape } from "../cloud/LinearOAuthRelay.ts";
 
 /**
  * The secret name is a file name in the secret store. `connectionId` reaches
@@ -31,6 +33,37 @@ export function saveLinearAccessToken(input: {
     yield* input.secrets
       .set(routineLinearOAuthSecretName(input.connectionId), new TextEncoder().encode(encoded))
       .pipe(Effect.mapError(() => persistenceFailure("Could not store the Linear access token.")));
+  });
+}
+
+const EXPIRY_WINDOW_MS = 60_000;
+const NOT_CONNECTED = "Connect Linear before reading workspace metadata.";
+
+export function ensureFreshLinearAccessToken(input: {
+  readonly secrets: ServerSecretStore.ServerSecretStore["Service"];
+  readonly relay: LinearOAuthRelayShape;
+  readonly environmentId: EnvironmentId;
+  readonly connectionId: string;
+}): Effect.Effect<RelayLinearAccessToken, RoutineError> {
+  return Effect.gen(function* () {
+    const stored = yield* readLinearAccessToken({
+      secrets: input.secrets,
+      connectionId: input.connectionId,
+    });
+    if (Option.isNone(stored))
+      return yield* Effect.fail(new RoutineError({ code: "blocked", message: NOT_CONNECTED }));
+    const now = yield* Clock.currentTimeMillis;
+    if (stored.value.expiresAt > now + EXPIRY_WINDOW_MS) return stored.value;
+    const refreshed = yield* input.relay.refresh({
+      environmentId: input.environmentId,
+      connectionId: input.connectionId,
+    });
+    yield* saveLinearAccessToken({
+      secrets: input.secrets,
+      connectionId: input.connectionId,
+      token: refreshed,
+    });
+    return refreshed;
   });
 }
 
