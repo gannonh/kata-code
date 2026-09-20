@@ -268,9 +268,9 @@ const writeGithubEnvFile = Effect.fn("relay.deploy.writeGithubEnvFile")(function
 const deployBaseServices = Layer.mergeAll(
   Layer.succeed(AuthProviders, {}),
   Layer.succeed(ArtifactStore, createArtifactStore()),
-  Layer.provideMerge(AlchemyContextLive, PlatformServices),
-  Layer.provide(ProfileStoreLive, PlatformServices),
-  Layer.provide(CredentialsStoreLive, PlatformServices),
+  AlchemyContextLive,
+  ProfileStoreLive,
+  CredentialsStoreLive,
   FetchHttpClient.layer,
   TelemetryLive,
   LoggingCli,
@@ -279,7 +279,12 @@ const deployBaseServices = Layer.mergeAll(
   // so alchemy never needs to prompt on its own.
   Interaction.layerNonInteractive(),
 );
-const deployServices = Layer.provideMerge(deployBaseServices, NodeServices.layer);
+// Several members above need the platform services. Layer.mergeAll builds in parallel,
+// so a sibling cannot supply them; they are provided to the whole group instead.
+const deployServices = Layer.provideMerge(
+  deployBaseServices,
+  Layer.mergeAll(PlatformServices, NodeServices.layer),
+);
 
 function relayPublicConfigValues(
   output: unknown,
