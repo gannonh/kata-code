@@ -379,6 +379,7 @@ export const PRESERVATION_CHECKS = [
     ownerPaths: [
       "package.json",
       "scripts/release-asset-names.ts",
+      "scripts/release-asset-names.test.ts",
       "scripts/update-release-package-versions.ts",
       ".github/workflows/release.yml",
     ],
