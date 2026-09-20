@@ -163,7 +163,6 @@ function harness() {
     }),
     Layer.succeed(EnvironmentLinks, {
       upsert: () => Effect.void,
-      listUsersForEnvironment: () => Effect.succeed(["user"]),
       listUsersForEnvironmentPublicKey: () => Effect.succeed(["user"]),
       listDeliveryUsersForEnvironment: (input) =>
         Effect.sync(() =>
@@ -179,7 +178,6 @@ function harness() {
               ]
             : [],
         ),
-      listPublicKeysForEnvironment: () => Effect.succeed([]),
       listForUser: () => Effect.succeed([]),
       revokeForUser: () => Effect.succeed(false),
       getForUser: (input) =>

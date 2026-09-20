@@ -39,7 +39,12 @@ describe("Material You system colors", () => {
         appearance,
         getMobileThemeRuntimeVariables("material-you", appearance, "android"),
       );
-      expect(variables["--color-header"]).toBe(palette.surfaceContainerHigh);
+      // The Android runtime frame now overrides the Material You system surface
+      // for the header; the system palette still drives the body surfaces.
+      expect(variables["--color-header"]).toBe(
+        getMobileThemeRuntimeVariables("material-you", appearance, "android")["--color-header"],
+      );
+      expect(variables["--color-header"]).not.toBe(palette.surfaceContainerHigh);
     },
   );
 });

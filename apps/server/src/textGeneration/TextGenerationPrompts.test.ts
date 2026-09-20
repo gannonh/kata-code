@@ -183,7 +183,6 @@ describe("buildRoutineDraftPrompt", () => {
   });
 });
 
-
 describe("buildPrContentPrompt", () => {
   it("includes branch names, commits, and diff in the prompt", () => {
     const result = buildPrContentPrompt({

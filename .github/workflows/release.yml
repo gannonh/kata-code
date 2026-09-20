@@ -341,9 +341,15 @@ jobs:
             args:
               - --filter=kata-code-relay...
 
-      - id: relay_state
-        name: Read production relay tracing config
+      # The deployed stack's outputs, read from Alchemy's state store without
+      # planning or applying. Select the backend explicitly to avoid loading
+      # the stack's unrelated provider credentials; suppress informational logs
+      # and strip the credential-refresh progress prefix before parsing JSON.
+      # Redacted values are persisted as
+      # {"__redacted__": "<value>"}; the token is masked before it is written.
+      - name: Read production relay tracing config
         shell: bash
+        working-directory: infra/relay
         run: |
           vp run --filter kata-code-relay deploy \
             --stage prod \

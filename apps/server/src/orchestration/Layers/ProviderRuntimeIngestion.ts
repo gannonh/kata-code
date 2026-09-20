@@ -14,6 +14,7 @@ import {
   type OrchestrationCheckpointSummary,
   type OrchestrationThreadActivity,
   type ProjectId,
+  type ProviderRequestKind,
   type ProviderRuntimeEvent,
   type ResponseStreamingMode,
   RuntimeRequestId,
@@ -402,7 +403,7 @@ function sessionStatusAllowsActiveTurn(
 
 function requestKindFromCanonicalRequestType(
   requestType: string | undefined,
-): "command" | "file-read" | "file-change" | "mcp-elicitation" | undefined {
+): ProviderRequestKind | undefined {
   switch (requestType) {
     case "command_execution_approval":
     case "exec_command_approval":
@@ -414,6 +415,8 @@ function requestKindFromCanonicalRequestType(
       return "file-change";
     case "mcp_elicitation_approval":
       return "mcp-elicitation";
+    case "permission_approval":
+      return "permission";
     default:
       return undefined;
   }
@@ -496,7 +499,9 @@ export function runtimeEventToActivities(
                   ? "File-change approval requested"
                   : requestKind === "mcp-elicitation"
                     ? "App access approval requested"
-                    : "Approval requested",
+                    : requestKind === "permission"
+                      ? "App permission approval requested"
+                      : "Approval requested",
           payload: {
             requestId: toApprovalRequestId(event.requestId),
             ...(requestKind ? { requestKind } : {}),

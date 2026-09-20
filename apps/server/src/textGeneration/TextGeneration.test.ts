@@ -179,3 +179,52 @@ describe("TextGeneration.make", () => {
     }),
   );
 });
+
+// ws.ts routine-draft generation calls this directly rather than through the
+// TextGeneration service, so it needs its own coverage.
+describe("makeTextGenerationFromRegistry", () => {
+  it.effect("delegates to the provider instance named by the model selection", () =>
+    Effect.gen(function* () {
+      const draft = {
+        draft: null,
+        assistantMessage: "Which timezone should I use?",
+      } as const;
+      const registry = makeStubRegistry([
+        makeStubInstance(
+          ProviderInstanceId.make("codex"),
+          makeStubTextGeneration({ generateRoutineDraft: () => Effect.succeed(draft) }),
+        ),
+        makeStubInstance(
+          ProviderInstanceId.make("claude"),
+          makeStubTextGeneration({
+            generateRoutineDraft: () => Effect.die("wrong instance selected"),
+          }),
+        ),
+      ]);
+
+      expect(
+        yield* TextGeneration.makeTextGenerationFromRegistry(registry).generateRoutineDraft({
+          cwd: process.cwd(),
+          prompt: "Create a weekday brief at 9am.",
+          modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-6-astra"),
+        }),
+      ).toEqual(draft);
+    }),
+  );
+
+  it.effect("fails with a TextGenerationError when the instance is not registered", () =>
+    Effect.gen(function* () {
+      const registry = makeStubRegistry([]);
+      const error = yield* TextGeneration.makeTextGenerationFromRegistry(registry)
+        .generateRoutineDraft({
+          cwd: process.cwd(),
+          prompt: "Create a weekday brief at 9am.",
+          modelSelection: createModelSelection(ProviderInstanceId.make("missing"), "gpt-6-astra"),
+        })
+        .pipe(Effect.flip);
+
+      expect(error.operation).toBe("generateRoutineDraft");
+      expect(error.detail).toContain("No provider instance registered for id 'missing'");
+    }),
+  );
+});

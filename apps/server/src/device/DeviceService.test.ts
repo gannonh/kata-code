@@ -63,6 +63,7 @@ const fixture = Effect.fn("fixture")(function* (
   bootError?: string,
   failListAfterShutdown = false,
   runtimeFailure?: NodeRuntimeUnavailableError,
+  streamAttachError?: string,
 ) {
   const settings = yield* Ref.make(DEFAULT_SERVER_SETTINGS);
   const starts: string[] = [];
@@ -145,6 +146,12 @@ const fixture = Effect.fn("fixture")(function* (
               new Response(new Uint8Array([137, 80, 78, 71])),
             );
           }
+          if (request.url.includes("/grid/api/start") && streamAttachError !== undefined) {
+            return HttpClientResponse.fromWeb(
+              request,
+              Response.json({ ok: false, error: streamAttachError }),
+            );
+          }
           if (request.url.endsWith("/shutdown")) {
             shutDown = true;
             booted = false;
@@ -169,7 +176,21 @@ const fixture = Effect.fn("fixture")(function* (
           return HttpClientResponse.fromWeb(
             request,
             Response.json({
-              simulators: [],
+              // The stream-attach case needs a listed simulator to get as far as
+              // the grid call; every other case asserts against an empty list.
+              simulators:
+                streamAttachError === undefined
+                  ? []
+                  : [
+                      {
+                        id: "SIM-1",
+                        name: "iPhone",
+                        platform: "ios",
+                        version: "iOS 18",
+                        booted: true,
+                        physical: false,
+                      },
+                    ],
               emulators: booted
                 ? [
                     {
@@ -376,5 +397,28 @@ it.effect("keeps shutdown successful when subsequent discovery fails", () =>
     const state = yield* service.state;
     expect(state.sessions).toEqual([]);
     expect(state.devices.find((device) => device.id === session.deviceId)?.booted).toBe(false);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("rejects open when iOS stream attach returns ok false", () =>
+  Effect.gen(function* () {
+    const { service, requests } = yield* fixture(
+      Effect.void,
+      undefined,
+      false,
+      undefined,
+      "helper missing",
+    );
+    yield* service.configure({ enabled: true });
+    const error = yield* service
+      .open({
+        threadId: ThreadId.make("ios-attach"),
+        deviceId: "SIM-1",
+        platform: "ios",
+      })
+      .pipe(Effect.flip);
+    expect(error._tag).toBe("DeviceOperationError");
+    expect(requests.some((url) => url.includes("/grid/api/start"))).toBe(true);
+    expect((yield* service.state).sessions).toEqual([]);
   }).pipe(Effect.scoped),
 );

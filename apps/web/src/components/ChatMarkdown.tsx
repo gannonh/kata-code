@@ -56,6 +56,7 @@ import {
 } from "@kata-sh/code-client-runtime/media-reference";
 import { mediaKindFromPath, mediaMimeTypeFromExtension } from "@kata-sh/code-shared/filePreview";
 import * as Cause from "effect/Cause";
+import { sourceControlRepositorySelector } from "@kata-sh/code-shared/sourceControl";
 import { AsyncResult } from "effect/unstable/reactivity";
 import React, {
   Children,
@@ -2907,8 +2908,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
               environmentId,
               input: {
                 projectId: pullRequestProject.id,
+                host: pullRequestCandidate.authority ?? pullRequestCandidate.host,
                 repository:
-                  pullRequestProject.repositoryIdentity?.displayName ??
+                  sourceControlRepositorySelector(pullRequestProject.repositoryIdentity) ??
                   pullRequestCandidate.repository,
                 number: pullRequestCandidate.number,
               },

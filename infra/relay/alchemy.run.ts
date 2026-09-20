@@ -1,5 +1,6 @@
 // @effect-diagnostics anyUnknownInErrorContext:off layerMergeAllWithDependencies:off - Alchemy provider helpers expose framework-owned any requirements.
 import * as Alchemy from "alchemy";
+import * as Output from "alchemy/Output";
 import * as Axiom from "alchemy/Axiom";
 import * as Cloudflare from "alchemy/Cloudflare";
 import * as Drizzle from "alchemy/Drizzle";
@@ -30,7 +31,6 @@ export default Alchemy.Stack(
     const relayApiZone = yield* RelayApiZone.pipe(Effect.orDie);
     const observability = yield* RelayObservability;
     const api = yield* Api;
-
     return {
       databaseName: db.database.name,
       databaseBranchName: db.branch?.name ?? "main",

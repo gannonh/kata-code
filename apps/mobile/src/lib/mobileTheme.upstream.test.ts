@@ -70,11 +70,14 @@ describe("mobile themes", () => {
     }
   });
 
-  it("preserves the existing mobile palette as the default", () => {
-    expect(readDefaultMobileThemeVariables("light")["--color-screen"]).toBe("#f2f2f7");
+  it("generates the default mobile palette from the shared theme roles", () => {
+    expect(readDefaultMobileThemeVariables("light")["--color-screen"]).toBe("#fcfcfc");
     expect(readDefaultMobileThemeVariables("dark")["--color-screen"]).toBe("#0a0a0a");
+    // Derived for contrast against the user bubble rather than hand-picked. The
+    // previously pinned #f0abfc scores 1.53:1 on the current bubble, below the
+    // 4.5:1 the default-readability test requires.
     expect(readDefaultMobileThemeVariables("light")["--color-user-bubble-skill-foreground"]).toBe(
-      "#f0abfc",
+      "#1b4ed8",
     );
   });
 
@@ -157,7 +160,7 @@ describe("mobile themes", () => {
 
   it("maps semantic palette roles onto every mobile color variable", () => {
     const variables = createMobileThemeVariables(T3_CHAT_THEME.colors, "light");
-    expect(Object.keys(variables)).toHaveLength(75);
+    expect(Object.keys(variables)).toHaveLength(87);
     expect(variables["--color-sheet-solid"]).toBe(
       themeColorToNativeColor(T3_CHAT_THEME.colors.chrome),
     );

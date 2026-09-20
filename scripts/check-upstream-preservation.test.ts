@@ -30,7 +30,7 @@ const repositoryRoot = NodePath.resolve(new URL("..", import.meta.url).pathname)
 const scriptPath = NodePath.join(repositoryRoot, "scripts/check-upstream-preservation.ts");
 const currentSha = "251a6bcb5cfad04999a6bdd4c7dbb5bb4c983ff9";
 const upstreamSha = "12391bd0d38eef6655b7a9f8945d0cb5febadc2b";
-const currentUpstreamSha = "0150c6a53b409ba3bcb45645709b649cf8708354";
+const currentUpstreamSha = "c14f6015bfe479d313355cb234af1a5c16dbb15f";
 const upstreamBaseSha = "6a687ee43bf222672ab8d3f4c0bab3d8d174f79f";
 
 const relativeRepositoryPath = (absolutePath: string): string =>

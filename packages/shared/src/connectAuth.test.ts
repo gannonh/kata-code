@@ -26,6 +26,48 @@ describe("connectAuth", () => {
       loopbackPort: 34338,
     });
     expect(connectLoopbackRedirectUri(34338)).toBe("http://127.0.0.1:34338/callback");
+    expect(parsed.hash).toBe(
+      "#s=q7mK9xV2pL4nR8sT6wYzAQ&c=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&p=34338",
+    );
+    // The link is printed for a human to copy, and wrapping is what clipped it.
+    // Short keys save 15 characters against the verbose form; assert both the
+    // saving and an absolute budget so neither can regress unnoticed.
+    const verbose = url
+      .replace("#s=", "#state=")
+      .replace("&c=", "&challenge=")
+      .replace("&p=", "&port=");
+    expect(verbose.length - url.length).toBe(15);
+    expect(url.length).toBeLessThanOrEqual(110);
+  });
+
+  it("reads verbose authorization parameters from installed CLIs", () => {
+    expect(
+      readConnectAuthorizeRequest(
+        new URL(
+          "https://app.kata.sh/connect#state=q7mK9xV2pL4nR8sT6wYzAQ&challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&port=34338",
+        ),
+      ),
+    ).toEqual({
+      state: "q7mK9xV2pL4nR8sT6wYzAQ",
+      challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+      loopbackPort: 34338,
+    });
+  });
+
+  it("rejects truncated or malformed authorization parameters", () => {
+    const state = "q7mK9xV2pL4nR8sT6wYzAQ";
+    const challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+    for (const [label, hash] of [
+      ["clipped state", `#s=${state.slice(0, 18)}&c=${challenge}&p=34338`],
+      ["clipped challenge", `#s=${state}&c=${challenge.slice(0, 30)}&p=34338`],
+      ["overlong state", `#s=${state}extra&c=${challenge}&p=34338`],
+      ["illegal state character", `#s=${state.slice(0, 21)}%21&c=${challenge}&p=34338`],
+    ] as const) {
+      expect(
+        readConnectAuthorizeRequest(new URL(`https://app.kata.sh/connect${hash}`)),
+        label,
+      ).toBeNull();
+    }
   });
 
   it("rejects authorize requests missing state, challenge, or port", () => {
@@ -44,7 +86,7 @@ describe("connectAuth", () => {
   it("rejects authorize requests whose loopback port is corrupted", () => {
     for (const port of ["", "abc", "-1", "0", "65536", "34338x", "34 38"]) {
       const url = new URL(
-        `https://app.kata.sh/connect#state=state-1&challenge=challenge-1&port=${encodeURIComponent(port)}`,
+        `https://app.kata.sh/connect#s=q7mK9xV2pL4nR8sT6wYzAQ&c=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&p=${encodeURIComponent(port)}`,
       );
       expect(readConnectAuthorizeRequest(url), port).toBeNull();
     }

@@ -45,7 +45,7 @@
       "distribution": "store",
       "channel": "v2-preview",
       "env": {
-        "T3CODE_MOBILE_UPDATES_ENABLED": "0"
+        "KATACODE_MOBILE_UPDATES_ENABLED": "0"
       }
     },
     "production": {

@@ -126,7 +126,7 @@ export const hashBundle = Effect.fn("hashBundle")(function* (root: string) {
           entries.push(`directory:${key}`);
           yield* visit(key);
         } else {
-          const chunks = yield* fs.stream(absolute, { chunkSize: FileSystem.Size(65536) }).pipe(
+          const chunks = yield* fs.stream(absolute, { chunkSize: 65536 }).pipe(
             Stream.mapEffect((chunk) => digest(chunk)),
             Stream.runCollect,
           );
@@ -139,7 +139,7 @@ export const hashBundle = Effect.fn("hashBundle")(function* (root: string) {
 });
 type FileSystemError = import("effect/PlatformError").PlatformError;
 
-const bundleId = "com.t3tools.t3code.dev";
+const bundleId = "com.katacode.dev";
 const roots = Effect.gen(function* () {
   const path = yield* Path.Path;
   const repo = yield* path.fromFileUrl(new URL("../", import.meta.url));
@@ -186,7 +186,7 @@ const command = Effect.fn("nativeClient.command")(function* (
         ...environment,
         APP_VARIANT: "development",
         MOBILE_VERSION_POLICY: "appVersion",
-        T3CODE_IOS_PERSONAL_TEAM: "0",
+        KATACODE_IOS_PERSONAL_TEAM: "0",
         CI: "1",
         EXPO_NO_GIT_STATUS: "1",
       },
@@ -291,9 +291,9 @@ export const installedBinary = Effect.fn("installedBinary")(function* (
 const main = Command.make(
   "mobile-native-client",
   {
-    mode: Argument.choice("mode", ["check", "ensure"]),
-    platform: Argument.choice("platform", ["ios", "android"]),
-    device: Argument.string("device"),
+    mode: Argument.Literals("mode", ["check", "ensure"]),
+    platform: Argument.Literals("platform", ["ios", "android"]),
+    device: Argument.String("device"),
   },
   Effect.fn("nativeClient.main")(function* ({ mode, platform, device }) {
     yield* validateDevice(platform, device);
@@ -307,7 +307,7 @@ const main = Command.make(
       });
     const recordPath = path.join(
       home,
-      ".cache/t3code/native-clients",
+      ".cache/katacode/native-clients",
       platform,
       `${yield* digest(device)}.json`,
     );
@@ -343,7 +343,7 @@ const main = Command.make(
           true,
         );
         if (platform === "ios") {
-          const output = yield* fs.makeTempDirectoryScoped({ prefix: "t3-native-client-" });
+          const output = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-native-client-" });
           const { mobile } = yield* roots;
           yield* command("pod", ["install"], true, path.join(mobile, "ios"));
           // Target this simulator only, without Expo's desktop activation or log streaming.
@@ -352,9 +352,9 @@ const main = Command.make(
             [
               "xcodebuild",
               "-workspace",
-              path.join(mobile, "ios/T3CodeDev.xcworkspace"),
+              path.join(mobile, "ios/KataCodeDev.xcworkspace"),
               "-scheme",
-              "T3CodeDev",
+              "KataCodeDev",
               "-configuration",
               "Debug",
               "-destination",
@@ -371,7 +371,7 @@ const main = Command.make(
               "simctl",
               "install",
               device,
-              path.join(output, "Build/Products/Debug-iphonesimulator/T3CodeDev.app"),
+              path.join(output, "Build/Products/Debug-iphonesimulator/KataCodeDev.app"),
             ],
             true,
           );

@@ -5,7 +5,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
 
-it.layer(NodeSqliteClient.layerMemory())("Kata upstream upgrade", (it) => {
+it.layer(NodeSqliteClient.layer({ filename: ":memory:" }))("Kata upstream upgrade", (it) => {
   it.effect("runs every incoming migration after the shipped Kata repairs exactly once", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

@@ -1,9 +1,19 @@
 import { DEFAULT_HOSTED_APP_ORIGIN } from "./branding.ts";
 import { readHashParams } from "./remote.ts";
 
-const CONNECT_AUTH_STATE_PARAM = "state";
-const CONNECT_AUTH_CHALLENGE_PARAM = "challenge";
-const CONNECT_AUTH_PORT_PARAM = "port";
+// Short fragment keys keep the printed authorize link under the width where
+// terminals and chat clients wrap it, which was clipping the state and
+// challenge when a user copied the link by hand.
+const CONNECT_AUTH_STATE_PARAM = "s";
+const CONNECT_AUTH_CHALLENGE_PARAM = "c";
+const CONNECT_AUTH_PORT_PARAM = "p";
+const LEGACY_CONNECT_AUTH_STATE_PARAM = "state";
+const LEGACY_CONNECT_AUTH_CHALLENGE_PARAM = "challenge";
+const LEGACY_CONNECT_AUTH_PORT_PARAM = "port";
+// base64url of 16 and 32 random bytes, per CliTokenManager. Matching the exact
+// shape is what makes a clipped link fail closed instead of half-authorizing.
+const CONNECT_AUTH_STATE_PATTERN = /^[A-Za-z0-9_-]{22}$/;
+const CONNECT_AUTH_CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const CONNECT_LOOPBACK_CALLBACK_PATH = "/callback";
 
 const CONNECT_AUTHORIZE_PATH = "/connect";
@@ -62,10 +72,19 @@ export function buildConnectAuthorizeRequestUrl(input: {
 
 export function readConnectAuthorizeRequest(url: URL): ConnectAuthorizeRequest | null {
   const params = readHashParams(url);
-  const state = params.get(CONNECT_AUTH_STATE_PARAM)?.trim() ?? "";
-  const challenge = params.get(CONNECT_AUTH_CHALLENGE_PARAM)?.trim() ?? "";
-  const loopbackPort = parseLoopbackPort(params.get(CONNECT_AUTH_PORT_PARAM)?.trim() ?? "");
-  if (!state || !challenge || loopbackPort === null) {
+  // Installed CLIs still emit the long keys, so the hosted app reads both.
+  const read = (short: string, legacy: string) =>
+    (params.get(short) ?? params.get(legacy))?.trim() ?? "";
+  const state = read(CONNECT_AUTH_STATE_PARAM, LEGACY_CONNECT_AUTH_STATE_PARAM);
+  const challenge = read(CONNECT_AUTH_CHALLENGE_PARAM, LEGACY_CONNECT_AUTH_CHALLENGE_PARAM);
+  const loopbackPort = parseLoopbackPort(
+    read(CONNECT_AUTH_PORT_PARAM, LEGACY_CONNECT_AUTH_PORT_PARAM),
+  );
+  if (
+    !CONNECT_AUTH_STATE_PATTERN.test(state) ||
+    !CONNECT_AUTH_CHALLENGE_PATTERN.test(challenge) ||
+    loopbackPort === null
+  ) {
     return null;
   }
   return { state, challenge, loopbackPort };
