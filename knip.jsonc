@@ -11,12 +11,10 @@
     },
     "scripts": {
       // Knip loads its preprocessor through a CLI option, not a source import.
-      // Worktree setup invokes setup-worktree.ts directly from t3.json.
       // Release verify is the only consumer of @vercel/sandbox.
       // Native verification runs mobile-native-client.ts directly.
       "entry": [
         "knip-schemas.ts",
-        "setup-worktree.ts",
         "verify-kata-sandbox-image-vercel.test.ts",
         "mobile-native-client.ts",
       ],
