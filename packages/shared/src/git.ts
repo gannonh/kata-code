@@ -391,9 +391,11 @@ export const GIT_REPOSITORY_ENV_VARS = [
   "GIT_PREFIX",
 ] as const;
 
-export function withoutGitRepositoryEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+type GitRepositoryEnvironment = Record<string, string | undefined>;
+
+export function withoutGitRepositoryEnv(env: GitRepositoryEnvironment): GitRepositoryEnvironment {
   const names = new Set<string>(GIT_REPOSITORY_ENV_VARS);
-  const scrubbed: NodeJS.ProcessEnv = {};
+  const scrubbed: GitRepositoryEnvironment = {};
   for (const [name, value] of Object.entries(env)) {
     if (!names.has(name.toUpperCase())) scrubbed[name] = value;
   }
