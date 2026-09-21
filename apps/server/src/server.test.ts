@@ -36,7 +36,6 @@ import {
   ProviderInstanceId,
   type ProviderInstallState,
   ProviderSetupError,
-  type RelayManagedEndpointRuntimeConfig,
   RoutineConnectionId,
   ResolvedKeybindingRule,
   type ServerLifecycleStreamEvent,
@@ -49,6 +48,7 @@ import {
   WorktreeSetupSnapshot,
   type WorktreeSetupStageId,
 } from "@kata-sh/code-contracts";
+import type { RelayManagedEndpointRuntimeConfig } from "@kata-sh/code-contracts/relay";
 import {
   WIRE_RELAY_PROVIDER_KIND,
   wireEnvironmentIssuer,
