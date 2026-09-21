@@ -58,6 +58,9 @@ export default defineConfig({
     testTimeout: 60_000,
     setupFiles: [
       NodeURL.fileURLToPath(
+        new URL("./packages/shared/src/testing/gitRepositoryEnv.ts", import.meta.url),
+      ),
+      NodeURL.fileURLToPath(
         new URL("./packages/shared/src/testing/longTempDir.ts", import.meta.url),
       ),
     ],

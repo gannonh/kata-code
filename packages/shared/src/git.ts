@@ -371,3 +371,33 @@ export function applyGitStatusStreamEvent(
       return mergeGitStatusParts(toLocalStatusPart(current), event.remote);
   }
 }
+
+// `git rev-parse --local-env-vars` minus GIT_CONFIG, GIT_CONFIG_PARAMETERS and
+// GIT_CONFIG_COUNT. Those three carry configuration rather than locate a repository,
+// and the test suite hands its pinned git config to every child through GIT_CONFIG_COUNT
+// and its keys.
+export const GIT_REPOSITORY_ENV_VARS = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_IMPLICIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_GRAFT_FILE",
+  "GIT_SHALLOW_FILE",
+  "GIT_NO_REPLACE_OBJECTS",
+  "GIT_REPLACE_REF_BASE",
+  "GIT_PREFIX",
+] as const;
+
+type GitRepositoryEnvironment = Record<string, string | undefined>;
+
+export function withoutGitRepositoryEnv(env: GitRepositoryEnvironment): GitRepositoryEnvironment {
+  const names = new Set<string>(GIT_REPOSITORY_ENV_VARS);
+  const scrubbed: GitRepositoryEnvironment = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (!names.has(name.toUpperCase())) scrubbed[name] = value;
+  }
+  return scrubbed;
+}

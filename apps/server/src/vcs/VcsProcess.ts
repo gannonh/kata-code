@@ -18,6 +18,7 @@ import {
   VcsProcessStdinWriteError,
   VcsProcessTimeoutError,
 } from "@kata-sh/code-contracts";
+import { withoutGitRepositoryEnv } from "@kata-sh/code-shared/git";
 import * as ProcessRunner from "../processRunner.ts";
 
 export interface VcsProcessInput {
@@ -121,6 +122,13 @@ const isTransientGitExit = (stderr: string) =>
   /unable to create [^\n]*\.lock['"]?: file exists/i.test(stderr) ||
   /(?:unable to stat|lstat\(|error: open\()[^\n]+: no such file or directory/i.test(stderr);
 
+// ProcessRunner's extend mode merges the raw process.env beneath `env`, restoring the
+// bindings this scrub removes, so every VCS spawn goes out as a replacement.
+const composeChildEnv = (input: VcsProcessInput): NodeJS.ProcessEnv =>
+  input.envMode === "replace"
+    ? { ...input.env }
+    : { ...withoutGitRepositoryEnv(process.env), ...input.env };
+
 export const make = Effect.gen(function* () {
   const processRunner = yield* ProcessRunner.ProcessRunner;
   const vcsProcesses = yield* Semaphore.make(VCS_PROCESS_CONCURRENCY);
@@ -142,8 +150,8 @@ export const make = Effect.gen(function* () {
         ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
         ...(input.onStdoutChunk !== undefined ? { onStdoutChunk: input.onStdoutChunk } : {}),
-        ...(input.env !== undefined ? { env: input.env } : {}),
-        ...(input.envMode !== undefined ? { envMode: input.envMode } : {}),
+        env: composeChildEnv(input),
+        envMode: "replace",
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: input.outputMode ?? "truncate",
@@ -225,8 +233,8 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
-        ...(input.env !== undefined ? { env: input.env } : {}),
-        ...(input.envMode !== undefined ? { envMode: input.envMode } : {}),
+        env: composeChildEnv(input),
+        envMode: "replace",
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
       })

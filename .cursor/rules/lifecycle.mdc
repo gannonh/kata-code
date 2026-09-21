@@ -29,6 +29,23 @@ alwaysApply: true
 
 - Architecture docs, process docs, ADRs, and other durable artifacts live as files in the repository under `docs/`.
 
+## Build labels (when present)
+
+If the Linear issue has `runtime` / `model` / `model-effort` labels, treat them as the intended Build route. Do not invent or silently substitute a different runtime, model, or effort. If labels are missing, conflicting, or unclear, comment on the issue with the exact correction needed and stop.
+
+| Model label | Slug |
+| --- | --- |
+| `sol` | `gpt-5.6-sol` |
+| `astra` | `gpt-6-astra` |
+| `fable` | `claude-fable-5-1` |
+| `composer` | `composer-2.5` |
+| `grok` | `grok-4.6` |
+| `opus` | `claude-opus-5` |
+| `luna` | `gpt-5.6-luna` |
+| `terra` | `gpt-5.6-terra` |
+
+`human-build` on the issue means a human owns Build. Coding agents must not start Build on that ticket unless a human explicitly asks them to on that issue.
+
 ## Project milestones (Linear)
 
 Linear **project milestones** are multi-ticket product gate/phase outcomes.
