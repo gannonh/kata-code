@@ -5,6 +5,7 @@ import { formatAttachmentSize } from "@kata-sh/code-client-runtime/state/attachm
 import { videoMimeType } from "@kata-sh/code-shared/video";
 import { MessageCircleIcon, MousePointerClickIcon } from "lucide-react";
 import { createContext, type MouseEvent, type ReactElement, type ReactNode, use } from "react";
+import type { EnvironmentId } from "@kata-sh/code-contracts";
 
 import type { ComposerFileAttachment, ComposerImageAttachment } from "~/composerDraftStore";
 import { composerFileNeedsReattach } from "~/composerDraftStore";
@@ -66,6 +67,7 @@ export type ComposerDraftContextRecord =
 
 /** What a chip can do beyond showing itself; the composer supplies the handlers. */
 export interface ComposerContextActions {
+  environmentId: EnvironmentId | null;
   expandImage: (imageId: string) => void;
   expandVideo: (fileId: string) => void;
   openFile: (fileId: string) => void;
@@ -74,6 +76,7 @@ export interface ComposerContextActions {
 }
 
 export const ComposerContextActionsContext = createContext<ComposerContextActions>({
+  environmentId: null,
   expandImage: () => {},
   expandVideo: () => {},
   openFile: () => {},
@@ -247,6 +250,7 @@ function PullRequestContextChip(props: { record: ReviewCommentContext; toneClass
   return (
     <PullRequestChip
       metadata={metadata}
+      environmentId={actions.environmentId}
       label={reviewCommentContextLabel(props.record)}
       kindLabel={pullRequestContextKindLabel(props.record)}
       className={cn(COMPOSER_INLINE_CHIP_CLASS_NAME, props.toneClassName)}
