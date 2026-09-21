@@ -15,6 +15,7 @@ import {
 } from "@kata-sh/code-contracts";
 import * as NetService from "@kata-sh/code-shared/Net";
 import { HostProcessEnvironment } from "@kata-sh/code-shared/hostProcess";
+import { DEFAULT_SIGNAL_EXPORT } from "@kata-sh/code-shared/observability";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as DateTime from "effect/DateTime";
@@ -102,10 +103,10 @@ const makeCliTestServerConfig = (baseDir: string) =>
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
       otlpLogsUrl: undefined,
-      otlpExportIntervalMs: 10_000,
+      otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
+      otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
+      otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
       otlpServiceName: "t3-server",
-      otlpHeaders: undefined,
-      otlpProtocol: "http/json",
       mode: "web",
       port: 0,
       host: "127.0.0.1",

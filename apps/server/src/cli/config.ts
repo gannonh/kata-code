@@ -1,5 +1,9 @@
 import * as NetService from "@kata-sh/code-shared/Net";
-import { OtlpHeadersFromString, OtlpProtocol } from "@kata-sh/code-shared/observability";
+import {
+  OtlpHeadersFromString,
+  OtlpProtocol,
+  type SignalExport,
+} from "@kata-sh/code-shared/observability";
 import { parsePersistedServerObservabilitySettings } from "@kata-sh/code-shared/serverSettings";
 import { DesktopBackendBootstrap, PortSchema } from "@kata-sh/code-contracts";
 import * as Config from "effect/Config";
@@ -401,6 +405,14 @@ export const resolveServerConfig = (
     );
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
 
+    // Kata Code's own OTLP variables name no signal, so the one answer they give
+    // is the answer for all three.
+    const signalExport: SignalExport = {
+      protocol: env.otlpProtocol,
+      headers: env.otlpHeaders,
+      exportIntervalMs: env.otlpExportIntervalMs,
+    };
+
     const config: ServerConfig.ServerConfig["Service"] = {
       logLevel,
       traceMinLevel: env.traceMinLevel,
@@ -418,10 +430,10 @@ export const resolveServerConfig = (
         persistedObservabilitySettings.otlpMetricsUrl,
       otlpLogsUrl:
         env.otlpLogsUrl ?? bootstrap?.otlpLogsUrl ?? persistedObservabilitySettings.otlpLogsUrl,
-      otlpExportIntervalMs: env.otlpExportIntervalMs,
+      otlpTracesExport: signalExport,
+      otlpMetricsExport: signalExport,
+      otlpLogsExport: signalExport,
       otlpServiceName: env.otlpServiceName,
-      otlpHeaders: env.otlpHeaders,
-      otlpProtocol: env.otlpProtocol,
       mode,
       port,
       cwd,
