@@ -36,6 +36,7 @@ import {
   ProviderInstanceId,
   type ProviderInstallState,
   ProviderSetupError,
+  type RelayManagedEndpointRuntimeConfig,
   RoutineConnectionId,
   ResolvedKeybindingRule,
   type ServerLifecycleStreamEvent,
@@ -1614,6 +1615,10 @@ const managedRelayEndpoint = {
   wsBaseUrl: "wss://desktop.example.test",
   providerKind: "cloudflare_tunnel",
 } as const;
+const managedEndpointRuntime: RelayManagedEndpointRuntimeConfig = {
+  providerKind: "cloudflare_tunnel",
+  connectorToken: "connector-token",
+};
 
 const jsonRequestBody = (value: unknown): string => {
   return JSON.stringify(value);
@@ -3489,7 +3494,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "cloud-managed-endpoint-url.bin",
       );
       const readCallback = fileSystem.readFileString(secretPath).pipe(Effect.option);
-      const postConfig = (endpoint: typeof managedRelayEndpoint | typeof manualRelayEndpoint) =>
+      const postConfig = (
+        endpoint: typeof managedRelayEndpoint | typeof manualRelayEndpoint,
+        endpointRuntime = endpoint.providerKind === "cloudflare_tunnel"
+          ? managedEndpointRuntime
+          : null,
+      ) =>
         fetchEffect(relayConfigUrl, {
           method: "POST",
           headers: {
@@ -3502,13 +3512,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             environmentCredential: "t3env_test_credential",
             cloudMintPublicKey: cloudKeyPair.publicKey,
             endpoint,
-            endpointRuntime:
-              endpoint.providerKind === "cloudflare_tunnel"
-                ? {
-                    providerKind: "cloudflare_tunnel",
-                    connectorToken: "connector-token",
-                  }
-                : null,
+            endpointRuntime,
           }),
         });
       const readLinkState = Effect.gen(function* () {
@@ -3522,6 +3526,19 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(response.status, 200);
         return body;
       });
+
+      const externallyManaged = yield* postConfig(managedRelayEndpoint, null);
+      assert.equal(externallyManaged.status, 200);
+      assert.equal(
+        Option.match(yield* readCallback, {
+          onNone: () => null,
+          onSome: (value) => value,
+        }),
+        "https://desktop.example.test",
+      );
+      const externalState = yield* readLinkState;
+      assert.equal(externalState.managedTunnelActive, false);
+      assert.equal(externalState.managedCallbackReady, false);
 
       const saved = yield* postConfig(managedRelayEndpoint);
       assert.equal(saved.status, 200);

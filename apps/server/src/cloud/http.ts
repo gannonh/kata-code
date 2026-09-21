@@ -227,12 +227,7 @@ function managedCallbackOrigin(
   const disagree = new EnvironmentHttpBadRequestError({
     message: "Managed endpoint and runtime configuration must agree.",
   });
-  if (runtime === null) {
-    return payload.endpoint.providerKind === "cloudflare_tunnel"
-      ? Effect.fail(disagree)
-      : Effect.succeed(null);
-  }
-  if (payload.endpoint.providerKind !== runtime.providerKind) {
+  if (runtime !== null && payload.endpoint.providerKind !== runtime.providerKind) {
     return Effect.fail(disagree);
   }
   if (payload.endpoint.providerKind !== "cloudflare_tunnel") {
