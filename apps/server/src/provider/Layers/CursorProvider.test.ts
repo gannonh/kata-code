@@ -691,6 +691,105 @@ describe("Cursor skills", () => {
       }),
     ));
 
+  it("reads installed plugin ids from XDG_CONFIG_HOME", async () =>
+    await runNode(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const userHome = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-home-",
+        });
+        const configHome = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-xdg-",
+        });
+        const workspace = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-workspace-",
+        });
+        const enabledSha = "84b6c4b36ff9b9d6b18bf784c761691d30acf4c6";
+        const staleSha = "970df460f1ae6affbedab6e04f6b396917452431";
+        const cache = path.join(userHome, ".cursor", "plugins", "cache");
+        const enabledRoot = path.join(cache, "gannonh-open-pstack", "67972749", enabledSha);
+        const staleRoot = path.join(cache, "gannonh-open-pstack", "61242178", staleSha);
+        const writeSkill = Effect.fn("writeCursorPluginSkill")(function* (
+          directory: string,
+          contents: string,
+        ) {
+          yield* fileSystem.makeDirectory(directory, { recursive: true });
+          yield* fileSystem.writeFileString(path.join(directory, "SKILL.md"), contents);
+        });
+        const writeInstalledIds = (dbPath: string, ids: ReadonlyArray<string>) =>
+          Effect.sync(() => {
+            const database = new NodeSqlite.DatabaseSync(dbPath);
+            database.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
+            database
+              .prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)")
+              .run("cursor.plugins.installedIds.no-team", encodeJson(ids));
+            database.close();
+          });
+        yield* fileSystem.makeDirectory(enabledRoot, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(enabledRoot, ".cache-complete"), "");
+        yield* writeSkill(
+          path.join(enabledRoot, "skills", "poteto-mode"),
+          "---\ndescription: xdg install\n---\n",
+        );
+        yield* fileSystem.makeDirectory(staleRoot, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(staleRoot, ".cache-complete"), "");
+        yield* writeSkill(
+          path.join(staleRoot, "skills", "poteto-mode"),
+          "---\ndescription: home config install\n---\n",
+        );
+        yield* fileSystem.writeFileString(
+          path.join(cache, ".cloud-plugin-manifest.json"),
+          encodeJson({
+            plugins: [
+              {
+                pluginId: "67972749",
+                name: "open-pstack",
+                marketplaceSlug: "gannonh-open-pstack",
+                resolvedCommitSha: enabledSha,
+              },
+              {
+                pluginId: "61242178",
+                name: "open-pstack",
+                marketplaceSlug: "gannonh-open-pstack",
+                resolvedCommitSha: staleSha,
+              },
+            ],
+          }),
+        );
+        const homeDb = path.join(
+          userHome,
+          ".config",
+          "Cursor",
+          "User",
+          "globalStorage",
+          "state.vscdb",
+        );
+        const xdgDb = path.join(configHome, "Cursor", "User", "globalStorage", "state.vscdb");
+        yield* fileSystem.makeDirectory(path.dirname(homeDb), { recursive: true });
+        yield* fileSystem.makeDirectory(path.dirname(xdgDb), { recursive: true });
+        yield* writeInstalledIds(homeDb, ["61242178"]);
+        yield* writeInstalledIds(xdgDb, ["67972749"]);
+
+        const skills = yield* discoverCursorSkills(workspace, {
+          HOME: userHome,
+          XDG_CONFIG_HOME: configHome,
+        });
+        expect(skills).toEqual([
+          {
+            name: "poteto-mode",
+            description: "xdg install",
+            path: path.join(enabledRoot, "skills", "poteto-mode", "SKILL.md"),
+            scope: "user",
+            enabled: true,
+          },
+        ]);
+      }),
+    ));
+
   it("turns a chosen skill mention into Cursor's bare slash command", () => {
     expect(cursorSkillInvocation("$poteto-mode", new Set(["poteto-mode"]))).toBe("/poteto-mode");
     expect(cursorSkillInvocation("$poteto-mode ", new Set(["poteto-mode"]))).toBe("/poteto-mode");

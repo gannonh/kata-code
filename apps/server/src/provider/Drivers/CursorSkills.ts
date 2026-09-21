@@ -269,9 +269,10 @@ const cursorGlobalStateDb = Effect.fn("cursorGlobalStateDb")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const appData = environment.APPDATA?.trim() || path.join(userHome, "AppData", "Roaming");
+  const linuxConfigHome = environment.XDG_CONFIG_HOME?.trim() || path.join(userHome, ".config");
   const candidates = [
     environment.CURSOR_GLOBAL_STATE_DB?.trim(),
-    path.join(userHome, ".config", "Cursor", "User", "globalStorage", "state.vscdb"),
+    path.join(linuxConfigHome, "Cursor", "User", "globalStorage", "state.vscdb"),
     path.join(
       userHome,
       "Library",
