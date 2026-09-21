@@ -79,7 +79,7 @@ const makeRoutineScheduler = Effect.gen(function* () {
       ),
     );
     yield* Effect.forkScoped(admissionLoop);
-    return yield* dispatchLoop;
+    yield* Effect.forkScoped(dispatchLoop);
   });
 
   return { owner, tick, start, wake } satisfies RoutineSchedulerShape;
