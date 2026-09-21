@@ -99,7 +99,11 @@ const linkWorkspaceDependencies = (temporaryRoot: string): void => {
     const source = NodePath.join(repositoryRoot, workspace, "node_modules");
     const destinationParent = NodePath.join(temporaryRoot, workspace);
     if (!NodeFS.existsSync(source) || !NodeFS.existsSync(destinationParent)) continue;
-    NodeFS.symlinkSync(source, NodePath.join(destinationParent, "node_modules"), "dir");
+    NodeFS.cpSync(source, NodePath.join(destinationParent, "node_modules"), {
+      recursive: true,
+      dereference: false,
+      verbatimSymlinks: true,
+    });
   }
 };
 
