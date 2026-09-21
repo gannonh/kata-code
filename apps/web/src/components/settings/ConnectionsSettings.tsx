@@ -60,6 +60,7 @@ import {
   canShowHostSandboxes,
   isQrShareableEndpoint,
   isWslSettingsRowVisible,
+  managedCallbackNeedsRepair,
   selectQrEndpointOption,
 } from "./ConnectionsSettings.logic";
 import {
@@ -1698,6 +1699,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
     publishAgentActivity,
     operationError,
     reconcileCloudState,
+    repairManagedCallback,
   } = useCloudLinkController();
   const [isUpdating, setIsUpdating] = useState(false);
   const [isUpdatingPreference, setIsUpdatingPreference] = useState(false);
@@ -1708,6 +1710,7 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
       ? "Your session does not have permission to manage Kata Code Connect access."
       : null;
   const isBusy = isUpdating || isUpdatingPreference;
+  const callbackNeedsRepair = managedCallbackNeedsRepair(primaryCloudLinkState.data);
 
   const updateManagedTunnel = async (enabled: boolean) => {
     setIsUpdating(true);
@@ -1727,6 +1730,19 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
           : publishAgentActivity
             ? "The managed tunnel was removed. Agent activity publishing stays on."
             : "This environment is no longer available through Kata Code Connect.",
+      });
+    }
+    setIsUpdating(false);
+  };
+
+  const repairCallback = async () => {
+    setIsUpdating(true);
+    const ok = await repairManagedCallback();
+    if (ok) {
+      toastManager.add({
+        type: "success",
+        title: "Kata Code Connect repaired",
+        description: "Routines can use this environment's public callback URL.",
       });
     }
     setIsUpdating(false);
@@ -1753,18 +1769,36 @@ function ConfiguredCloudLinkRow({ canManageRelay }: { readonly canManageRelay: b
         <SettingsRow
           title={searchableSetting("t3-connect").title}
           description={
-            managedTunnelActive
-              ? "This environment is available to your other devices through Kata Code Connect."
-              : "Make this environment available to your other devices through Kata Code Connect."
+            callbackNeedsRepair
+              ? "Kata Code Connect is running, but this environment has no public callback URL."
+              : managedTunnelActive
+                ? "This environment is available to your other devices through Kata Code Connect."
+                : "Make this environment available to your other devices through Kata Code Connect."
           }
           status={operationError ?? primaryCloudLinkState.error}
           control={
-            <CloudLinkSwitch
-              checked={managedTunnelActive}
-              disabled={!canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy}
-              disabledReason={disabledReason}
-              onCheckedChange={(enabled) => void updateManagedTunnel(enabled)}
-            />
+            <div className="flex items-center gap-2">
+              {callbackNeedsRepair ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    !canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy
+                  }
+                  onClick={() => void repairCallback()}
+                >
+                  Repair Kata Code Connect
+                </Button>
+              ) : null}
+              <CloudLinkSwitch
+                checked={managedTunnelActive}
+                disabled={
+                  !canManageRelay || !isSignedIn || primaryCloudLinkState.isPending || isBusy
+                }
+                disabledReason={disabledReason}
+                onCheckedChange={(enabled) => void updateManagedTunnel(enabled)}
+              />
+            </div>
           }
         />
       ) : null}

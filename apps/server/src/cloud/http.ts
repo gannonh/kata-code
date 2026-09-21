@@ -45,7 +45,7 @@ import {
   signRelayJwt,
   verifyRelayJwt,
 } from "@kata-sh/code-shared/relayJwt";
-import { isSecureRelayUrl } from "@kata-sh/code-shared/relayUrl";
+import { isSecureRelayUrl, normalizeSecureRelayUrl } from "@kata-sh/code-shared/relayUrl";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
@@ -218,6 +218,35 @@ function validateRelayConfigPayload(
     );
   }
   return Effect.void;
+}
+
+function managedCallbackOrigin(
+  payload: RelayEnvironmentConfigRequest,
+): Effect.Effect<string | null, EnvironmentHttpBadRequestError> {
+  const runtime = payload.endpointRuntime;
+  const disagree = new EnvironmentHttpBadRequestError({
+    message: "Managed endpoint and runtime configuration must agree.",
+  });
+  if (runtime === null) {
+    return payload.endpoint.providerKind === "cloudflare_tunnel"
+      ? Effect.fail(disagree)
+      : Effect.succeed(null);
+  }
+  if (payload.endpoint.providerKind !== runtime.providerKind) {
+    return Effect.fail(disagree);
+  }
+  if (payload.endpoint.providerKind !== "cloudflare_tunnel") {
+    return Effect.succeed(null);
+  }
+  const origin = normalizeSecureRelayUrl(payload.endpoint.httpBaseUrl);
+  if (origin === null) {
+    return Effect.fail(
+      new EnvironmentHttpBadRequestError({
+        message: "Managed callback URL must be a secure HTTPS origin.",
+      }),
+    );
+  }
+  return Effect.succeed(origin);
 }
 
 function validateLinkedCloudUser(input: {
@@ -462,11 +491,22 @@ const cloudLinkProofHandler = Effect.fn("environment.cloud.linkProof")(
   ),
 );
 
+const rollbackManagedEndpoint = (dependencies: CloudHttpDependencies) =>
+  Effect.all(
+    [
+      Effect.ignore(dependencies.endpointRuntime.applyConfig(null)),
+      Effect.ignore(dependencies.secrets.remove(CLOUD_ENDPOINT_RUNTIME_CONFIG)),
+      Effect.ignore(dependencies.secrets.remove(CLOUD_MANAGED_ENDPOINT_URL)),
+    ],
+    { concurrency: 1 },
+  ).pipe(Effect.asVoid);
+
 const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConfig")(function* (
   dependencies: CloudHttpDependencies,
   payload: RelayEnvironmentConfigRequest,
 ) {
   yield* validateRelayConfigPayload(payload);
+  const callbackOrigin = yield* managedCallbackOrigin(payload);
   yield* validateLinkedCloudUser({
     secrets: dependencies.secrets,
     cloudUserId: payload.cloudUserId,
@@ -478,32 +518,50 @@ const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConfig")(fu
   const ok =
     endpointRuntimeStatus.status === "disabled" || endpointRuntimeStatus.status === "running";
   if (!ok) {
+    yield* rollbackManagedEndpoint(dependencies);
     return yield* new EnvironmentCloudEndpointUnavailableError({
       message: "Managed endpoint runtime could not be started.",
       endpointRuntimeStatus,
     });
   }
 
-  yield* dependencies.secrets.set(RELAY_URL_SECRET, stringToBytes(payload.relayUrl));
-  yield* dependencies.secrets.set(
-    RELAY_ISSUER_SECRET,
-    stringToBytes(payload.relayIssuer ?? payload.relayUrl),
-  );
-  yield* dependencies.secrets.set(CLOUD_LINKED_USER_ID, stringToBytes(payload.cloudUserId));
-  yield* dependencies.secrets.set(
-    RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
-    stringToBytes(payload.environmentCredential),
-  );
-  yield* dependencies.secrets.set(CLOUD_MINT_PUBLIC_KEY, stringToBytes(payload.cloudMintPublicKey));
-  if (payload.endpointRuntime) {
-    const endpointRuntimeJson = yield* encodeEndpointRuntimeConfigJson(payload.endpointRuntime);
+  // The relay owns the public hostname. Persist it only after the runtime
+  // accepted its configuration, and drop both records if that write fails so
+  // Connections cannot report a healthy tunnel without a callback URL.
+  yield* Effect.gen(function* () {
+    yield* dependencies.secrets.set(RELAY_URL_SECRET, stringToBytes(payload.relayUrl));
     yield* dependencies.secrets.set(
-      CLOUD_ENDPOINT_RUNTIME_CONFIG,
-      stringToBytes(endpointRuntimeJson),
+      RELAY_ISSUER_SECRET,
+      stringToBytes(payload.relayIssuer ?? payload.relayUrl),
     );
-  } else {
-    yield* dependencies.secrets.remove(CLOUD_ENDPOINT_RUNTIME_CONFIG);
-  }
+    yield* dependencies.secrets.set(CLOUD_LINKED_USER_ID, stringToBytes(payload.cloudUserId));
+    yield* dependencies.secrets.set(
+      RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
+      stringToBytes(payload.environmentCredential),
+    );
+    yield* dependencies.secrets.set(
+      CLOUD_MINT_PUBLIC_KEY,
+      stringToBytes(payload.cloudMintPublicKey),
+    );
+    if (payload.endpointRuntime) {
+      const endpointRuntimeJson = yield* encodeEndpointRuntimeConfigJson(payload.endpointRuntime);
+      yield* dependencies.secrets.set(
+        CLOUD_ENDPOINT_RUNTIME_CONFIG,
+        stringToBytes(endpointRuntimeJson),
+      );
+    } else {
+      yield* dependencies.secrets.remove(CLOUD_ENDPOINT_RUNTIME_CONFIG);
+    }
+    if (callbackOrigin === null) {
+      yield* dependencies.secrets.remove(CLOUD_MANAGED_ENDPOINT_URL);
+    } else {
+      yield* dependencies.secrets.set(CLOUD_MANAGED_ENDPOINT_URL, stringToBytes(callbackOrigin));
+    }
+  }).pipe(
+    Effect.catch((error) =>
+      rollbackManagedEndpoint(dependencies).pipe(Effect.andThen(Effect.fail(error))),
+    ),
+  );
   return { ok, endpointRuntimeStatus } satisfies EnvironmentCloudRelayConfigResult;
 });
 
@@ -614,27 +672,15 @@ const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesi
       schema: RelayEnvironmentLinkResponse,
     });
     yield* setCliDesiredCloudLink(true, mode);
-    const applied = yield* applyCloudRelayConfig(dependencies, {
+    return yield* applyCloudRelayConfig(dependencies, {
       relayUrl,
       relayIssuer: link.relayIssuer,
       cloudUserId: link.cloudUserId,
       environmentCredential: link.environmentCredential,
       cloudMintPublicKey: link.cloudMintPublicKey,
+      endpoint: link.endpoint,
       endpointRuntime: link.endpointRuntime,
     });
-    // The relay owns the public hostname. Keep it so callbacks such as routine
-    // webhooks can name a reachable URL without asking the relay again. It is
-    // stored only after the runtime accepted its configuration, so a failed
-    // start never advertises an endpoint that is not active.
-    if (link.endpoint.providerKind === "cloudflare_tunnel") {
-      yield* dependencies.secrets.set(
-        CLOUD_MANAGED_ENDPOINT_URL,
-        stringToBytes(link.endpoint.httpBaseUrl),
-      );
-    } else {
-      yield* dependencies.secrets.remove(CLOUD_MANAGED_ENDPOINT_URL);
-    }
-    return applied;
   },
   Effect.catchIf(
     ServerSecretStore.isSecretStoreError,
@@ -769,17 +815,25 @@ export const releaseManagedTunnelOnShutdown = Effect.fn(
 const readCloudLinkState = Effect.fn("environment.cloud.readLinkState")(function* (
   dependencies: CloudHttpDependencies,
 ) {
-  const [cloudUserId, relayUrl, relayIssuer, endpointRuntimeConfig, publishAgentActivity] =
-    yield* Effect.all(
-      [
-        dependencies.secrets.get(CLOUD_LINKED_USER_ID),
-        dependencies.secrets.get(RELAY_URL_SECRET),
-        dependencies.secrets.get(RELAY_ISSUER_SECRET),
-        dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG),
-        dependencies.secrets.get(PUBLISH_AGENT_ACTIVITY_SECRET),
-      ],
-      { concurrency: 5 },
-    );
+  const [
+    cloudUserId,
+    relayUrl,
+    relayIssuer,
+    endpointRuntimeConfig,
+    managedEndpointUrl,
+    publishAgentActivity,
+  ] = yield* Effect.all(
+    [
+      dependencies.secrets.get(CLOUD_LINKED_USER_ID),
+      dependencies.secrets.get(RELAY_URL_SECRET),
+      dependencies.secrets.get(RELAY_ISSUER_SECRET),
+      dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG),
+      dependencies.secrets.get(CLOUD_MANAGED_ENDPOINT_URL),
+      dependencies.secrets.get(PUBLISH_AGENT_ACTIVITY_SECRET),
+    ],
+    { concurrency: 6 },
+  );
+  const managedTunnelActive = Option.isSome(endpointRuntimeConfig);
   return {
     linked: Option.isSome(cloudUserId),
     cloudUserId: Option.isSome(cloudUserId) ? bytesToString(cloudUserId.value) : null,
@@ -787,7 +841,8 @@ const readCloudLinkState = Effect.fn("environment.cloud.readLinkState")(function
     relayIssuer: Option.isSome(relayIssuer) ? bytesToString(relayIssuer.value) : null,
     // The managed tunnel runtime config is only stored for managed links; a
     // publish-only link leaves it absent.
-    managedTunnelActive: Option.isSome(endpointRuntimeConfig),
+    managedTunnelActive,
+    managedCallbackReady: managedTunnelActive && Option.isSome(managedEndpointUrl),
     publishAgentActivity: Option.isSome(publishAgentActivity)
       ? bytesToString(publishAgentActivity.value) === "true"
       : false,

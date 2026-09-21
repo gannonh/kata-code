@@ -387,6 +387,9 @@ export const EnvironmentCloudLinkStateResult = Schema.Struct({
   // clients can present the two capabilities as independent settings.
   // Optional so newer clients tolerate older environment servers.
   managedTunnelActive: Schema.optional(Schema.Boolean),
+  // True only when a managed runtime and its public callback origin are both
+  // stored. Optional for the same older-server tolerance as managedTunnelActive.
+  managedCallbackReady: Schema.optional(Schema.Boolean),
   publishAgentActivity: Schema.Boolean,
 });
 export type EnvironmentCloudLinkStateResult = typeof EnvironmentCloudLinkStateResult.Type;

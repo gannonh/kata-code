@@ -78,7 +78,10 @@ export function useCloudLinkController() {
   const publishAgentActivity = primaryCloudLinkState.data?.publishAgentActivity ?? false;
   const linked = primaryCloudLinkState.data?.linked ?? false;
 
-  const reconcileCloudState = async (desired: CloudLinkDesiredState): Promise<boolean> => {
+  const reconcileCloudState = async (
+    desired: CloudLinkDesiredState,
+    options?: { readonly forceLink?: boolean },
+  ): Promise<boolean> => {
     setOperationError(null);
     const target = primaryCloudLinkState.target;
     if (!target) {
@@ -116,7 +119,7 @@ export function useCloudLinkController() {
         reportUpdateFailure(new Error("Sign in to Kata Code Connect before enabling this."));
         return false;
       }
-      if (!linked || managedTunnelActive !== desired.managedTunnel) {
+      if (options?.forceLink || !linked || managedTunnelActive !== desired.managedTunnel) {
         const linkResult = await linkPrimaryEnvironment({
           target,
           clerkToken,
@@ -152,6 +155,12 @@ export function useCloudLinkController() {
     return true;
   };
 
+  const repairManagedCallback = () =>
+    reconcileCloudState(
+      { managedTunnel: true, publish: publishAgentActivity },
+      { forceLink: true },
+    );
+
   return {
     isSignedIn,
     linkState: primaryCloudLinkState,
@@ -160,5 +169,6 @@ export function useCloudLinkController() {
     publishAgentActivity,
     operationError,
     reconcileCloudState,
+    repairManagedCallback,
   };
 }

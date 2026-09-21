@@ -11,6 +11,18 @@ export function isQrShareableEndpoint(endpoint: AdvertisedEndpoint): boolean {
   return endpoint.status !== "unavailable" && endpoint.reachability !== "loopback";
 }
 
+export function managedCallbackNeedsRepair(
+  state:
+    | {
+        readonly managedTunnelActive?: boolean | undefined;
+        readonly managedCallbackReady?: boolean | undefined;
+      }
+    | null
+    | undefined,
+): boolean {
+  return state?.managedTunnelActive === true && state.managedCallbackReady === false;
+}
+
 export function isWslSettingsRowVisible(input: {
   readonly state: DesktopWslState | null;
   readonly error: string | null;
