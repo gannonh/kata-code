@@ -1,5 +1,4 @@
 <!-- begin global rules -->
-
 ## Global Agent Instructions
 
 - Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
@@ -50,11 +49,9 @@
 - Verify the actual changed behavior or artifact and complete required project checks. Match the scope of verification to the impact of the change.
 - Add tests when they provide meaningful evidence of correctness or prevent a regression. Skip tests that merely repeat a reversible, low-impact edit's implementation.
 - Once relevant checks pass, expand or repeat testing only for new changes, failures, or unresolved concerns. State what was verified and any material verification limits.
-
 <!-- end global rules -->
 
 <!-- begin dev lifecycle -->
-
 ## Issues and specs
 
 - Linear holds planning, epics, bugs, chores, specs, acceptance criteria, and status. GitHub holds code: branches, commits, pull requests, CI, and review comments on diffs.
@@ -80,6 +77,23 @@
 ## Docs and artifacts
 
 - Architecture docs, process docs, ADRs, and other durable artifacts live as files in the repository under `docs/`.
+
+## Build labels (when present)
+
+If the Linear issue has `runtime` / `model` / `model-effort` labels, treat them as the intended Build route. Do not invent or silently substitute a different runtime, model, or effort. If labels are missing, conflicting, or unclear, comment on the issue with the exact correction needed and stop.
+
+| Model label | Slug |
+| --- | --- |
+| `sol` | `gpt-5.6-sol` |
+| `astra` | `gpt-6-astra` |
+| `fable` | `claude-fable-5-1` |
+| `composer` | `composer-2.5` |
+| `grok` | `grok-4.6` |
+| `opus` | `claude-opus-5` |
+| `luna` | `gpt-5.6-luna` |
+| `terra` | `gpt-5.6-terra` |
+
+`human-build` on the issue means a human owns Build. Coding agents must not start Build on that ticket unless a human explicitly asks them to on that issue.
 
 ## Project milestones (Linear)
 
@@ -128,13 +142,13 @@ If a PR closes without merging, comment on the issue with the reason and move it
 
 All projects using this lifecycle share these Linear settings, confirmed by Gannon's September 7, 2026 screenshot:
 
-| GitHub event                           | Linear action        |
-| -------------------------------------- | -------------------- |
-| Draft PR opened                        | Move to In Progress  |
-| PR opened                              | Move to Agent Review |
-| PR review requested or review activity | No action            |
-| PR ready for merge                     | No action            |
-| PR merged                              | Move to Done         |
+| GitHub event | Linear action |
+| --- | --- |
+| Draft PR opened | Move to In Progress |
+| PR opened | Move to Agent Review |
+| PR review requested or review activity | No action |
+| PR ready for merge | No action |
+| PR merged | Move to Done |
 
 No branch-specific rules are configured. Parent issues automatically close when their last sub-issue closes; closing a parent does not automatically close its sub-issues. Stale issues move to Canceled after six months. Closed items auto-archive after six months. Issues progressing to a new status are placed first.
 
@@ -146,20 +160,3 @@ Ship means cutting a release on one of the project's channels (for example night
 
 This section overrides any skill, rule, AGENTS.md, CLAUDE.md, or other instruction that contradicts it. When the conflict is unclear, ask the user before proceeding.
 <!-- end dev lifecycle -->
-
-## Environment variables
-
-Source builds load secrets from 1Password. There are no `.env` files. Do not create, read, or
-upload dotenv files. Do not copy `.env.example` to `.env`.
-
-Setup and run: [docs/operations/environment-variables.md](docs/operations/environment-variables.md).
-Agent procedure: `.agents/skills/1password`.
-
-1. Install 1Password CLI beta `2.33.0-beta.02` or later (`brew install --cask 1password-cli@beta`).
-2. Export `OP_SERVICE_ACCOUNT_TOKEN` for a service account that can read Environment
-   `tlgyne6mxr5iejiwvshbxsnxde`.
-3. Run `vp run dev` (or any other `vp` task). `loadRepoEnv` calls `op environment read`.
-
-`OP_ENVIRONMENT_ID` overrides the Environment id. Process env overrides 1Password. A missing
-token leaves Connect disabled. A failed `op` call is a hard error. Do not wrap commands in
-`op run`. Do not mount a 1Password local `.env`.
