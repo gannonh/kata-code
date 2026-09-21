@@ -1,4 +1,5 @@
 import * as NodeOS from "node:os";
+import { DatabaseSync } from "node:sqlite";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
@@ -451,6 +452,240 @@ describe("Cursor skills", () => {
         expect(
           (yield* probeCursorSkills(workspace, { HOME: userHome }).pipe(Effect.result))._tag,
         ).toBe("Success");
+      }),
+    ));
+
+  it("discovers skills from the enabled Cursor plugin install", async () =>
+    await runNode(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const userHome = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-home-",
+        });
+        const workspace = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-workspace-",
+        });
+        const enabledSha = "84b6c4b36ff9b9d6b18bf784c761691d30acf4c6";
+        const staleSha = "970df460f1ae6affbedab6e04f6b396917452431";
+        const publicSha = "efa2a531985e0a8084d36ff3cf87233be8a9f34b";
+        const cache = path.join(userHome, ".cursor", "plugins", "cache");
+        const enabledRoot = path.join(
+          cache,
+          "gannonh-open-pstack",
+          "open-pstack",
+          enabledSha,
+        );
+        const writeSkill = Effect.fn("writeCursorPluginSkill")(function* (
+          directory: string,
+          contents: string,
+        ) {
+          yield* fileSystem.makeDirectory(directory, { recursive: true });
+          yield* fileSystem.writeFileString(path.join(directory, "SKILL.md"), contents);
+        });
+
+        yield* fileSystem.makeDirectory(path.join(enabledRoot, ".cursor-plugin"), {
+          recursive: true,
+        });
+        yield* fileSystem.writeFileString(
+          path.join(enabledRoot, ".cursor-plugin", "plugin.json"),
+          JSON.stringify({ name: "open-pstack", skills: "./skills/" }),
+        );
+        yield* fileSystem.writeFileString(path.join(enabledRoot, ".cache-complete"), "");
+        yield* writeSkill(
+          path.join(enabledRoot, "skills", "poteto-mode"),
+          "---\ndescription: enabled install\n---\n",
+        );
+        yield* writeSkill(
+          path.join(enabledRoot, "skills", "secret"),
+          "---\nuser-invocable: false\ndescription: hidden\n---\n",
+        );
+        yield* writeSkill(
+          path.join(enabledRoot, "docs", "not-a-skill"),
+          "---\ndescription: outside the manifest skills path\n---\n",
+        );
+
+        const staleRoot = path.join(cache, "gannonh-open-pstack", "61242178", staleSha);
+        yield* fileSystem.makeDirectory(staleRoot, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(staleRoot, ".cache-complete"), "");
+        yield* fileSystem.writeFileString(
+          path.join(cache, "gannonh-open-pstack", "61242178", `${staleSha}.installed`),
+          "stale",
+        );
+        yield* writeSkill(
+          path.join(staleRoot, "skills", "poteto-mode"),
+          "---\ndescription: stale install\n---\n",
+        );
+        yield* writeSkill(
+          path.join(staleRoot, "skills", "stale-only"),
+          "---\ndescription: stale only\n---\n",
+        );
+
+        const publicRoot = path.join(cache, "cursor-public", "pstack", publicSha);
+        yield* fileSystem.makeDirectory(publicRoot, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(publicRoot, ".cache-complete"), "");
+        yield* writeSkill(
+          path.join(publicRoot, "skills", "poteto-mode"),
+          "---\ndescription: public copy\n---\n",
+        );
+        yield* writeSkill(
+          path.join(publicRoot, "skills", "public-only"),
+          "---\ndescription: public only\n---\n",
+        );
+
+        yield* writeSkill(
+          path.join(
+            userHome,
+            ".cursor",
+            "plugins",
+            "marketplaces",
+            "gannonh-open-pstack",
+            "skills",
+            "checkout-only",
+          ),
+          "---\ndescription: marketplace checkout\n---\n",
+        );
+
+        const thermos = path.join(userHome, ".cursor", "plugins", "local", "thermos");
+        yield* writeSkill(path.join(thermos, "skills", "boil"), "---\ndescription: local plugin\n---\n");
+        yield* fileSystem.writeFileString(
+          path.join(userHome, ".cursor", "settings.json"),
+          JSON.stringify({ enabled_plugins: { thermos } }),
+        );
+        yield* fileSystem.writeFileString(
+          path.join(cache, ".cloud-plugin-manifest.json"),
+          JSON.stringify({
+            plugins: [
+              {
+                pluginId: "61242178",
+                name: "open-pstack",
+                marketplaceSlug: "gannonh-open-pstack",
+                resolvedCommitSha: staleSha,
+              },
+            ],
+          }),
+        );
+
+        const stateDb = path.join(
+          userHome,
+          ".config",
+          "Cursor",
+          "User",
+          "globalStorage",
+          "state.vscdb",
+        );
+        yield* fileSystem.makeDirectory(path.dirname(stateDb), { recursive: true });
+        const database = new DatabaseSync(stateDb);
+        database.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
+        database
+          .prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)")
+          .run("cursor.plugins.installedIds.no-team", JSON.stringify(["67972749"]));
+        database.close();
+
+        const environment = { HOME: userHome };
+        const skills = yield* discoverCursorSkills(workspace, environment);
+        expect(skills.map((skill) => skill.name)).toEqual(["boil", "poteto-mode", "secret"]);
+        expect(skills).toContainEqual({
+          name: "poteto-mode",
+          description: "enabled install",
+          path: path.join(enabledRoot, "skills", "poteto-mode", "SKILL.md"),
+          scope: "user",
+          enabled: true,
+        });
+        expect(skills).toContainEqual({
+          name: "secret",
+          description: "hidden",
+          path: path.join(enabledRoot, "skills", "secret", "SKILL.md"),
+          scope: "user",
+          enabled: true,
+          userInvocable: false,
+        });
+        expect(skills).toContainEqual({
+          name: "boil",
+          description: "local plugin",
+          path: path.join(thermos, "skills", "boil", "SKILL.md"),
+          scope: "user",
+          enabled: true,
+        });
+
+        yield* writeSkill(
+          path.join(workspace, ".cursor", "skills", "poteto-mode"),
+          "---\ndescription: project copy\n---\n",
+        );
+        const withProject = yield* discoverCursorSkills(workspace, environment);
+        expect(withProject.find((skill) => skill.name === "poteto-mode")).toEqual({
+          name: "poteto-mode",
+          description: "project copy",
+          path: path.join(workspace, ".cursor", "skills", "poteto-mode", "SKILL.md"),
+          scope: "project",
+          enabled: true,
+        });
+      }),
+    ));
+
+  it("uses the manifest commit under the plugin id when that id is enabled", async () =>
+    await runNode(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const userHome = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-home-",
+        });
+        const workspace = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-workspace-",
+        });
+        const enabledSha = "84b6c4b36ff9b9d6b18bf784c761691d30acf4c6";
+        const staleSha = "970df460f1ae6affbedab6e04f6b396917452431";
+        const cache = path.join(userHome, ".cursor", "plugins", "cache");
+        const enabledRoot = path.join(cache, "gannonh-open-pstack", "67972749", enabledSha);
+        const staleRoot = path.join(cache, "gannonh-open-pstack", "61242178", staleSha);
+        const writeSkill = Effect.fn("writeCursorPluginSkill")(function* (
+          directory: string,
+          contents: string,
+        ) {
+          yield* fileSystem.makeDirectory(directory, { recursive: true });
+          yield* fileSystem.writeFileString(path.join(directory, "SKILL.md"), contents);
+        });
+        yield* fileSystem.makeDirectory(enabledRoot, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(enabledRoot, ".cache-complete"), "");
+        yield* writeSkill(
+          path.join(enabledRoot, "skills", "poteto-mode"),
+          "---\ndescription: current id install\n---\n",
+        );
+        yield* fileSystem.makeDirectory(staleRoot, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(staleRoot, ".cache-complete"), "");
+        yield* writeSkill(
+          path.join(staleRoot, "skills", "poteto-mode"),
+          "---\ndescription: old id install\n---\n",
+        );
+        yield* fileSystem.writeFileString(
+          path.join(cache, ".cloud-plugin-manifest.json"),
+          JSON.stringify({
+            plugins: [
+              {
+                pluginId: "67972749",
+                name: "open-pstack",
+                marketplaceSlug: "gannonh-open-pstack",
+                resolvedCommitSha: enabledSha,
+              },
+            ],
+          }),
+        );
+
+        const skills = yield* discoverCursorSkills(workspace, { HOME: userHome });
+        expect(skills).toEqual([
+          {
+            name: "poteto-mode",
+            description: "current id install",
+            path: path.join(enabledRoot, "skills", "poteto-mode", "SKILL.md"),
+            scope: "user",
+            enabled: true,
+          },
+        ]);
       }),
     ));
 
