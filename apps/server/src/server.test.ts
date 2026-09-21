@@ -48,6 +48,7 @@ import {
   WorktreeSetupSnapshot,
   type WorktreeSetupStageId,
 } from "@kata-sh/code-contracts";
+import type { RelayManagedEndpointRuntimeConfig } from "@kata-sh/code-contracts/relay";
 import {
   WIRE_RELAY_PROVIDER_KIND,
   wireEnvironmentIssuer,
@@ -1601,6 +1602,22 @@ const fetchEffect = (input: Parameters<typeof fetch>[0], init?: RequestInit) => 
       ? effect.pipe(Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }))
       : effect
   ).pipe(Effect.mapError((cause) => new TestHttpRequestError({ cause })));
+};
+
+const manualRelayEndpoint = {
+  httpBaseUrl: "http://127.0.0.1:3773",
+  wsBaseUrl: "ws://127.0.0.1:3773",
+  providerKind: "manual",
+} as const;
+
+const managedRelayEndpoint = {
+  httpBaseUrl: "https://desktop.example.test/",
+  wsBaseUrl: "wss://desktop.example.test",
+  providerKind: "cloudflare_tunnel",
+} as const;
+const managedEndpointRuntime: RelayManagedEndpointRuntimeConfig = {
+  providerKind: "cloudflare_tunnel",
+  connectorToken: "connector-token",
 };
 
 const jsonRequestBody = (value: unknown): string => {
@@ -3198,6 +3215,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: "not-a-public-key",
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -3237,6 +3255,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           body: jsonRequestBody({
             ...body,
             cloudMintPublicKey: cloudKeyPair.publicKey,
+            endpoint: manualRelayEndpoint,
             endpointRuntime: null,
           }),
         });
@@ -3311,6 +3330,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             cloudUserId,
             environmentCredential,
             cloudMintPublicKey: cloudKeyPair.publicKey,
+            endpoint: manualRelayEndpoint,
             endpointRuntime: null,
           }),
         });
@@ -3369,6 +3389,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -3394,6 +3415,242 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("reports a stored managed runtime without a callback URL as not ready", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-stale-callback-",
+      });
+      yield* buildAppUnderTest({ config: { baseDir } });
+
+      const secretsDir = path.join(baseDir, "userdata", "secrets");
+      yield* fileSystem.makeDirectory(secretsDir, { recursive: true });
+      yield* fileSystem.writeFile(
+        path.join(secretsDir, "cloud-endpoint-runtime-config.bin"),
+        new TextEncoder().encode("present"),
+      );
+
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const linkStateUrl = yield* getHttpServerUrl("/api/connect/link-state");
+      const linkStateResponse = yield* fetchEffect(linkStateUrl, {
+        headers: { cookie: ownerCookie },
+      });
+      const linkStateBody = yield* responseJsonEffect<{
+        readonly managedTunnelActive?: boolean;
+        readonly managedCallbackReady?: boolean;
+      }>(linkStateResponse);
+
+      assert.equal(linkStateResponse.status, 200);
+      assert.equal(linkStateBody.managedTunnelActive, true);
+      assert.equal(linkStateBody.managedCallbackReady, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("persists the managed callback origin and clears it when runtime start fails", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-callback-origin-",
+      });
+      let failRuntime = false;
+      yield* buildAppUnderTest({
+        config: { baseDir },
+        layers: {
+          cloudManagedEndpointRuntime: {
+            applyConfig: (config) => {
+              if (!config) {
+                return Effect.succeed({ status: "disabled" });
+              }
+              if (failRuntime) {
+                return Effect.succeed({
+                  status: "failed",
+                  providerKind: "cloudflare_tunnel",
+                  reason: "cloudflared missing",
+                });
+              }
+              return Effect.succeed({
+                status: "running",
+                providerKind: "cloudflare_tunnel",
+                pid: 123,
+              });
+            },
+          },
+        },
+      });
+
+      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
+        privateKeyEncoding: { format: "pem", type: "pkcs8" },
+        publicKeyEncoding: { format: "pem", type: "spki" },
+      });
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
+      const linkStateUrl = yield* getHttpServerUrl("/api/connect/link-state");
+      const secretPath = path.join(
+        baseDir,
+        "userdata",
+        "secrets",
+        "cloud-managed-endpoint-url.bin",
+      );
+      const readCallback = fileSystem.readFileString(secretPath).pipe(Effect.option);
+      const postConfig = (
+        endpoint: typeof managedRelayEndpoint | typeof manualRelayEndpoint,
+        endpointRuntime = endpoint.providerKind === "cloudflare_tunnel"
+          ? managedEndpointRuntime
+          : null,
+      ) =>
+        fetchEffect(relayConfigUrl, {
+          method: "POST",
+          headers: {
+            cookie: ownerCookie,
+            "content-type": "application/json",
+          },
+          body: jsonRequestBody({
+            relayUrl: "https://relay.example.test",
+            cloudUserId: "user_123",
+            environmentCredential: "t3env_test_credential",
+            cloudMintPublicKey: cloudKeyPair.publicKey,
+            endpoint,
+            endpointRuntime,
+          }),
+        });
+      const readLinkState = Effect.gen(function* () {
+        const response = yield* fetchEffect(linkStateUrl, {
+          headers: { cookie: ownerCookie },
+        });
+        const body = yield* responseJsonEffect<{
+          readonly managedTunnelActive?: boolean;
+          readonly managedCallbackReady?: boolean;
+        }>(response);
+        assert.equal(response.status, 200);
+        return body;
+      });
+
+      const externallyManaged = yield* postConfig(managedRelayEndpoint, null);
+      assert.equal(externallyManaged.status, 200);
+      assert.equal(
+        Option.match(yield* readCallback, {
+          onNone: () => null,
+          onSome: (value) => value,
+        }),
+        "https://desktop.example.test",
+      );
+      const externalState = yield* readLinkState;
+      assert.equal(externalState.managedTunnelActive, false);
+      assert.equal(externalState.managedCallbackReady, false);
+
+      const saved = yield* postConfig(managedRelayEndpoint);
+      assert.equal(saved.status, 200);
+      assert.equal(
+        Option.match(yield* readCallback, {
+          onNone: () => null,
+          onSome: (value) => value,
+        }),
+        "https://desktop.example.test",
+      );
+      const readyState = yield* readLinkState;
+      assert.equal(readyState.managedTunnelActive, true);
+      assert.equal(readyState.managedCallbackReady, true);
+
+      failRuntime = true;
+      const failed = yield* postConfig(managedRelayEndpoint);
+      assert.equal(failed.status, 503);
+      assert.equal(
+        Option.match(yield* readCallback, {
+          onNone: () => null,
+          onSome: (value) => value,
+        }),
+        null,
+      );
+      const clearedState = yield* readLinkState;
+      assert.equal(clearedState.managedTunnelActive, false);
+      assert.equal(clearedState.managedCallbackReady, false);
+
+      failRuntime = false;
+      const restored = yield* postConfig(managedRelayEndpoint);
+      assert.equal(restored.status, 200);
+      const publishOnly = yield* postConfig(manualRelayEndpoint);
+      assert.equal(publishOnly.status, 200);
+      assert.equal(
+        Option.match(yield* readCallback, {
+          onNone: () => null,
+          onSome: (value) => value,
+        }),
+        null,
+      );
+      const publishOnlyState = yield* readLinkState;
+      assert.equal(publishOnlyState.managedTunnelActive, false);
+      assert.equal(publishOnlyState.managedCallbackReady, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("rejects an insecure managed callback URL before starting the runtime", () =>
+    Effect.gen(function* () {
+      const appliedRuntimeConfigs: Array<unknown> = [];
+      yield* buildAppUnderTest({
+        layers: {
+          cloudManagedEndpointRuntime: {
+            applyConfig: (config) => {
+              appliedRuntimeConfigs.push(config);
+              return Effect.succeed({
+                status: "running",
+                providerKind: "cloudflare_tunnel",
+                pid: 123,
+              });
+            },
+          },
+        },
+      });
+
+      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
+        privateKeyEncoding: { format: "pem", type: "pkcs8" },
+        publicKeyEncoding: { format: "pem", type: "spki" },
+      });
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
+      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
+      const response = yield* fetchEffect(relayConfigUrl, {
+        method: "POST",
+        headers: {
+          cookie: ownerCookie,
+          "content-type": "application/json",
+        },
+        body: jsonRequestBody({
+          relayUrl: "https://relay.example.test",
+          cloudUserId: "user_123",
+          environmentCredential: "t3env_test_credential",
+          cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: {
+            httpBaseUrl: "http://desktop.example.test",
+            wsBaseUrl: "ws://desktop.example.test",
+            providerKind: "cloudflare_tunnel",
+          },
+          endpointRuntime: {
+            providerKind: "cloudflare_tunnel",
+            connectorToken: "connector-token",
+          },
+        }),
+      });
+      const body = yield* responseJsonEffect<{ readonly message?: string }>(response);
+
+      assert.equal(response.status, 400);
+      assert.equal(body.message, "Managed callback URL must be a secure HTTPS origin.");
+      assert.deepEqual(appliedRuntimeConfigs, []);
+
+      const linkStateUrl = yield* getHttpServerUrl("/api/connect/link-state");
+      const linkStateResponse = yield* fetchEffect(linkStateUrl, {
+        headers: { cookie: ownerCookie },
+      });
+      const linkStateBody = yield* responseJsonEffect<{
+        readonly managedTunnelActive?: boolean;
+        readonly managedCallbackReady?: boolean;
+      }>(linkStateResponse);
+      assert.equal(linkStateResponse.status, 200);
+      assert.equal(linkStateBody.managedTunnelActive, false);
+      assert.equal(linkStateBody.managedCallbackReady, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("does not expose internal cloud reconciliation over HTTP", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
@@ -3409,8 +3666,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
   it.effect("unlinks local cloud state and disables the managed endpoint runtime", () =>
     Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-unlink-callback-",
+      });
       const appliedRuntimeConfigs: Array<unknown> = [];
       yield* buildAppUnderTest({
+        config: { baseDir },
         layers: {
           cloudManagedEndpointRuntime: {
             applyConfig: (config) => {
@@ -3451,6 +3714,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: managedRelayEndpoint,
           endpointRuntime: {
             providerKind: "cloudflare_tunnel",
             connectorToken: "connector-token",
@@ -3460,6 +3724,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         }),
       });
       assert.equal(relayConfigResponse.status, 200);
+      const callbackPath = path.join(
+        baseDir,
+        "userdata",
+        "secrets",
+        "cloud-managed-endpoint-url.bin",
+      );
+      assert.equal(yield* fileSystem.readFileString(callbackPath), "https://desktop.example.test");
 
       const unlinkResponse = yield* fetchEffect(unlinkUrl, {
         method: "POST",
@@ -3485,12 +3756,20 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         readonly cloudUserId?: string | null;
         readonly relayUrl?: string | null;
         readonly relayIssuer?: string | null;
+        readonly managedTunnelActive?: boolean;
+        readonly managedCallbackReady?: boolean;
       }>(linkStateResponse);
       assert.equal(linkStateResponse.status, 200);
       assert.equal(linkStateBody.linked, false);
       assert.equal(linkStateBody.cloudUserId, null);
       assert.equal(linkStateBody.relayUrl, null);
       assert.equal(linkStateBody.relayIssuer, null);
+      assert.equal(linkStateBody.managedTunnelActive, false);
+      assert.equal(linkStateBody.managedCallbackReady, false);
+      assert.equal(
+        Option.isNone(yield* fileSystem.readFileString(callbackPath).pipe(Effect.option)),
+        true,
+      );
       assert.deepEqual(appliedRuntimeConfigs, [
         {
           providerKind: "cloudflare_tunnel",
@@ -3524,6 +3803,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -3583,6 +3863,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -3642,6 +3923,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -3702,6 +3984,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -3764,6 +4047,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             relayIssuer: "https://relay.example.test",
             environmentCredential: "t3env_test_credential",
             cloudMintPublicKey: cloudKeyPair.publicKey,
+            endpoint: manualRelayEndpoint,
             endpointRuntime: null,
           }),
         });
@@ -3843,6 +4127,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: managedRelayEndpoint,
           endpointRuntime: {
             providerKind: "cloudflare_tunnel",
             connectorToken: "connector-token",
@@ -3912,6 +4197,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -3979,6 +4265,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -4030,6 +4317,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -4081,6 +4369,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -4146,6 +4435,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });
@@ -4196,6 +4486,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           cloudUserId: "user_123",
           environmentCredential: "t3env_test_credential",
           cloudMintPublicKey: cloudKeyPair.publicKey,
+          endpoint: manualRelayEndpoint,
           endpointRuntime: null,
         }),
       });

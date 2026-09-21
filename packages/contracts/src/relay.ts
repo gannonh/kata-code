@@ -206,6 +206,7 @@ export const RelayEnvironmentConfigRequest = Schema.Struct({
   cloudUserId: Schema.String,
   environmentCredential: Schema.String,
   cloudMintPublicKey: Schema.String,
+  endpoint: RelayManagedEndpoint,
   endpointRuntime: Schema.NullOr(RelayManagedEndpointRuntimeConfig),
 });
 export type RelayEnvironmentConfigRequest = typeof RelayEnvironmentConfigRequest.Type;

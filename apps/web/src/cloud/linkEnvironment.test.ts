@@ -296,6 +296,18 @@ describe("web cloud link environment client", () => {
           wsBaseUrl: TARGET.wsBaseUrl,
         },
       });
+      const relayConfigCall = fetchMock.mock.calls.find((call) =>
+        String(call[0]).includes("/api/connect/relay-config"),
+      );
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      expect(JSON.parse(bodyText(relayConfigCall?.[1]?.body))).toMatchObject({
+        endpoint: {
+          httpBaseUrl: "https://desktop.example.test",
+          wsBaseUrl: "wss://desktop.example.test",
+          providerKind: "cloudflare_tunnel",
+        },
+        endpointRuntime: null,
+      });
     }),
   );
 
@@ -402,6 +414,18 @@ describe("web cloud link environment client", () => {
       // @effect-diagnostics-next-line preferSchemaOverJson:off
       expect(JSON.parse(bodyText(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
         endpoint: { providerKind: "manual" },
+      });
+      const relayConfigCall = fetchMock.mock.calls.find((call) =>
+        String(call[0]).includes("/api/connect/relay-config"),
+      );
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      expect(JSON.parse(bodyText(relayConfigCall?.[1]?.body))).toMatchObject({
+        endpoint: {
+          httpBaseUrl: TARGET.httpBaseUrl,
+          wsBaseUrl: TARGET.wsBaseUrl,
+          providerKind: "manual",
+        },
+        endpointRuntime: null,
       });
     }),
   );

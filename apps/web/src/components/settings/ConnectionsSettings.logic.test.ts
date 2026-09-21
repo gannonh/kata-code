@@ -4,8 +4,27 @@ import {
   applyWslEnableSelection,
   isQrShareableEndpoint,
   isWslSettingsRowVisible,
+  managedCallbackNeedsRepair,
   selectQrEndpointOption,
 } from "./ConnectionsSettings.logic";
+
+describe("managedCallbackNeedsRepair", () => {
+  it("asks for repair when the tunnel is stored without a callback URL", () => {
+    expect(
+      managedCallbackNeedsRepair({ managedTunnelActive: true, managedCallbackReady: false }),
+    ).toBe(true);
+  });
+
+  it("leaves a complete managed link and a publish-only link alone", () => {
+    expect(
+      managedCallbackNeedsRepair({ managedTunnelActive: true, managedCallbackReady: true }),
+    ).toBe(false);
+    expect(
+      managedCallbackNeedsRepair({ managedTunnelActive: false, managedCallbackReady: false }),
+    ).toBe(false);
+    expect(managedCallbackNeedsRepair(undefined)).toBe(false);
+  });
+});
 
 const baseWslState: DesktopWslState = {
   enabled: false,
