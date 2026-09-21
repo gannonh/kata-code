@@ -64,6 +64,9 @@ const makeRoutineScheduler = Effect.gen(function* () {
       Effect.andThen(Effect.raceFirst(Queue.take(wakeups), Effect.sleep("1 second"))),
     ),
   );
+  // Startup awaits this effect. Both loops stay alive on the provided scope, and
+  // closing that scope stops them. Awaiting the dispatch loop here would park
+  // command readiness forever, which is how queued runs were never claimed.
   const start: RoutineSchedulerShape["start"] = Effect.gen(function* () {
     const initialNow = yield* DateTime.now.pipe(Effect.map(DateTime.toEpochMillis));
     yield* store
@@ -79,7 +82,7 @@ const makeRoutineScheduler = Effect.gen(function* () {
       ),
     );
     yield* Effect.forkScoped(admissionLoop);
-    return yield* dispatchLoop;
+    yield* Effect.forkScoped(dispatchLoop);
   });
 
   return { owner, tick, start, wake } satisfies RoutineSchedulerShape;
