@@ -296,7 +296,7 @@ function readInstalledPluginIdsSync(dbPath: string): InstalledPluginIds {
     const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
     try {
       const rows = database
-        .prepare("SELECT value FROM ItemTable WHERE key LIKE 'cursor.plugins.installedIds%'")
+        .prepare("SELECT value FROM ItemTable WHERE key GLOB 'cursor.plugins.installedIds*'")
         .all() as ReadonlyArray<{ value?: unknown }>;
       const ids = new Set<string>();
       for (const row of rows) {
