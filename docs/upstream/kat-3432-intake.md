@@ -44,7 +44,7 @@ KAT-3429 remains Todo waiting Start and is not this run's Build. KAT-3377 is Don
 
 ## Retained-outcome review
 
-Clean merges and new files received the same review as conflicts. Auto-merged files that arrived with `@t3tools` imports were remapped. `sandboxes-preview`, Sprite connect, GitHubCli discovery APIs, and routines RPC remain present on the candidate. New comments that said "T3 Code" in `observability.ts` and `cli/config.ts` were rewritten to Kata Code. Portable branding failed on new device-tool ownership copy (`T3 server` in `packages/client-runtime/src/state/device.ts` and `docs/user/devices.md`); those strings were rewritten to Kata Code server before the next candidate SHA.
+Clean merges and new files received the same review as conflicts. Auto-merged files that arrived with `@t3tools` imports were remapped. `sandboxes-preview`, Sprite connect, GitHubCli discovery APIs, and routines RPC remain present on the candidate. New comments that said "T3 Code" in `observability.ts` and `cli/config.ts` were rewritten to Kata Code. Portable branding failed on new device-tool ownership copy (`T3 server` in `packages/client-runtime/src/state/device.ts` and `docs/user/devices.md`); those strings were rewritten to Kata Code server. New `deviceToolMaintenance.test.ts` omitted `ProcessRunner.runBytes` on its mock; the unused stub matches other server tests.
 
 ## Verification
 
