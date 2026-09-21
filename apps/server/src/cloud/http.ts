@@ -525,9 +525,6 @@ const applyCloudRelayConfig = Effect.fn("environment.cloud.applyRelayConfig")(fu
     });
   }
 
-  // The relay owns the public hostname. Persist it only after the runtime
-  // accepted its configuration, and drop both records if that write fails so
-  // Connections cannot report a healthy tunnel without a callback URL.
   yield* Effect.gen(function* () {
     yield* dependencies.secrets.set(RELAY_URL_SECRET, stringToBytes(payload.relayUrl));
     yield* dependencies.secrets.set(
