@@ -1,5 +1,5 @@
 import * as NodeOS from "node:os";
-import { DatabaseSync } from "node:sqlite";
+import * as NodeSqlite from "node:sqlite";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
@@ -579,7 +579,7 @@ describe("Cursor skills", () => {
           "state.vscdb",
         );
         yield* fileSystem.makeDirectory(path.dirname(stateDb), { recursive: true });
-        const database = new DatabaseSync(stateDb);
+        const database = new NodeSqlite.DatabaseSync(stateDb);
         database.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
         database
           .prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)")

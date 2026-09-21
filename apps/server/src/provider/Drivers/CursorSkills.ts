@@ -10,7 +10,7 @@
  * @module provider/Drivers/CursorSkills
  */
 import * as NodeOS from "node:os";
-import { DatabaseSync } from "node:sqlite";
+import * as NodeSqlite from "node:sqlite";
 
 import type { ServerProviderSkill } from "@kata-sh/code-contracts";
 import * as ByteSize from "effect/ByteSize";
@@ -292,7 +292,7 @@ const cursorGlobalStateDb = Effect.fn("cursorGlobalStateDb")(function* (
 
 function readInstalledPluginIdsSync(dbPath: string): InstalledPluginIds {
   try {
-    const database = new DatabaseSync(dbPath, { readOnly: true });
+    const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
     try {
       const rows = database
         .prepare("SELECT value FROM ItemTable WHERE key LIKE 'cursor.plugins.installedIds%'")
