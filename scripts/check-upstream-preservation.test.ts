@@ -31,12 +31,13 @@ const repositoryRoot = NodePath.resolve(new URL("..", import.meta.url).pathname)
 const scriptPath = NodePath.join(repositoryRoot, "scripts/check-upstream-preservation.ts");
 const currentSha = "251a6bcb5cfad04999a6bdd4c7dbb5bb4c983ff9";
 const upstreamSha = "12391bd0d38eef6655b7a9f8945d0cb5febadc2b";
-// withHistoricalBaselineWorktree runs the gate commands inside its checkout against
-// the repository's installed node_modules, so its candidate has to track the
-// dependency floor. currentSha predates the effect rc.115 upgrade and no longer runs
-// there. Its FORK.md pin is currentUpstreamSha.
+// withHistoricalBaselineWorktree checks out baselineCandidateSha and runs today's
+// checker against that tree. Pass that commit's FORK.md pin (baselineUpstreamSha),
+// not the live pin. currentSha stays historical because withSandboxRegressionWorktree
+// copies today's checker over that checkout and needs a tree difference to commit.
 const baselineCandidateSha = "00406934429021e47d3cb60e16491febb46742b4";
-const currentUpstreamSha = "c14f6015bfe479d313355cb234af1a5c16dbb15f";
+const baselineUpstreamSha = "c14f6015bfe479d313355cb234af1a5c16dbb15f";
+const currentUpstreamSha = "b379b5b1407b4c718095cd13395173b6cc005218";
 const upstreamBaseSha = "6a687ee43bf222672ab8d3f4c0bab3d8d174f79f";
 
 const relativeRepositoryPath = (absolutePath: string): string =>
@@ -397,7 +398,7 @@ describe("upstream preservation CLI", () => {
             "--base",
             baselineCandidateSha,
             "--upstream",
-            currentUpstreamSha,
+            baselineUpstreamSha,
             "--upstream-base",
             upstreamBaseSha,
           ],

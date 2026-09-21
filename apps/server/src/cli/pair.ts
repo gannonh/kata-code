@@ -16,6 +16,7 @@ import {
 } from "@kata-sh/code-contracts";
 import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "@kata-sh/code-contracts/wireIdentity";
 import { resolveWorktreeKatacodeHome } from "@kata-sh/code-shared/devHome";
+import { DEFAULT_SIGNAL_EXPORT } from "@kata-sh/code-shared/observability";
 import {
   buildTailscaleHttpsBaseUrl,
   DEFAULT_TAILSCALE_SERVE_PORT,
@@ -322,10 +323,10 @@ const makePairServerConfig = Effect.fn(function* (input: {
     otlpTracesUrl: undefined,
     otlpMetricsUrl: undefined,
     otlpLogsUrl: undefined,
-    otlpExportIntervalMs: 10_000,
+    otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
+    otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
+    otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
     otlpServiceName: "t3-server",
-    otlpHeaders: undefined,
-    otlpProtocol: "http/json",
     mode: "web",
     port: state.port,
     host: state.host,
