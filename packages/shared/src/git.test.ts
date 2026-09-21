@@ -8,6 +8,7 @@ import {
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
   parseOriginUrlFromGitConfig,
+  withoutGitRepositoryEnv,
   WORKTREE_BRANCH_PREFIX,
 } from "./git.ts";
 
@@ -272,5 +273,29 @@ describe("applyGitStatusStreamEvent", () => {
       behindCount: 1,
       pr: null,
     });
+  });
+});
+
+describe("withoutGitRepositoryEnv", () => {
+  it("drops every repository binding git reads", () => {
+    expect(
+      withoutGitRepositoryEnv({
+        GIT_DIR: "/repo/.git",
+        GIT_WORK_TREE: "/repo",
+        GIT_INDEX_FILE: "/repo/.git/index",
+        PATH: "/usr/bin",
+      }),
+    ).toEqual({ PATH: "/usr/bin" });
+  });
+
+  it("drops bindings regardless of the case they were inherited with", () => {
+    expect(
+      withoutGitRepositoryEnv({
+        git_dir: "/repo/.git",
+        Git_Work_Tree: "/repo",
+        gIt_InDeX_fIlE: "/repo/.git/index",
+        PATH: "/usr/bin",
+      }),
+    ).toEqual({ PATH: "/usr/bin" });
   });
 });
