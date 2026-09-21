@@ -9,6 +9,7 @@ import { describe, expect, it } from "@effect/vitest";
 import {
   calculateResultArtifactDigest,
   changedInventoryOutcomeDetails,
+  loadInventory,
   parseNameStatusDiff,
   matchesOwnerPath,
   resolveRefs,
@@ -815,6 +816,18 @@ describe("upstream preservation CLI", () => {
       (candidate) => candidate.id === "release-package-ownership",
     );
     expect(check?.id).toBe("release-package-ownership");
+    expect(check?.ownerPaths).toEqual([
+      "package.json",
+      "scripts/release-asset-names.ts",
+      "scripts/release-asset-names.test.ts",
+      "scripts/update-release-package-versions.ts",
+      ".github/workflows/release.yml",
+    ]);
+    expect(
+      loadInventory(repositoryRoot).entries.find(
+        (entry) => entry.id === "release-package-ownership",
+      )?.ownerPaths,
+    ).toEqual(check?.ownerPaths);
     const command = check?.commands[0];
     if (command === undefined) throw new Error("release-package-ownership has no command");
     expect(command.trustedPaths).toEqual(["scripts/update-release-package-versions.test.ts"]);
@@ -829,6 +842,109 @@ describe("upstream preservation CLI", () => {
       expect(missingRequiredPaths(emptyRoot, command)).toEqual(command.requiredPaths);
     } finally {
       NodeFS.rmSync(emptyRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a test-only scripts/release-asset-names.test.ts edit as a changed retained outcome", () => {
+    const headSha = resolveCommitRef(repositoryRoot, "HEAD");
+    const temporaryRoot = NodeFS.mkdtempSync(
+      NodePath.join(NodeOS.tmpdir(), "kat-3386-release-asset-names-"),
+    );
+    const add = NodeChildProcess.spawnSync(
+      "git",
+      ["worktree", "add", "--detach", temporaryRoot, headSha],
+      { cwd: repositoryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+    );
+    expect(add.status).toBe(0);
+    try {
+      for (const relativePath of [
+        "scripts/lib/upstream-preservation/checks.ts",
+        "docs/upstream/retained-behavior.v1.json",
+      ]) {
+        NodeFS.copyFileSync(
+          NodePath.join(repositoryRoot, relativePath),
+          NodePath.join(temporaryRoot, relativePath),
+        );
+      }
+      const baseStaged = NodeChildProcess.spawnSync(
+        "git",
+        [
+          "add",
+          "--",
+          "scripts/lib/upstream-preservation/checks.ts",
+          "docs/upstream/retained-behavior.v1.json",
+        ],
+        { cwd: temporaryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+      expect(baseStaged.status).toBe(0);
+      const baseCommit = NodeChildProcess.spawnSync(
+        "git",
+        [
+          "-c",
+          "user.name=Kata preservation test",
+          "-c",
+          "user.email=kata-preservation-test@example.com",
+          "commit",
+          "--allow-empty",
+          "--no-verify",
+          "-m",
+          "KAT-3386 owner path contract baseline",
+        ],
+        { cwd: temporaryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+      expect(baseCommit.status).toBe(0);
+      const baseSha = resolveCommitRef(temporaryRoot, "HEAD");
+
+      NodeFS.appendFileSync(
+        NodePath.join(temporaryRoot, "scripts/release-asset-names.test.ts"),
+        "\nexport const releaseAssetNamesCandidateChange = true;\n",
+      );
+      const staged = NodeChildProcess.spawnSync(
+        "git",
+        ["add", "--", "scripts/release-asset-names.test.ts"],
+        { cwd: temporaryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+      expect(staged.status).toBe(0);
+      const commit = NodeChildProcess.spawnSync(
+        "git",
+        [
+          "-c",
+          "user.name=Kata preservation test",
+          "-c",
+          "user.email=kata-preservation-test@example.com",
+          "commit",
+          "--no-verify",
+          "-m",
+          "test-only release asset names change",
+        ],
+        { cwd: temporaryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+      expect(commit.status).toBe(0);
+      const candidateSha = resolveCommitRef(temporaryRoot, "HEAD");
+      const report = runPreservation({
+        mode: "human-review",
+        repositoryRoot: temporaryRoot,
+        candidate: candidateSha,
+        base: baseSha,
+        upstream: currentUpstreamSha,
+        upstreamBase: upstreamBaseSha,
+        commandExecutor: () => "PASS",
+        executionTreeCheck: () => undefined,
+      });
+
+      expect(report.lines).toContain(
+        "CHANGED_RETAINED_OUTCOMES status=NOT RUN ids=release-package-ownership",
+      );
+      expect(report.lines).toContain("INTEGRATION_RECORD status=NOT RUN");
+      expect(report.exitCode).toBe(1);
+    } finally {
+      const remove = NodeChildProcess.spawnSync(
+        "git",
+        ["worktree", "remove", "--force", temporaryRoot],
+        { cwd: repositoryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+      );
+      expect(remove.status).toBe(0);
+      NodeFS.rmSync(temporaryRoot, { recursive: true, force: true });
     }
   });
 
