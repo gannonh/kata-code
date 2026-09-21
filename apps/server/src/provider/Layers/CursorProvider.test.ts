@@ -7,6 +7,7 @@ import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { describe, expect, it } from "vite-plus/test";
@@ -33,6 +34,7 @@ import {
   resolveCursorAcpConfigUpdates,
 } from "./CursorProvider.ts";
 import {
+  cursorSkillInvocation,
   discoverCursorSkills,
   hasCursorSkillMention,
   probeCursorSkills,
@@ -42,6 +44,8 @@ import { execScriptSource, writeFakeCli } from "../../testUtils/fakeCli.ts";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { cursorUsageResponseToLimits, readCursorUsageLimits } from "./cursorUsageLimits.ts";
+
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const runNode = <A, E>(
   effect: Effect.Effect<
@@ -472,12 +476,7 @@ describe("Cursor skills", () => {
         const staleSha = "970df460f1ae6affbedab6e04f6b396917452431";
         const publicSha = "efa2a531985e0a8084d36ff3cf87233be8a9f34b";
         const cache = path.join(userHome, ".cursor", "plugins", "cache");
-        const enabledRoot = path.join(
-          cache,
-          "gannonh-open-pstack",
-          "open-pstack",
-          enabledSha,
-        );
+        const enabledRoot = path.join(cache, "gannonh-open-pstack", "open-pstack", enabledSha);
         const writeSkill = Effect.fn("writeCursorPluginSkill")(function* (
           directory: string,
           contents: string,
@@ -491,7 +490,7 @@ describe("Cursor skills", () => {
         });
         yield* fileSystem.writeFileString(
           path.join(enabledRoot, ".cursor-plugin", "plugin.json"),
-          JSON.stringify({ name: "open-pstack", skills: "./skills/" }),
+          encodeJson({ name: "open-pstack", skills: "./skills/" }),
         );
         yield* fileSystem.writeFileString(path.join(enabledRoot, ".cache-complete"), "");
         yield* writeSkill(
@@ -549,14 +548,17 @@ describe("Cursor skills", () => {
         );
 
         const thermos = path.join(userHome, ".cursor", "plugins", "local", "thermos");
-        yield* writeSkill(path.join(thermos, "skills", "boil"), "---\ndescription: local plugin\n---\n");
+        yield* writeSkill(
+          path.join(thermos, "skills", "boil"),
+          "---\ndescription: local plugin\n---\n",
+        );
         yield* fileSystem.writeFileString(
           path.join(userHome, ".cursor", "settings.json"),
-          JSON.stringify({ enabled_plugins: { thermos } }),
+          encodeJson({ enabled_plugins: { thermos } }),
         );
         yield* fileSystem.writeFileString(
           path.join(cache, ".cloud-plugin-manifest.json"),
-          JSON.stringify({
+          encodeJson({
             plugins: [
               {
                 pluginId: "61242178",
@@ -581,7 +583,7 @@ describe("Cursor skills", () => {
         database.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
         database
           .prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)")
-          .run("cursor.plugins.installedIds.no-team", JSON.stringify(["67972749"]));
+          .run("cursor.plugins.installedIds.no-team", encodeJson(["67972749"]));
         database.close();
 
         const environment = { HOME: userHome };
@@ -664,7 +666,7 @@ describe("Cursor skills", () => {
         );
         yield* fileSystem.writeFileString(
           path.join(cache, ".cloud-plugin-manifest.json"),
-          JSON.stringify({
+          encodeJson({
             plugins: [
               {
                 pluginId: "67972749",
@@ -688,6 +690,15 @@ describe("Cursor skills", () => {
         ]);
       }),
     ));
+
+  it("turns a chosen skill mention into Cursor's bare slash command", () => {
+    expect(cursorSkillInvocation("$poteto-mode", new Set(["poteto-mode"]))).toBe("/poteto-mode");
+    expect(cursorSkillInvocation("$poteto-mode ", new Set(["poteto-mode"]))).toBe("/poteto-mode");
+    expect(cursorSkillInvocation("please $poteto-mode this", new Set(["poteto-mode"]))).toBe(
+      undefined,
+    );
+    expect(cursorSkillInvocation("$poteto-mode", new Set())).toBe(undefined);
+  });
 
   it("rewrites only discovered skill mentions into Cursor slash invocations", () => {
     expect(hasCursorSkillMention("use $Review_Pr:V2 here")).toBe(true);
