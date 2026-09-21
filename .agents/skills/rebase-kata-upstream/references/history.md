@@ -1,14 +1,20 @@
 # Verified history and gotchas
 
-These observations were checked against Kata main `0c2aa608219f35ae1254092fa81a25ff26aac6d3` on September 10, 2026. The last-integration record was checked on merge `9926bc3db3ee0edc0579c289f7d9ce7f5c71bdbe` on September 12, 2026. The workflow-reference lesson was checked against `e96c74aa48e7ae5b56b70db9b7a62096dc0df0d5` on September 15, 2026. Resolve current paths and issue states before applying them. Repository documents are the detailed evidence; this file preserves lessons that change integration decisions.
+These observations were checked against Kata main `0c2aa608219f35ae1254092fa81a25ff26aac6d3` on September 10, 2026. The last-integration record was checked on squash `e96c74aa48e7ae5b56b70db9b7a62096dc0df0d5` on September 20, 2026. The workflow-reference lesson was checked against that same squash on September 15, 2026. Resolve current paths and issue states before applying them. Repository documents are the detailed evidence; this file preserves lessons that change integration decisions.
 
 ## Last upstream integration
 
-[KAT-3329 / PR #212](https://github.com/gannonh/kata-code/pull/212) integrated 102 upstream commits, from `12391bd0d38eef6655b7a9f8945d0cb5febadc2b` to `36668dbe4fe2f8c881cc4f93bc675413eef1406f`. Kata freeze main was `cc884451eb56ca9b97ed527df3819e6dc3227870`. It landed as merge commit `9926bc3db3ee0edc0579c289f7d9ce7f5c71bdbe` with parents `6395a985c6ffbf99521d90b59a470f943d113451` (main) and `1cf73933d370d98c3920599cb14310e18771a69d` (candidate). On that commit, `git merge-base --is-ancestor 36668dbe4fe2f8c881cc4f93bc675413eef1406f HEAD` holds. Original root remains `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f`.
+[KAT-3371 / PR #223](https://github.com/gannonh/kata-code/pull/223) integrated 107 upstream commits, from `36668dbe4fe2f8c881cc4f93bc675413eef1406f` to `47ace94962a714a561d7cfbdbaa4c721ef6b0598`. Kata freeze main was `b22872bd59d85b0ff64ad2cd7d5837c256057155`. It landed as squash `e96c74aa48e7ae5b56b70db9b7a62096dc0df0d5` with parent `af4a4ec39706fcffca53bf26b3168126bd5f6bd3` ([KAT-3301 / PR #224](https://github.com/gannonh/kata-code/pull/224)). On that commit, `git merge-base --is-ancestor 47ace94962a714a561d7cfbdbaa4c721ef6b0598 HEAD` is false. Original root remains `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f`.
 
-Read `docs/upstream/kat-3329-intake.md` and `docs/upstream/kat-3329-decisions.tsv`.
+Read `docs/upstream/kat-3371-intake.md` and `docs/upstream/kat-3371-decisions.tsv`.
 
-The previous integration [KAT-3297 / PR #194](https://github.com/gannonh/kata-code/pull/194) squashed to `31828c7463c75197e288c6f52bff77c2c99a93fe`, so pin `12391bd0d38eef6655b7a9f8945d0cb5febadc2b` was not an ancestor of main. That run's dry merge reported 443 content conflicts. Its intake, decisions, and verification files remain the prior-run record. KAT-3329 recorded that lost pin with `git merge --strategy=ours --no-ff` before merging the frozen tip, then landed with GitHub's merge-commit method. Pin `36668dbe4fe2f8c881cc4f93bc675413eef1406f` is now an ancestor of that merge, so the next run omits the squash-recovery anchor unless a later squash loses ancestry. Check ancestry after landing, not just on the PR branch.
+The previous integration [KAT-3329 / PR #212](https://github.com/gannonh/kata-code/pull/212) landed as merge commit `9926bc3db3ee0edc0579c289f7d9ce7f5c71bdbe`, so pin `36668dbe4fe2f8c881cc4f93bc675413eef1406f` was an ancestor of the Kata base. KAT-3371 intake recorded SKIP for the squash-recovery anchor for that reason. GitHub then squash-merged #223. [KAT-3411 / PR #239](https://github.com/gannonh/kata-code/pull/239) recovered pin `47ace94962a714a561d7cfbdbaa4c721ef6b0598` with `git merge --strategy=ours --no-ff` before merging its frozen tip, the same class as [KAT-3297 / PR #194](https://github.com/gannonh/kata-code/pull/194). GitHub then squash-merged #239 as well. The next run does not recover `47ace94962a714a561d7cfbdbaa4c721ef6b0598`. Read `FORK.md` at the current Kata base for the live pin, and recover that pin when it lacks ancestry. Check ancestry after landing, not just on the PR branch.
+
+## Squash after SKIP of the recovery anchor
+
+| Observed trap | Resolution to carry forward |
+| --- | --- |
+| Intake recorded SKIP for squash recovery because the previous pin was already an ancestor of the Kata base, then GitHub squash-merged the PR | After [KAT-3371 / PR #223](https://github.com/gannonh/kata-code/pull/223) landed as `e96c74aa48e7ae5b56b70db9b7a62096dc0df0d5`, `git merge-base --is-ancestor 47ace94962a714a561d7cfbdbaa4c721ef6b0598 HEAD` is false. [KAT-3411 / PR #239](https://github.com/gannonh/kata-code/pull/239) recovered that pin. The next intake recovers the live pin from `FORK.md` when it lacks ancestry. A pre-merge ancestor check does not prove post-squash ancestry. |
 
 ## Preserve behavior through refactors
 
