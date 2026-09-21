@@ -2,12 +2,12 @@
 
 ## Frozen refs
 
-| Value                  | Commit                                                                                          |
-| ---------------------- | ----------------------------------------------------------------------------------------------- |
-| Kata base              | `af0d264336d2707cd98bdd57a59feca652e24033` (`origin/main` after KAT-3377 PR #244)               |
-| Previous upstream pin  | `c14f6015bfe479d313355cb234af1a5c16dbb15f`                                                      |
-| Frozen upstream target | `b379b5b1407b4c718095cd13395173b6cc005218`                                                      |
-| Original upstream root | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f`                                                      |
+| Value                  | Commit                                                                            |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| Kata base              | `af0d264336d2707cd98bdd57a59feca652e24033` (`origin/main` after KAT-3377 PR #244) |
+| Previous upstream pin  | `c14f6015bfe479d313355cb234af1a5c16dbb15f`                                        |
+| Frozen upstream target | `b379b5b1407b4c718095cd13395173b6cc005218`                                        |
+| Original upstream root | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f`                                        |
 
 Run `kat-upstream-20260921T071320Z-cursor-cloud` froze a range of 40 commits and 180 changed paths. Reverse commits: 0. None of the paths are under `.repos/`.
 
