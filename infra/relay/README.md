@@ -94,8 +94,9 @@ the configured API and tunnel DNS zones as retained Cloudflare resources. Person
 the production-owned zones.
 
 The `prod` Alchemy stage owns the retained PlanetScale database and is the shared hosted relay for
-stable and nightly clients. To raise production replica count without replacing that database, follow
-[Scale production relay Postgres to HA](../../docs/operations/relay-planetscale-ha.md). Every other
+stable and nightly clients. Production stays on single-node PS-5. Follow
+[Keep production relay Postgres on single-node PS-5](../../docs/operations/relay-planetscale-ha.md)
+before changing cluster size or replica count. Every other
 stage references that database and provisions an isolated PlanetScale branch and runtime role for
 local development, so deploy `prod` before creating developer stages:
 

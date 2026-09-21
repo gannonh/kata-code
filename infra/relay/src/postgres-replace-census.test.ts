@@ -271,13 +271,14 @@ describe("patched alchemy PostgresDatabase", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("targets two replicas on the prod shared database", () =>
+  it.effect("keeps the prod shared database on single-node PS-5", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const dbPath = yield* path.fromFileUrl(new URL("./db.ts", import.meta.url));
       const source = yield* fileSystem.readFileString(dbPath);
-      expect(source).toMatch(/replicas:\s*2/);
+      expect(source).toMatch(/clusterSize:\s*"PS_5"/);
+      expect(source).toMatch(/replicas:\s*0/);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

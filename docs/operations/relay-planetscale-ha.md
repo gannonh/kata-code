@@ -1,15 +1,17 @@
-# Scale production relay Postgres to HA
+# Keep production relay Postgres on single-node PS-5
 
-Raise replica count on the retained production database without Alchemy replacing
-`RelayPostgresDatabase`. The database name is `katacoderelay`. The PlanetScale id is
-`s5mpblbu2m4s`. `relay_migrations` bookkeeping stays on that database.
+Production deploys reconcile `RelayPostgresDatabase` to the size in
+`infra/relay/src/db.ts`. A larger size or a replica count above 0 in that file
+scales `katacoderelay` up on the next prod deploy and raises the PlanetScale bill.
+The database name is `katacoderelay`. The PlanetScale id is `s5mpblbu2m4s`.
+`relay_migrations` bookkeeping stays on that database.
 
 ## Target
 
 `infra/relay/src/db.ts` sets the prod shared database to:
 
-- `clusterSize: "PS_20"`
-- `replicas: 2`
+- `clusterSize: "PS_5"`
+- `replicas: 0`
 - `arch: "arm"`
 - `region: { slug: "us-west" }`
 
@@ -44,8 +46,8 @@ Confirm the restored identity is `katacoderelay` / `s5mpblbu2m4s`. Then dry-run 
 
 ## Apply
 
-Production apply is a separate authorized step. Do not apply from a scale-path PR unless that issue
+Production apply is a separate authorized step. Do not apply from a size-change PR unless that issue
 says to apply.
 
-After an authorized apply, inspect state again. Desired `replicas` must be `2`. The physical
-database id must stay `s5mpblbu2m4s`.
+After an authorized apply, inspect state again. Desired `clusterSize` must be `PS_5` and
+`replicas` must be `0`. The physical database id must stay `s5mpblbu2m4s`.
