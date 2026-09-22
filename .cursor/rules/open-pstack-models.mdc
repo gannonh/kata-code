@@ -6,20 +6,20 @@ alwaysApply: true
 
 Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one panel lane.
 
-feature, refactoring: cursor:cursor-grok-4.7@xhigh
-bug-fix: cursor:cursor-grok-4.7@xhigh
-perf-issue: cursor:cursor-grok-4.7@xhigh
-hillclimb: cursor:cursor-grok-4.7@medium
-judgment and prose: cursor:cursor-grok-4.7@high
-hardest tasks: claude:fable@xhigh
-how explorer: cursor:cursor-grok-4.7@medium
-how explainer: cursor:cursor-grok-4.7@xhigh
+feature, refactoring: cursor:grok-4.7@xhigh
+bug-fix: cursor:grok-4.7@xhigh
+perf-issue: cursor:grok-4.7@xhigh
+hillclimb: cursor:grok-4.7@medium
+judgment and prose: cursor:grok-4.7@high
+hardest tasks: claude:opus@xhigh
+how explorer: cursor:grok-4.7@medium
+how explainer: cursor:grok-4.7@xhigh
 why investigators: inherit-parent
 why synthesizer: inherit-parent
 reflect tooling: inherit-parent
 reflect judgment, divergent, synthesizer: inherit-parent
-arena runners: cursor:cursor-grok-4.7@xhigh, claude:fable@xhigh, codex:gpt-5.6-sol@max, claude:opus@xhigh
-arena cross-judge pool: cursor:cursor-grok-4.7@xhigh, claude:fable@xhigh, codex:gpt-5.6-sol@max, claude:opus@xhigh
-swarm workers: cursor:cursor-grok-4.7@medium
-architect runners: cursor:cursor-grok-4.7@xhigh, claude:fable@xhigh, codex:gpt-5.6-sol@max, claude:opus@xhigh
-interrogate reviewers: cursor:cursor-grok-4.7@xhigh, claude:fable@xhigh, codex:gpt-5.6-sol@max, claude:opus@xhigh
+arena runners: cursor:grok-4.7@xhigh, claude:fable@xhigh, codex:gpt-6-sol@max, claude:opus@xhigh
+arena cross-judge pool: cursor:grok-4.7@xhigh, claude:fable@xhigh, codex:gpt-6-sol@max, claude:opus@xhigh
+swarm workers: cursor:grok-4.7@medium
+architect runners: cursor:grok-4.7@xhigh, claude:fable@xhigh, codex:gpt-6-sol@max, claude:opus@xhigh
+interrogate reviewers: cursor:grok-4.7@xhigh, claude:fable@xhigh, codex:gpt-6-sol@max, claude:opus@xhigh
