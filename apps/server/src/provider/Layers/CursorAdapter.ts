@@ -102,6 +102,7 @@ function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
 
 export interface CursorAdapterLiveOptions {
   readonly environment?: NodeJS.ProcessEnv;
+  readonly pluginMcpFetch?: typeof globalThis.fetch;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
   /**
@@ -549,7 +550,12 @@ export function makeCursorAdapter(
 
           const processEnv = options?.environment ?? process.env;
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
-          const pluginMcpDiscovery = discoverCursorPluginMcpServers(cwd, { env: processEnv });
+          const pluginMcpDiscovery = yield* Effect.promise(() =>
+            discoverCursorPluginMcpServers(cwd, {
+              env: processEnv,
+              ...(options?.pluginMcpFetch ? { fetch: options.pluginMcpFetch } : {}),
+            }),
+          );
           const mcpServers = acpMcpServersForProviderSession({
             mcpSession,
             host: pluginMcpDiscovery.servers,

@@ -21,13 +21,38 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 const PLUGIN_ROOT_VARS = ["CURSOR_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] as const;
 const TEMPLATE_PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/g;
+const PLUGIN_AUTH_PROBE_TIMEOUT_MS = 5_000;
+
+export type CursorPluginMcpFetch = typeof globalThis.fetch;
+type HttpCursorPluginMcpServer = Extract<
+  EffectAcpSchema.McpServer,
+  { readonly type: "http" | "sse" }
+>;
+
+interface ConvertedPluginMcpServer {
+  readonly server: EffectAcpSchema.McpServer;
+  readonly usesStoredAccessToken: boolean;
+}
+
+interface ResolvedHttpHeaders {
+  readonly headers: ReadonlyArray<{ name: string; value: string }>;
+  readonly usesStoredAccessToken: boolean;
+}
+
+export interface CursorPluginMcpDiscoveryOptions {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly homedir?: string;
+  readonly fetch?: CursorPluginMcpFetch;
+}
+
+export interface CursorPluginMcpAuthRequirement {
+  readonly identifier: string;
+  readonly displayName: string;
+}
 
 export interface CursorPluginMcpDiscovery {
   readonly servers: ReadonlyArray<EffectAcpSchema.McpServer>;
-  readonly authRequired: ReadonlyArray<{
-    readonly identifier: string;
-    readonly displayName: string;
-  }>;
+  readonly authRequired: ReadonlyArray<CursorPluginMcpAuthRequirement>;
 }
 
 interface InstalledPlugin {
@@ -55,10 +80,10 @@ function homeFromEnv(env: NodeJS.ProcessEnv): string {
   return env.HOME?.trim() || env.USERPROFILE?.trim() || NodeOS.homedir();
 }
 
-export function discoverCursorPluginMcpServers(
+export async function discoverCursorPluginMcpServers(
   cwd: string,
-  options?: { readonly env?: NodeJS.ProcessEnv; readonly homedir?: string },
-): CursorPluginMcpDiscovery {
+  options?: CursorPluginMcpDiscoveryOptions,
+): Promise<CursorPluginMcpDiscovery> {
   const env = options?.env ?? process.env;
   const dataDir = cursorDataDir(env, options?.homedir);
   const projectDir = NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd));
@@ -70,6 +95,7 @@ export function discoverCursorPluginMcpServers(
     installed,
     accessTokens,
     env,
+    options?.fetch,
   );
 }
 
@@ -108,14 +134,16 @@ function readInstalledPlugins(mcpsDir: string): ReadonlyMap<string, InstalledPlu
   return installed;
 }
 
-function readPluginCacheMcpServers(
+async function readPluginCacheMcpServers(
   cacheDir: string,
   installed: ReadonlyMap<string, InstalledPlugin>,
   accessTokens: ReadonlyMap<string, string>,
   env: NodeJS.ProcessEnv,
-): CursorPluginMcpDiscovery {
+  fetchFn: CursorPluginMcpFetch | undefined,
+): Promise<CursorPluginMcpDiscovery> {
   const servers: EffectAcpSchema.McpServer[] = [];
-  const authRequired: Array<{ identifier: string; displayName: string }> = [];
+  const authRequired: CursorPluginMcpAuthRequirement[] = [];
+  const rejectedAuthChecks: Array<Promise<CursorPluginMcpAuthRequirement | undefined>> = [];
   const taken = new Set<string>();
   let marketplaces: NodeFS.Dirent[];
   try {
@@ -153,20 +181,90 @@ function readPluginCacheMcpServers(
         );
         if (!converted) continue;
         taken.add(identifier);
-        servers.push(converted);
-        if (
-          installedPlugin.hasMcpAuthTool &&
-          "type" in converted &&
-          (converted.type === "http" || converted.type === "sse") &&
-          !converted.headers.some((header) => header.name.toLowerCase() === "authorization")
-        ) {
-          authRequired.push({ identifier, displayName: installedPlugin.displayName });
+        servers.push(converted.server);
+        if (installedPlugin.hasMcpAuthTool && isHttpCursorPluginMcpServer(converted.server)) {
+          if (!converted.server.headers.some(hasUsableAuthorization)) {
+            authRequired.push({ identifier, displayName: installedPlugin.displayName });
+          } else if (converted.usesStoredAccessToken && fetchFn !== undefined) {
+            rejectedAuthChecks.push(
+              hasRejectedStoredAccessToken(converted.server, fetchFn).then((rejected) =>
+                rejected ? { identifier, displayName: installedPlugin.displayName } : undefined,
+              ),
+            );
+          }
         }
       }
     }
   }
+  const rejectedAuthRequirements = await Promise.all(rejectedAuthChecks);
+  authRequired.push(
+    ...rejectedAuthRequirements.filter(
+      (requirement): requirement is CursorPluginMcpAuthRequirement => requirement !== undefined,
+    ),
+  );
   authRequired.sort((left, right) => left.identifier.localeCompare(right.identifier));
   return { servers, authRequired };
+}
+
+function isHttpCursorPluginMcpServer(
+  server: EffectAcpSchema.McpServer,
+): server is HttpCursorPluginMcpServer {
+  return "type" in server && (server.type === "http" || server.type === "sse");
+}
+
+async function hasRejectedStoredAccessToken(
+  server: HttpCursorPluginMcpServer,
+  fetchFn: CursorPluginMcpFetch,
+): Promise<boolean> {
+  const headers: Array<[string, string]> = server.headers.map((header): [string, string] => [
+    header.name,
+    header.value,
+  ]);
+  const hasHeader = (name: string) =>
+    headers.some(([headerName]) => headerName.toLowerCase() === name);
+  if (!hasHeader("accept")) {
+    headers.push([
+      "Accept",
+      server.type === "sse" ? "text/event-stream" : "application/json, text/event-stream",
+    ]);
+  }
+  if (server.type === "http" && !hasHeader("content-type")) {
+    headers.push(["Content-Type", "application/json"]);
+  }
+  const request: RequestInit =
+    server.type === "sse"
+      ? { method: "GET" }
+      : {
+          method: "POST",
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "kata-code-auth-probe", version: "0.0.0" },
+            },
+          }),
+        };
+  let response: Response | undefined;
+  try {
+    response = await fetchFn(server.url, {
+      ...request,
+      redirect: "manual",
+      headers,
+      signal: AbortSignal.timeout(PLUGIN_AUTH_PROBE_TIMEOUT_MS),
+    });
+    return response.status === 401 || response.status === 403;
+  } catch {
+    return false;
+  } finally {
+    try {
+      await response?.body?.cancel();
+    } catch {
+      // Closing an optional probe response is best effort.
+    }
+  }
 }
 
 function isFile(filePath: string): boolean {
@@ -209,7 +307,7 @@ function toAcpMcpServer(
   pluginRoot: string,
   accessToken: string | undefined,
   env: NodeJS.ProcessEnv,
-): EffectAcpSchema.McpServer | undefined {
+): ConvertedPluginMcpServer | undefined {
   if (!isRecord(rawConfig)) return undefined;
   const type = stringField(rawConfig, "type")?.toLowerCase();
   const url = resolveTemplate(stringField(rawConfig, "url"), pluginRoot, env);
@@ -221,19 +319,27 @@ function toAcpMcpServer(
       type === "streamable-http" ||
       type === "streamablehttp")
   ) {
+    const resolvedHeaders = httpHeaders(rawConfig.headers, pluginRoot, accessToken, env);
     return {
-      type: "http",
-      name,
-      url,
-      headers: httpHeaders(rawConfig.headers, pluginRoot, accessToken, env),
+      server: {
+        type: "http",
+        name,
+        url,
+        headers: resolvedHeaders.headers,
+      },
+      usesStoredAccessToken: resolvedHeaders.usesStoredAccessToken,
     };
   }
   if (url && type === "sse") {
+    const resolvedHeaders = httpHeaders(rawConfig.headers, pluginRoot, accessToken, env);
     return {
-      type: "sse",
-      name,
-      url,
-      headers: httpHeaders(rawConfig.headers, pluginRoot, accessToken, env),
+      server: {
+        type: "sse",
+        name,
+        url,
+        headers: resolvedHeaders.headers,
+      },
+      usesStoredAccessToken: resolvedHeaders.usesStoredAccessToken,
     };
   }
   if (command) {
@@ -241,12 +347,15 @@ function toAcpMcpServer(
       ? NodePath.resolve(pluginRoot, command)
       : command;
     return {
-      name,
-      command: resolvedCommand,
-      args: stringArray(rawConfig.args)
-        .map((value) => resolveTemplate(value, pluginRoot, env))
-        .filter((value): value is string => value !== undefined),
-      env: objectToEntries(rawConfig.env, pluginRoot, env),
+      server: {
+        name,
+        command: resolvedCommand,
+        args: stringArray(rawConfig.args)
+          .map((value) => resolveTemplate(value, pluginRoot, env))
+          .filter((value): value is string => value !== undefined),
+        env: objectToEntries(rawConfig.env, pluginRoot, env),
+      },
+      usesStoredAccessToken: false,
     };
   }
   return undefined;
@@ -257,15 +366,22 @@ function httpHeaders(
   pluginRoot: string,
   accessToken: string | undefined,
   env: NodeJS.ProcessEnv,
-): ReadonlyArray<{ name: string; value: string }> {
+): ResolvedHttpHeaders {
   const configured = objectToEntries(rawHeaders, pluginRoot, env);
-  if (
-    accessToken === undefined ||
-    configured.some((header) => header.name.toLowerCase() === "authorization")
-  ) {
-    return configured;
+  const usableConfigured = configured.filter(
+    (header) => header.name.toLowerCase() !== "authorization" || hasUsableAuthorization(header),
+  );
+  if (accessToken === undefined || usableConfigured.some(hasUsableAuthorization)) {
+    return { headers: usableConfigured, usesStoredAccessToken: false };
   }
-  return [...configured, { name: "Authorization", value: `Bearer ${accessToken}` }];
+  return {
+    headers: [...usableConfigured, { name: "Authorization", value: `Bearer ${accessToken}` }],
+    usesStoredAccessToken: true,
+  };
+}
+
+function hasUsableAuthorization(header: { name: string; value: string }): boolean {
+  return header.name.toLowerCase() === "authorization" && /^\S+\s+\S/.test(header.value.trim());
 }
 
 function objectToEntries(
