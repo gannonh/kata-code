@@ -10,7 +10,6 @@
  * @module provider/Drivers/CursorSkills
  */
 import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 import * as NodeURL from "node:url";
 
@@ -264,18 +263,18 @@ function installedPluginKeySuffix(key: string): string | undefined {
   return key.slice(pipe + 1);
 }
 
-function fileUriToPath(uri: string): string | undefined {
+function fileUriToPath(uri: string, path: Path.Path): string | undefined {
   if (!uri.startsWith("file:")) return undefined;
   try {
-    return NodePath.normalize(NodeURL.fileURLToPath(uri));
+    return path.normalize(NodeURL.fileURLToPath(uri));
   } catch {
     return undefined;
   }
 }
 
-function pathContains(root: string, cwd: string): boolean {
-  const relative = NodePath.relative(root, cwd);
-  return relative === "" || (!relative.startsWith("..") && !NodePath.isAbsolute(relative));
+function pathContains(root: string, cwd: string, path: Path.Path): boolean {
+  const relative = path.relative(root, cwd);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function unionPluginIds(rows: ReadonlyArray<InstalledPluginIdRow>): ReadonlySet<string> {
@@ -288,22 +287,17 @@ function unionPluginIds(rows: ReadonlyArray<InstalledPluginIdRow>): ReadonlySet<
 
 function selectInstalledPluginIds(
   rows: ReadonlyArray<InstalledPluginIdRow>,
+  path: Path.Path,
   cwd?: string,
 ): ReadonlySet<string> {
-  // A key with no window suffix is the whole installed set. Tests and older
-  // Cursor builds write that shape. Per-window rows must not be unioned: a
-  // stale window still names the previous plugin id.
-  const unsuffixed = rows.filter((row) => installedPluginKeySuffix(row.key) === undefined);
-  if (unsuffixed.length > 0) return unionPluginIds(unsuffixed);
-
-  const normalizedCwd = cwd?.trim() ? NodePath.normalize(cwd) : undefined;
+  const normalizedCwd = cwd?.trim() ? path.normalize(cwd) : undefined;
   if (normalizedCwd !== undefined) {
     const matches = rows.flatMap((row) => {
       const folders = (installedPluginKeySuffix(row.key) ?? "").split(",").flatMap((part) => {
-        const folder = fileUriToPath(part.trim());
+        const folder = fileUriToPath(part.trim(), path);
         return folder ? [folder] : [];
       });
-      const matched = folders.filter((folder) => pathContains(folder, normalizedCwd));
+      const matched = folders.filter((folder) => pathContains(folder, normalizedCwd, path));
       if (matched.length === 0) return [];
       return [
         {
@@ -381,7 +375,11 @@ function sqliteText(value: unknown): string | undefined {
   return undefined;
 }
 
-function readInstalledPluginIdsSync(dbPath: string, cwd?: string): InstalledPluginIds {
+function readInstalledPluginIdsSync(
+  dbPath: string,
+  cwd: string | undefined,
+  path: Path.Path,
+): InstalledPluginIds {
   try {
     const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
     try {
@@ -402,7 +400,7 @@ function readInstalledPluginIdsSync(dbPath: string, cwd?: string): InstalledPlug
         }
         parsed.push({ key, ids });
       }
-      return { _tag: "Ready", ids: selectInstalledPluginIds(parsed, cwd) };
+      return { _tag: "Ready", ids: selectInstalledPluginIds(parsed, path, cwd) };
     } finally {
       database.close();
     }
@@ -570,7 +568,7 @@ const cursorPluginSkillDirectories = Effect.fn("cursorPluginSkillDirectories")(f
 
   const stateDb = yield* cursorGlobalStateDb(userHome, environment);
   const installed = stateDb
-    ? readInstalledPluginIdsSync(stateDb, cwd)
+    ? readInstalledPluginIdsSync(stateDb, cwd, path)
     : ({ _tag: "Missing" } as const);
   if (installed._tag === "Unreadable") return directories;
 

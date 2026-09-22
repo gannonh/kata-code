@@ -584,7 +584,10 @@ describe("Cursor skills", () => {
         database.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
         database
           .prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)")
-          .run("cursor.plugins.installedIds.no-team", encodeJson(["67972749"]));
+          .run(
+            `cursor.plugins.installedIds.no-team|${NodeURL.pathToFileURL(workspace).href}`,
+            encodeJson(["67972749"]),
+          );
         database.close();
 
         const environment = { HOME: userHome };
@@ -727,7 +730,10 @@ describe("Cursor skills", () => {
             database.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
             database
               .prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)")
-              .run("cursor.plugins.installedIds.no-team", encodeJson(ids));
+              .run(
+                `cursor.plugins.installedIds.no-team|${NodeURL.pathToFileURL(workspace).href}`,
+                encodeJson(ids),
+              );
             database.close();
           });
         yield* fileSystem.makeDirectory(enabledRoot, { recursive: true });
@@ -873,6 +879,7 @@ describe("Cursor skills", () => {
           insert.run(workspaceKey, installed("67972749"));
           insert.run(staleWindowKey, installed("61242178"));
           insert.run(multiRootKey, installed("61242178"));
+          insert.run("cursor.plugins.installedIds.no-team", installed("61242178"));
           insert.run("cursor.plugins.installedIds.no-team|no-workspace", installed("61242178"));
           database.close();
         });
