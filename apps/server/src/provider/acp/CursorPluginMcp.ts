@@ -21,6 +21,44 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 const PLUGIN_ROOT_VARS = ["CURSOR_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] as const;
 const TEMPLATE_PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/g;
+const PLUGIN_AUTH_PROBE_TIMEOUT_MS = 5_000;
+
+export type CursorPluginMcpFetch = typeof globalThis.fetch;
+type HttpCursorPluginMcpServer = Extract<
+  EffectAcpSchema.McpServer,
+  { readonly type: "http" | "sse" }
+>;
+
+interface ConvertedPluginMcpServer {
+  readonly server: EffectAcpSchema.McpServer;
+  readonly usesStoredAccessToken: boolean;
+}
+
+interface ResolvedHttpHeaders {
+  readonly headers: ReadonlyArray<{ name: string; value: string }>;
+  readonly usesStoredAccessToken: boolean;
+}
+
+export interface CursorPluginMcpDiscoveryOptions {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly homedir?: string;
+  readonly fetch?: CursorPluginMcpFetch;
+}
+
+export interface CursorPluginMcpAuthRequirement {
+  readonly identifier: string;
+  readonly displayName: string;
+}
+
+export interface CursorPluginMcpDiscovery {
+  readonly servers: ReadonlyArray<EffectAcpSchema.McpServer>;
+  readonly authRequired: ReadonlyArray<CursorPluginMcpAuthRequirement>;
+}
+
+interface InstalledPlugin {
+  readonly displayName: string;
+  readonly hasMcpAuthTool: boolean;
+}
 
 export function cursorWorkspaceSlug(cwd: string): string {
   return cwd
@@ -42,26 +80,44 @@ function homeFromEnv(env: NodeJS.ProcessEnv): string {
   return env.HOME?.trim() || env.USERPROFILE?.trim() || NodeOS.homedir();
 }
 
-export function discoverCursorPluginMcpServers(
+export async function discoverCursorPluginMcpServers(
   cwd: string,
-  options?: { readonly env?: NodeJS.ProcessEnv; readonly homedir?: string },
-): ReadonlyArray<EffectAcpSchema.McpServer> {
+  options?: CursorPluginMcpDiscoveryOptions,
+): Promise<CursorPluginMcpDiscovery> {
   const env = options?.env ?? process.env;
   const dataDir = cursorDataDir(env, options?.homedir);
-  const installed = readInstalledPluginIdentifiers(
-    NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd), "mcps"),
+  const projectDir = NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd));
+  const installed = readInstalledPlugins(NodePath.join(projectDir, "mcps"));
+  if (installed.size === 0) return { servers: [], authRequired: [] };
+  const accessTokens = readPluginAccessTokens(NodePath.join(projectDir, "mcp-auth.json"));
+  return readPluginCacheMcpServers(
+    NodePath.join(dataDir, "plugins", "cache"),
+    installed,
+    accessTokens,
+    env,
+    options?.fetch,
   );
-  if (installed.size === 0) return [];
-  return readPluginCacheMcpServers(NodePath.join(dataDir, "plugins", "cache"), installed, env);
 }
 
-function readInstalledPluginIdentifiers(mcpsDir: string): Set<string> {
-  const identifiers = new Set<string>();
+function readPluginAccessTokens(filePath: string): ReadonlyMap<string, string> {
+  const tokens = new Map<string, string>();
+  const records = readJsonObject(filePath);
+  if (!records) return tokens;
+  for (const [identifier, rawRecord] of Object.entries(records)) {
+    if (!isRecord(rawRecord) || !isRecord(rawRecord.tokens)) continue;
+    const accessToken = stringField(rawRecord.tokens, "access_token");
+    if (accessToken) tokens.set(identifier, accessToken);
+  }
+  return tokens;
+}
+
+function readInstalledPlugins(mcpsDir: string): ReadonlyMap<string, InstalledPlugin> {
+  const installed = new Map<string, InstalledPlugin>();
   let entries: NodeFS.Dirent[];
   try {
     entries = NodeFS.readdirSync(mcpsDir, { withFileTypes: true });
   } catch {
-    return identifiers;
+    return installed;
   }
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -69,23 +125,31 @@ function readInstalledPluginIdentifiers(mcpsDir: string): Set<string> {
     const metadata = readJsonObject(metadataPath);
     const identifier =
       stringField(metadata, "serverIdentifier") ?? stringField(metadata, "serverName");
-    if (identifier) identifiers.add(identifier);
+    if (!identifier) continue;
+    installed.set(identifier, {
+      displayName: stringField(metadata, "serverName") ?? identifier,
+      hasMcpAuthTool: isFile(NodePath.join(mcpsDir, entry.name, "tools", "mcp_auth.json")),
+    });
   }
-  return identifiers;
+  return installed;
 }
 
-function readPluginCacheMcpServers(
+async function readPluginCacheMcpServers(
   cacheDir: string,
-  installed: ReadonlySet<string>,
+  installed: ReadonlyMap<string, InstalledPlugin>,
+  accessTokens: ReadonlyMap<string, string>,
   env: NodeJS.ProcessEnv,
-): ReadonlyArray<EffectAcpSchema.McpServer> {
+  fetchFn: CursorPluginMcpFetch | undefined,
+): Promise<CursorPluginMcpDiscovery> {
   const servers: EffectAcpSchema.McpServer[] = [];
+  const authRequired: CursorPluginMcpAuthRequirement[] = [];
+  const rejectedAuthChecks: Array<Promise<CursorPluginMcpAuthRequirement | undefined>> = [];
   const taken = new Set<string>();
   let marketplaces: NodeFS.Dirent[];
   try {
     marketplaces = NodeFS.readdirSync(cacheDir, { withFileTypes: true });
   } catch {
-    return servers;
+    return { servers, authRequired };
   }
   for (const marketplace of marketplaces) {
     if (!marketplace.isDirectory()) continue;
@@ -106,15 +170,109 @@ function readPluginCacheMcpServers(
       if (!isRecord(mcpServers)) continue;
       for (const [serverKey, rawConfig] of Object.entries(mcpServers)) {
         const identifier = `plugin-${plugin.name}-${serverKey}`;
-        if (!installed.has(identifier) || taken.has(identifier)) continue;
-        const converted = toAcpMcpServer(identifier, rawConfig, pluginRoot, env);
+        const installedPlugin = installed.get(identifier);
+        if (!installedPlugin || taken.has(identifier)) continue;
+        const converted = toAcpMcpServer(
+          identifier,
+          rawConfig,
+          pluginRoot,
+          accessTokens.get(identifier),
+          env,
+        );
         if (!converted) continue;
         taken.add(identifier);
-        servers.push(converted);
+        servers.push(converted.server);
+        if (installedPlugin.hasMcpAuthTool && isHttpCursorPluginMcpServer(converted.server)) {
+          if (!converted.server.headers.some(hasUsableAuthorization)) {
+            authRequired.push({ identifier, displayName: installedPlugin.displayName });
+          } else if (converted.usesStoredAccessToken && fetchFn !== undefined) {
+            rejectedAuthChecks.push(
+              hasRejectedStoredAccessToken(converted.server, fetchFn).then((rejected) =>
+                rejected ? { identifier, displayName: installedPlugin.displayName } : undefined,
+              ),
+            );
+          }
+        }
       }
     }
   }
-  return servers;
+  const rejectedAuthRequirements = await Promise.all(rejectedAuthChecks);
+  authRequired.push(
+    ...rejectedAuthRequirements.filter(
+      (requirement): requirement is CursorPluginMcpAuthRequirement => requirement !== undefined,
+    ),
+  );
+  authRequired.sort((left, right) => left.identifier.localeCompare(right.identifier));
+  return { servers, authRequired };
+}
+
+function isHttpCursorPluginMcpServer(
+  server: EffectAcpSchema.McpServer,
+): server is HttpCursorPluginMcpServer {
+  return "type" in server && (server.type === "http" || server.type === "sse");
+}
+
+async function hasRejectedStoredAccessToken(
+  server: HttpCursorPluginMcpServer,
+  fetchFn: CursorPluginMcpFetch,
+): Promise<boolean> {
+  const headers: Array<[string, string]> = server.headers.map((header): [string, string] => [
+    header.name,
+    header.value,
+  ]);
+  const hasHeader = (name: string) =>
+    headers.some(([headerName]) => headerName.toLowerCase() === name);
+  if (!hasHeader("accept")) {
+    headers.push([
+      "Accept",
+      server.type === "sse" ? "text/event-stream" : "application/json, text/event-stream",
+    ]);
+  }
+  if (server.type === "http" && !hasHeader("content-type")) {
+    headers.push(["Content-Type", "application/json"]);
+  }
+  const request: RequestInit =
+    server.type === "sse"
+      ? { method: "GET" }
+      : {
+          method: "POST",
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "initialize",
+            params: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "kata-code-auth-probe", version: "0.0.0" },
+            },
+          }),
+        };
+  let response: Response | undefined;
+  try {
+    response = await fetchFn(server.url, {
+      ...request,
+      redirect: "manual",
+      headers,
+      signal: AbortSignal.timeout(PLUGIN_AUTH_PROBE_TIMEOUT_MS),
+    });
+    return response.status === 401 || response.status === 403;
+  } catch {
+    return false;
+  } finally {
+    try {
+      await response?.body?.cancel();
+    } catch {
+      // Closing an optional probe response is best effort.
+    }
+  }
+}
+
+function isFile(filePath: string): boolean {
+  try {
+    return NodeFS.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function newestPluginMcpJson(pluginDir: string): string | undefined {
@@ -147,8 +305,9 @@ function toAcpMcpServer(
   name: string,
   rawConfig: unknown,
   pluginRoot: string,
+  accessToken: string | undefined,
   env: NodeJS.ProcessEnv,
-): EffectAcpSchema.McpServer | undefined {
+): ConvertedPluginMcpServer | undefined {
   if (!isRecord(rawConfig)) return undefined;
   const type = stringField(rawConfig, "type")?.toLowerCase();
   const url = resolveTemplate(stringField(rawConfig, "url"), pluginRoot, env);
@@ -160,19 +319,27 @@ function toAcpMcpServer(
       type === "streamable-http" ||
       type === "streamablehttp")
   ) {
+    const resolvedHeaders = httpHeaders(rawConfig.headers, pluginRoot, accessToken, env);
     return {
-      type: "http",
-      name,
-      url,
-      headers: objectToEntries(rawConfig.headers, pluginRoot, env),
+      server: {
+        type: "http",
+        name,
+        url,
+        headers: resolvedHeaders.headers,
+      },
+      usesStoredAccessToken: resolvedHeaders.usesStoredAccessToken,
     };
   }
   if (url && type === "sse") {
+    const resolvedHeaders = httpHeaders(rawConfig.headers, pluginRoot, accessToken, env);
     return {
-      type: "sse",
-      name,
-      url,
-      headers: objectToEntries(rawConfig.headers, pluginRoot, env),
+      server: {
+        type: "sse",
+        name,
+        url,
+        headers: resolvedHeaders.headers,
+      },
+      usesStoredAccessToken: resolvedHeaders.usesStoredAccessToken,
     };
   }
   if (command) {
@@ -180,15 +347,41 @@ function toAcpMcpServer(
       ? NodePath.resolve(pluginRoot, command)
       : command;
     return {
-      name,
-      command: resolvedCommand,
-      args: stringArray(rawConfig.args)
-        .map((value) => resolveTemplate(value, pluginRoot, env))
-        .filter((value): value is string => value !== undefined),
-      env: objectToEntries(rawConfig.env, pluginRoot, env),
+      server: {
+        name,
+        command: resolvedCommand,
+        args: stringArray(rawConfig.args)
+          .map((value) => resolveTemplate(value, pluginRoot, env))
+          .filter((value): value is string => value !== undefined),
+        env: objectToEntries(rawConfig.env, pluginRoot, env),
+      },
+      usesStoredAccessToken: false,
     };
   }
   return undefined;
+}
+
+function httpHeaders(
+  rawHeaders: unknown,
+  pluginRoot: string,
+  accessToken: string | undefined,
+  env: NodeJS.ProcessEnv,
+): ResolvedHttpHeaders {
+  const configured = objectToEntries(rawHeaders, pluginRoot, env);
+  const usableConfigured = configured.filter(
+    (header) => header.name.toLowerCase() !== "authorization" || hasUsableAuthorization(header),
+  );
+  if (accessToken === undefined || usableConfigured.some(hasUsableAuthorization)) {
+    return { headers: usableConfigured, usesStoredAccessToken: false };
+  }
+  return {
+    headers: [...usableConfigured, { name: "Authorization", value: `Bearer ${accessToken}` }],
+    usesStoredAccessToken: true,
+  };
+}
+
+function hasUsableAuthorization(header: { name: string; value: string }): boolean {
+  return header.name.toLowerCase() === "authorization" && /^\S+\s+\S/.test(header.value.trim());
 }
 
 function objectToEntries(

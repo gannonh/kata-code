@@ -199,6 +199,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         yield* makeCursorCommandCatalog(managedSnapshot);
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
+        pluginMcpFetch: globalThis.fetch,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
         onAvailableCommands: (commands, cwd) =>

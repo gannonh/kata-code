@@ -153,6 +153,7 @@ function mcpServersFromRequests(
 function assertSessionMcpKeepsT3CodeAndHostPlugins(
   requests: ReadonlyArray<Record<string, unknown>>,
   method: "session/new" | "session/load",
+  expectedLinearHeaders: ReadonlyArray<{ readonly name: string; readonly value: string }>,
 ): void {
   const servers = mcpServersFromRequests(requests, method);
   const names = servers
@@ -175,6 +176,13 @@ function assertSessionMcpKeepsT3CodeAndHostPlugins(
   const t3Code = servers.find((server) => server.name === "t3-code");
   assert.equal(t3Code?.type, "http");
   assert.equal(t3Code?.url, "http://127.0.0.1:43123/mcp");
+  const linear = servers.find((server) => server.name === "plugin-linear-linear");
+  assert.deepEqual(linear, {
+    type: "http",
+    name: "plugin-linear-linear",
+    url: "https://mcp.linear.app/mcp",
+    headers: expectedLinearHeaders,
+  });
 }
 
 // Tests mutate `ServerSettingsService` mid-flight (e.g. setting
@@ -1820,19 +1828,30 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
     );
     const cwd = NodePath.join(dataDir, "workspace");
     NodeFS.mkdirSync(cwd, { recursive: true });
-    const projectMcps = NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd), "mcps");
+    const projectDir = NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd));
+    const projectMcps = NodePath.join(projectDir, "mcps");
     writeFile(
       NodePath.join(projectMcps, "plugin-linear-linear", "SERVER_METADATA.json"),
       JSON.stringify({
         serverIdentifier: "plugin-linear-linear",
-        serverName: "linear",
+        serverName: "Linear",
       }),
+    );
+    writeFile(
+      NodePath.join(projectMcps, "plugin-linear-linear", "tools", "mcp_auth.json"),
+      JSON.stringify({ name: "mcp_auth" }),
     );
     writeFile(
       NodePath.join(projectMcps, "plugin-github-github", "SERVER_METADATA.json"),
       JSON.stringify({
         serverIdentifier: "plugin-github-github",
         serverName: "github",
+      }),
+    );
+    writeFile(
+      NodePath.join(projectDir, "mcp-auth.json"),
+      JSON.stringify({
+        "plugin-linear-linear": { tokens: { access_token: "fake-linear-token" } },
       }),
     );
     writeFile(
@@ -1899,6 +1918,12 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         providers: { cursor: { binaryPath: wrapperPath } },
       });
 
+      const createEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === createThreadId),
+        Stream.takeUntil((event) => event.type === "session.exited"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
       McpProviderSession.setMcpProviderSession({
         ...mcpSession,
         threadId: createThreadId,
@@ -1910,7 +1935,19 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         runtimeMode: "full-access",
       });
       yield* adapter.stopSession(createThreadId);
+      const createEvents = Array.from(yield* Fiber.join(createEventsFiber));
+      assert.deepEqual(
+        createEvents.map((event) => event.type),
+        ["session.started", "session.state.changed", "thread.started", "session.exited"],
+      );
 
+      writeFile(NodePath.join(projectDir, "mcp-auth.json"), "{");
+      const loadEventsFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.threadId === loadThreadId),
+        Stream.takeUntil((event) => event.type === "session.exited"),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
       McpProviderSession.setMcpProviderSession({
         ...mcpSession,
         threadId: loadThreadId,
@@ -1923,13 +1960,37 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         resumeCursor: { schemaVersion: 1, sessionId: "mock-session-1" },
       });
       yield* adapter.stopSession(loadThreadId);
+      const loadEvents = Array.from(yield* Fiber.join(loadEventsFiber));
+      assert.deepEqual(
+        loadEvents.map((event) => event.type),
+        [
+          "session.started",
+          "session.state.changed",
+          "thread.started",
+          "runtime.warning",
+          "session.exited",
+        ],
+      );
+      const warnings = loadEvents.filter((event) => event.type === "runtime.warning");
+      assert.lengthOf(warnings, 1);
+      const warning = warnings[0];
+      assert.equal(warning?.type, "runtime.warning");
+      if (warning?.type === "runtime.warning") {
+        assert.equal(
+          warning.payload.message,
+          "Cursor plugin authentication is required for Linear. Authenticate with mcp_auth in Cursor desktop for this workspace, then start a new Kata agent session.",
+        );
+        assert.deepEqual(warning.payload.detail, ["plugin-linear-linear"]);
+      }
 
       const requests = yield* waitForJsonLogMatch(
         requestLogPath,
         (entry) => entry.method === "session/load",
       );
-      assertSessionMcpKeepsT3CodeAndHostPlugins(requests, "session/new");
-      assertSessionMcpKeepsT3CodeAndHostPlugins(requests, "session/load");
+      assertSessionMcpKeepsT3CodeAndHostPlugins(requests, "session/new", [
+        { name: "Authorization", value: "Bearer fake-linear-token" },
+      ]);
+      assertSessionMcpKeepsT3CodeAndHostPlugins(requests, "session/load", []);
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {
