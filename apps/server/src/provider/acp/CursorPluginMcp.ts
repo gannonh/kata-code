@@ -48,11 +48,28 @@ export function discoverCursorPluginMcpServers(
 ): ReadonlyArray<EffectAcpSchema.McpServer> {
   const env = options?.env ?? process.env;
   const dataDir = cursorDataDir(env, options?.homedir);
-  const installed = readInstalledPluginIdentifiers(
-    NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd), "mcps"),
-  );
+  const projectDir = NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd));
+  const installed = readInstalledPluginIdentifiers(NodePath.join(projectDir, "mcps"));
   if (installed.size === 0) return [];
-  return readPluginCacheMcpServers(NodePath.join(dataDir, "plugins", "cache"), installed, env);
+  const accessTokens = readPluginAccessTokens(NodePath.join(projectDir, "mcp-auth.json"));
+  return readPluginCacheMcpServers(
+    NodePath.join(dataDir, "plugins", "cache"),
+    installed,
+    accessTokens,
+    env,
+  );
+}
+
+function readPluginAccessTokens(filePath: string): ReadonlyMap<string, string> {
+  const tokens = new Map<string, string>();
+  const records = readJsonObject(filePath);
+  if (!records) return tokens;
+  for (const [identifier, rawRecord] of Object.entries(records)) {
+    if (!isRecord(rawRecord) || !isRecord(rawRecord.tokens)) continue;
+    const accessToken = stringField(rawRecord.tokens, "access_token");
+    if (accessToken) tokens.set(identifier, accessToken);
+  }
+  return tokens;
 }
 
 function readInstalledPluginIdentifiers(mcpsDir: string): Set<string> {
@@ -77,6 +94,7 @@ function readInstalledPluginIdentifiers(mcpsDir: string): Set<string> {
 function readPluginCacheMcpServers(
   cacheDir: string,
   installed: ReadonlySet<string>,
+  accessTokens: ReadonlyMap<string, string>,
   env: NodeJS.ProcessEnv,
 ): ReadonlyArray<EffectAcpSchema.McpServer> {
   const servers: EffectAcpSchema.McpServer[] = [];
@@ -107,7 +125,13 @@ function readPluginCacheMcpServers(
       for (const [serverKey, rawConfig] of Object.entries(mcpServers)) {
         const identifier = `plugin-${plugin.name}-${serverKey}`;
         if (!installed.has(identifier) || taken.has(identifier)) continue;
-        const converted = toAcpMcpServer(identifier, rawConfig, pluginRoot, env);
+        const converted = toAcpMcpServer(
+          identifier,
+          rawConfig,
+          pluginRoot,
+          accessTokens.get(identifier),
+          env,
+        );
         if (!converted) continue;
         taken.add(identifier);
         servers.push(converted);
@@ -147,6 +171,7 @@ function toAcpMcpServer(
   name: string,
   rawConfig: unknown,
   pluginRoot: string,
+  accessToken: string | undefined,
   env: NodeJS.ProcessEnv,
 ): EffectAcpSchema.McpServer | undefined {
   if (!isRecord(rawConfig)) return undefined;
@@ -164,7 +189,7 @@ function toAcpMcpServer(
       type: "http",
       name,
       url,
-      headers: objectToEntries(rawConfig.headers, pluginRoot, env),
+      headers: httpHeaders(rawConfig.headers, pluginRoot, accessToken, env),
     };
   }
   if (url && type === "sse") {
@@ -172,7 +197,7 @@ function toAcpMcpServer(
       type: "sse",
       name,
       url,
-      headers: objectToEntries(rawConfig.headers, pluginRoot, env),
+      headers: httpHeaders(rawConfig.headers, pluginRoot, accessToken, env),
     };
   }
   if (command) {
@@ -189,6 +214,23 @@ function toAcpMcpServer(
     };
   }
   return undefined;
+}
+
+function httpHeaders(
+  rawHeaders: unknown,
+  pluginRoot: string,
+  accessToken: string | undefined,
+  env: NodeJS.ProcessEnv,
+): ReadonlyArray<{ name: string; value: string }> {
+  const configured = objectToEntries(rawHeaders, pluginRoot, env);
+  if (accessToken === undefined || hasAuthorizationHeader(rawHeaders)) return configured;
+  return [...configured, { name: "Authorization", value: `Bearer ${accessToken}` }];
+}
+
+function hasAuthorizationHeader(value: unknown): boolean {
+  return (
+    isRecord(value) && Object.keys(value).some((name) => name.toLowerCase() === "authorization")
+  );
 }
 
 function objectToEntries(
