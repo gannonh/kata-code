@@ -39,6 +39,10 @@ describe("discoverCursorPluginMcpServers", () => {
       JSON.stringify({ name: "get_issue", description: "not launch config" }),
     );
     writeFile(
+      NodePath.join(projectMcps, "plugin-linear-linear", "tools", "mcp_auth.json"),
+      JSON.stringify({ name: "mcp_auth" }),
+    );
+    writeFile(
       NodePath.join(projectMcps, "plugin-github-github", "SERVER_METADATA.json"),
       JSON.stringify({ serverIdentifier: "plugin-github-github", serverName: "github" }),
     );
@@ -49,6 +53,10 @@ describe("discoverCursorPluginMcpServers", () => {
     writeFile(
       NodePath.join(projectMcps, "plugin-stdio-stdio", "SERVER_METADATA.json"),
       JSON.stringify({ serverIdentifier: "plugin-stdio-stdio", serverName: "stdio" }),
+    );
+    writeFile(
+      NodePath.join(projectMcps, "plugin-stdio-stdio", "tools", "mcp_auth.json"),
+      JSON.stringify({ name: "mcp_auth" }),
     );
     writeFile(
       NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd), "mcp-auth.json"),
@@ -103,13 +111,14 @@ describe("discoverCursorPluginMcpServers", () => {
     );
 
     const pluginRoot = NodePath.join(dataDir, "plugins/cache/cursor-public/stdio/ccc333");
-    const servers = discoverCursorPluginMcpServers(cwd, {
+    const discovery = discoverCursorPluginMcpServers(cwd, {
       env: {
         CURSOR_DATA_DIR: dataDir,
         GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_test",
         SECRET_TOKEN: "s3cret",
       },
     });
+    const { servers } = discovery;
     expect(servers.map((server) => server.name).sort()).toEqual([
       "plugin-github-github",
       "plugin-linear-linear",
@@ -145,6 +154,7 @@ describe("discoverCursorPluginMcpServers", () => {
       expect(stdio.command.includes("${")).toBe(false);
     }
     expect(servers.some((server) => server.name === "cursor-ide-browser")).toBe(false);
+    expect(discovery.authRequired).toEqual([]);
   });
 
   it("adds stored OAuth to SSE and preserves configured Authorization case-insensitively", () => {
@@ -158,6 +168,14 @@ describe("discoverCursorPluginMcpServers", () => {
     writeFile(
       NodePath.join(projectDir, "mcps", "plugin-linear-configured", "SERVER_METADATA.json"),
       JSON.stringify({ serverIdentifier: "plugin-linear-configured" }),
+    );
+    writeFile(
+      NodePath.join(projectDir, "mcps", "plugin-linear-events", "tools", "mcp_auth.json"),
+      JSON.stringify({ name: "mcp_auth" }),
+    );
+    writeFile(
+      NodePath.join(projectDir, "mcps", "plugin-linear-configured", "tools", "mcp_auth.json"),
+      JSON.stringify({ name: "mcp_auth" }),
     );
     writeFile(
       NodePath.join(projectDir, "mcp-auth.json"),
@@ -180,23 +198,31 @@ describe("discoverCursorPluginMcpServers", () => {
       }),
     );
 
-    expect(discoverCursorPluginMcpServers(cwd, { env: { CURSOR_DATA_DIR: dataDir } })).toEqual([
-      {
-        type: "sse",
-        name: "plugin-linear-events",
-        url: "https://mcp.linear.app/events",
-        headers: [{ name: "Authorization", value: "Bearer fake-events-token" }],
-      },
-      {
-        type: "http",
-        name: "plugin-linear-configured",
-        url: "https://mcp.linear.app/configured",
-        headers: [],
-      },
-    ]);
+    expect(discoverCursorPluginMcpServers(cwd, { env: { CURSOR_DATA_DIR: dataDir } })).toEqual({
+      servers: [
+        {
+          type: "sse",
+          name: "plugin-linear-events",
+          url: "https://mcp.linear.app/events",
+          headers: [{ name: "Authorization", value: "Bearer fake-events-token" }],
+        },
+        {
+          type: "http",
+          name: "plugin-linear-configured",
+          url: "https://mcp.linear.app/configured",
+          headers: [],
+        },
+      ],
+      authRequired: [
+        {
+          identifier: "plugin-linear-configured",
+          displayName: "plugin-linear-configured",
+        },
+      ],
+    });
   });
 
-  it("ignores malformed stored OAuth records", () => {
+  it("marks OAuth-capable HTTP plugins auth-required for missing or malformed tokens", () => {
     const dataDir = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "cursor-plugin-mcp-invalid-auth-"),
     );
@@ -204,7 +230,11 @@ describe("discoverCursorPluginMcpServers", () => {
     const projectDir = NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd));
     writeFile(
       NodePath.join(projectDir, "mcps", "plugin-linear-linear", "SERVER_METADATA.json"),
-      JSON.stringify({ serverIdentifier: "plugin-linear-linear" }),
+      JSON.stringify({ serverIdentifier: "plugin-linear-linear", serverName: "Linear" }),
+    );
+    writeFile(
+      NodePath.join(projectDir, "mcps", "plugin-linear-linear", "tools", "mcp_auth.json"),
+      JSON.stringify({ name: "mcp_auth" }),
     );
     writeFile(
       NodePath.join(dataDir, "plugins/cache/cursor-public/linear/aaa111/mcp.json"),
@@ -213,6 +243,17 @@ describe("discoverCursorPluginMcpServers", () => {
       }),
     );
     const authPath = NodePath.join(projectDir, "mcp-auth.json");
+    const expected = {
+      servers: [
+        {
+          type: "http",
+          name: "plugin-linear-linear",
+          url: "https://mcp.linear.app/mcp",
+          headers: [],
+        },
+      ],
+      authRequired: [{ identifier: "plugin-linear-linear", displayName: "Linear" }],
+    };
     const malformedAuthFiles = [
       "{",
       JSON.stringify({ "plugin-linear-linear": "invalid" }),
@@ -222,16 +263,14 @@ describe("discoverCursorPluginMcpServers", () => {
       JSON.stringify({ "plugin-linear-linear": { tokens: { access_token: 42 } } }),
     ];
 
+    expect(discoverCursorPluginMcpServers(cwd, { env: { CURSOR_DATA_DIR: dataDir } })).toEqual(
+      expected,
+    );
     for (const contents of malformedAuthFiles) {
       writeFile(authPath, contents);
-      expect(discoverCursorPluginMcpServers(cwd, { env: { CURSOR_DATA_DIR: dataDir } })).toEqual([
-        {
-          type: "http",
-          name: "plugin-linear-linear",
-          url: "https://mcp.linear.app/mcp",
-          headers: [],
-        },
-      ]);
+      expect(discoverCursorPluginMcpServers(cwd, { env: { CURSOR_DATA_DIR: dataDir } })).toEqual(
+        expected,
+      );
     }
   });
 
@@ -275,9 +314,10 @@ describe("discoverCursorPluginMcpServers", () => {
       }),
     );
 
-    const servers = discoverCursorPluginMcpServers(cwd, {
+    const discovery = discoverCursorPluginMcpServers(cwd, {
       env: { CURSOR_DATA_DIR: dataDir, APP_MODE: "live" },
     });
+    const { servers } = discovery;
     expect(servers).toContainEqual({
       type: "http",
       name: "plugin-github-github",
@@ -290,6 +330,7 @@ describe("discoverCursorPluginMcpServers", () => {
       args: [],
       env: [{ name: "FALLBACK", value: "local" }],
     });
+    expect(discovery.authRequired).toEqual([]);
   });
 
   it("uses the provider environment's home when CURSOR_DATA_DIR is unset", () => {
@@ -316,25 +357,26 @@ describe("discoverCursorPluginMcpServers", () => {
       }),
     );
 
-    expect(discoverCursorPluginMcpServers(cwd, { env: { HOME: home } })).toContainEqual({
-      type: "http",
-      name: "plugin-linear-linear",
-      url: "https://mcp.linear.app/mcp",
-      headers: [],
-    });
-    expect(discoverCursorPluginMcpServers(cwd, { env: { USERPROFILE: home } })).toContainEqual({
-      type: "http",
-      name: "plugin-linear-linear",
-      url: "https://mcp.linear.app/mcp",
-      headers: [],
-    });
+    const expected = {
+      servers: [
+        {
+          type: "http",
+          name: "plugin-linear-linear",
+          url: "https://mcp.linear.app/mcp",
+          headers: [],
+        },
+      ],
+      authRequired: [],
+    };
+    expect(discoverCursorPluginMcpServers(cwd, { env: { HOME: home } })).toEqual(expected);
+    expect(discoverCursorPluginMcpServers(cwd, { env: { USERPROFILE: home } })).toEqual(expected);
   });
 
   it("returns no servers when the project has no installed plugin metadata", () => {
     const dataDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cursor-plugin-mcp-empty-"));
     expect(
       discoverCursorPluginMcpServers("/tmp/empty-workspace", { env: { CURSOR_DATA_DIR: dataDir } }),
-    ).toEqual([]);
+    ).toEqual({ servers: [], authRequired: [] });
   });
 
   it("prefers CURSOR_DATA_DIR, then the home from the environment", () => {
