@@ -82,6 +82,7 @@ import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import {
+  cursorSkillInvocation,
   discoverCursorSkills,
   hasCursorSkillMention,
   rewriteCursorSkillMentions,
@@ -1022,6 +1023,7 @@ export function makeCursorAdapter(
 
           const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
           const rawPrompt = input.input?.trim() ?? "";
+          let bareSkillInvocation = false;
           if (rawPrompt) {
             let cursorSkillNames = ctx.cursorSkillNames;
             if (hasCursorSkillMention(rawPrompt) && cursorSkillNames === undefined) {
@@ -1039,10 +1041,16 @@ export function makeCursorAdapter(
               );
               ctx.cursorSkillNames = cursorSkillNames;
             }
-            const prompt = cursorSkillNames
-              ? rewriteCursorSkillMentions(rawPrompt, cursorSkillNames)
-              : rawPrompt;
+            const bareInvocation = cursorSkillNames
+              ? cursorSkillInvocation(rawPrompt, cursorSkillNames)
+              : undefined;
+            const prompt =
+              bareInvocation ??
+              (cursorSkillNames
+                ? rewriteCursorSkillMentions(rawPrompt, cursorSkillNames)
+                : rawPrompt);
             promptParts.push({ type: "text", text: prompt });
+            bareSkillInvocation = bareInvocation !== undefined;
           }
           if (input.attachments && input.attachments.length > 0) {
             for (const attachment of input.attachments) {
@@ -1094,15 +1102,19 @@ export function makeCursorAdapter(
           const result = yield* ctx.acp
             .prompt(
               {
-                prompt: /^\/[^\s/]+(?:\s|$)/.test(rawPrompt)
-                  ? promptParts
-                  : [
-                      ...promptParts,
-                      {
-                        type: "text",
-                        text: buildRuntimeInstructions({ harness: "Cursor", model: resolvedModel }),
-                      },
-                    ],
+                prompt:
+                  bareSkillInvocation || /^\/[^\s/]+(?:\s|$)/.test(rawPrompt)
+                    ? promptParts
+                    : [
+                        ...promptParts,
+                        {
+                          type: "text",
+                          text: buildRuntimeInstructions({
+                            harness: "Cursor",
+                            model: resolvedModel,
+                          }),
+                        },
+                      ],
               },
               { dispatched: promptDispatched },
             )

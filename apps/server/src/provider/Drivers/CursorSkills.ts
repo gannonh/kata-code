@@ -4,20 +4,25 @@
  * Cursor discovers Agent Skills recursively from user and project roots but
  * its ACP command catalog only appears after opening a real session. Scanning
  * the same roots avoids starting an agent and its MCP servers just to populate
- * a composer menu.
+ * a composer menu. Installed plugin skills live under the plugin cache, so
+ * those roots are added from the enabled install rather than a full plugin walk.
  *
  * @module provider/Drivers/CursorSkills
  */
 import * as NodeOS from "node:os";
+import * as NodeSqlite from "node:sqlite";
 
 import type { ServerProviderSkill } from "@kata-sh/code-contracts";
 import * as ByteSize from "effect/ByteSize";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { parse as parseYamlDocument } from "yaml";
+
+import { cursorDataDir } from "../acp/CursorPluginMcp.ts";
 
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const SKILL_MENTION_PATTERN =
@@ -216,6 +221,339 @@ const discoverSkillsInRoot = Effect.fn("discoverCursorSkillsInRoot")(function* (
   return skills;
 });
 
+interface CloudPluginRecord {
+  readonly pluginId: string;
+  readonly name: string;
+  readonly marketplaceSlug: string;
+  readonly resolvedCommitSha: string;
+}
+
+type InstalledPluginIds =
+  | { readonly _tag: "Missing" }
+  | { readonly _tag: "Unreadable" }
+  | { readonly _tag: "Ready"; readonly ids: ReadonlySet<string> };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function pluginIdString(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function staysInside(parent: string, child: string, separator: string): boolean {
+  return child === parent || child.startsWith(`${parent}${separator}`);
+}
+
+const decodeUnknownJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+
+const readJsonObject = Effect.fn("readCursorPluginJson")(function* (
+  filePath: string,
+  budget: CursorSkillScanBudget,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const contents = yield* orUndefined(fileSystem.readFileString(filePath), budget);
+  if (contents === undefined) return undefined;
+  const parsed = decodeUnknownJson(contents);
+  if (Option.isNone(parsed) || !isRecord(parsed.value)) return undefined;
+  return parsed.value;
+});
+
+const cursorGlobalStateDb = Effect.fn("cursorGlobalStateDb")(function* (
+  userHome: string,
+  environment: NodeJS.ProcessEnv,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const appData = environment.APPDATA?.trim() || path.join(userHome, "AppData", "Roaming");
+  const linuxConfigHome = environment.XDG_CONFIG_HOME?.trim() || path.join(userHome, ".config");
+  const candidates = [
+    environment.CURSOR_GLOBAL_STATE_DB?.trim(),
+    path.join(linuxConfigHome, "Cursor", "User", "globalStorage", "state.vscdb"),
+    path.join(
+      userHome,
+      "Library",
+      "Application Support",
+      "Cursor",
+      "User",
+      "globalStorage",
+      "state.vscdb",
+    ),
+    path.join(appData, "Cursor", "User", "globalStorage", "state.vscdb"),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  for (const candidate of candidates) {
+    const info = yield* orUndefined(fileSystem.stat(candidate));
+    if (info?.type === "File") return candidate;
+  }
+  return undefined;
+});
+
+function readInstalledPluginIdsSync(dbPath: string): InstalledPluginIds {
+  try {
+    const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const rows = database
+        .prepare("SELECT value FROM ItemTable WHERE key GLOB 'cursor.plugins.installedIds*'")
+        .all() as ReadonlyArray<{ value?: unknown }>;
+      const ids = new Set<string>();
+      for (const row of rows) {
+        const text =
+          typeof row.value === "string"
+            ? row.value
+            : row.value instanceof Uint8Array
+              ? Buffer.from(row.value).toString("utf8")
+              : undefined;
+        if (!text) continue;
+        const parsed = decodeUnknownJson(text);
+        if (Option.isNone(parsed) || !Array.isArray(parsed.value)) continue;
+        for (const id of parsed.value) {
+          const normalized = pluginIdString(id);
+          if (normalized) ids.add(normalized);
+        }
+      }
+      return { _tag: "Ready", ids };
+    } finally {
+      database.close();
+    }
+  } catch {
+    return { _tag: "Unreadable" };
+  }
+}
+
+const readCloudPlugins = Effect.fn("readCloudPlugins")(function* (
+  manifestPath: string,
+  budget: CursorSkillScanBudget,
+) {
+  const manifest = yield* readJsonObject(manifestPath, budget);
+  const plugins = manifest?.plugins;
+  if (!Array.isArray(plugins)) return [];
+  const records: CloudPluginRecord[] = [];
+  for (const plugin of plugins) {
+    if (!isRecord(plugin)) continue;
+    const pluginId = pluginIdString(plugin.pluginId);
+    const name = typeof plugin.name === "string" ? plugin.name.trim() : "";
+    const marketplaceSlug =
+      typeof plugin.marketplaceSlug === "string" ? plugin.marketplaceSlug.trim() : "";
+    const resolvedCommitSha =
+      typeof plugin.resolvedCommitSha === "string" ? plugin.resolvedCommitSha.trim() : "";
+    if (!pluginId || !name || !marketplaceSlug || !resolvedCommitSha) continue;
+    records.push({ pluginId, name, marketplaceSlug, resolvedCommitSha });
+  }
+  return records;
+});
+
+const cacheCompleteVersions = Effect.fn("cacheCompleteVersions")(function* (
+  pluginDir: string,
+  budget: CursorSkillScanBudget,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const entries = yield* orUndefined(fileSystem.readDirectory(pluginDir), budget);
+  if (!entries) return [];
+  const found: Array<{ directory: string; mtimeMs: number }> = [];
+  for (const entry of [...entries].sort()) {
+    if (budget.exhausted) return found;
+    if (entry.startsWith("ew-disabled-") || entry.endsWith(".installed")) continue;
+    if (budget.remainingEntries === 0) {
+      budget.exhausted = true;
+      return found;
+    }
+    budget.remainingEntries -= 1;
+    const directory = path.join(pluginDir, entry);
+    const info = yield* orUndefined(fileSystem.stat(directory), budget);
+    if (info?.type !== "Directory") continue;
+    const marker = yield* orUndefined(
+      fileSystem.stat(path.join(directory, ".cache-complete")),
+      budget,
+    );
+    if (marker?.type !== "File") continue;
+    found.push({
+      directory,
+      mtimeMs: Option.match(marker.mtime, {
+        onNone: () => 0,
+        onSome: (date) => date.getTime(),
+      }),
+    });
+  }
+  found.sort(
+    (left, right) => right.mtimeMs - left.mtimeMs || left.directory.localeCompare(right.directory),
+  );
+  return found;
+});
+
+const pluginSkillDirectories = Effect.fn("pluginSkillDirectories")(function* (
+  pluginRoot: string,
+  budget: CursorSkillScanBudget,
+) {
+  const path = yield* Path.Path;
+  const manifestPaths = [".cursor-plugin", ".claude-plugin", ".codex-plugin"].map((directory) =>
+    path.join(pluginRoot, directory, "plugin.json"),
+  );
+  let skillsField: unknown;
+  for (const manifestPath of manifestPaths) {
+    const manifest = yield* readJsonObject(manifestPath, budget);
+    if (!manifest || !("skills" in manifest)) continue;
+    skillsField = manifest.skills;
+    break;
+  }
+  const relatives = Array.isArray(skillsField)
+    ? skillsField.filter(
+        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0,
+      )
+    : typeof skillsField === "string" && skillsField.trim().length > 0
+      ? [skillsField]
+      : ["skills"];
+  const directories: string[] = [];
+  for (const relative of relatives) {
+    const resolved = path.resolve(pluginRoot, relative);
+    const directory = relative.replaceAll("\\", "/").endsWith("SKILL.md")
+      ? path.dirname(resolved)
+      : resolved;
+    if (!staysInside(pluginRoot, directory, path.sep)) continue;
+    directories.push(directory);
+  }
+  return directories;
+});
+
+function expandHome(value: string, userHome: string): string {
+  if (value === "~") return userHome;
+  if (value.startsWith("~/") || value.startsWith("~\\")) return `${userHome}${value.slice(1)}`;
+  return value;
+}
+
+const localPluginRoots = Effect.fn("localPluginRoots")(function* (
+  settingsPath: string,
+  userHome: string,
+  budget: CursorSkillScanBudget,
+) {
+  const path = yield* Path.Path;
+  const settings = yield* readJsonObject(settingsPath, budget);
+  const enabled = settings?.enabled_plugins;
+  if (!isRecord(enabled)) return [];
+  const roots: string[] = [];
+  for (const value of Object.values(enabled)) {
+    const configured =
+      typeof value === "string"
+        ? value
+        : isRecord(value) && value.enabled !== false && typeof value.path === "string"
+          ? value.path
+          : undefined;
+    if (!configured?.trim()) continue;
+    const expanded = expandHome(configured.trim(), userHome);
+    roots.push(
+      path.isAbsolute(expanded) ? expanded : path.resolve(path.dirname(settingsPath), expanded),
+    );
+  }
+  return roots;
+});
+
+const cursorPluginSkillDirectories = Effect.fn("cursorPluginSkillDirectories")(function* (
+  userHome: string,
+  environment: NodeJS.ProcessEnv,
+  budget: CursorSkillScanBudget,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const dataDir = cursorDataDir(environment, userHome);
+  const cacheDir = path.join(dataDir, "plugins", "cache");
+  const directories: string[] = [];
+  const seen = new Set<string>();
+  const addPlugin = function* (pluginRoot: string) {
+    if (seen.has(pluginRoot)) return;
+    seen.add(pluginRoot);
+    for (const directory of yield* pluginSkillDirectories(pluginRoot, budget)) {
+      directories.push(directory);
+    }
+  };
+
+  for (const pluginRoot of yield* localPluginRoots(
+    path.join(dataDir, "settings.json"),
+    userHome,
+    budget,
+  )) {
+    const info = yield* orUndefined(fileSystem.stat(pluginRoot), budget);
+    if (info?.type !== "Directory") continue;
+    yield* addPlugin(pluginRoot);
+  }
+
+  const stateDb = yield* cursorGlobalStateDb(userHome, environment);
+  const installed = stateDb ? readInstalledPluginIdsSync(stateDb) : ({ _tag: "Missing" } as const);
+  if (installed._tag === "Unreadable") return directories;
+
+  const manifest = yield* readCloudPlugins(
+    path.join(cacheDir, ".cloud-plugin-manifest.json"),
+    budget,
+  );
+  const enabled = (pluginId: string) => installed._tag === "Missing" || installed.ids.has(pluginId);
+  const resolvedIds = new Set<string>();
+  const hasCompleteCache = function* (directory: string) {
+    const marker = yield* orUndefined(
+      fileSystem.stat(path.join(directory, ".cache-complete")),
+      budget,
+    );
+    return marker?.type === "File";
+  };
+
+  for (const plugin of manifest) {
+    if (!enabled(plugin.pluginId)) continue;
+    const candidates = [plugin.pluginId, plugin.name].map((key) =>
+      path.join(cacheDir, plugin.marketplaceSlug, key, plugin.resolvedCommitSha),
+    );
+    for (const candidate of candidates) {
+      if (!(yield* hasCompleteCache(candidate))) continue;
+      yield* addPlugin(candidate);
+      resolvedIds.add(plugin.pluginId);
+      break;
+    }
+  }
+
+  if (installed._tag === "Ready") {
+    const marketplaces = yield* orUndefined(fileSystem.readDirectory(cacheDir), budget);
+    for (const pluginId of installed.ids) {
+      if (resolvedIds.has(pluginId) || budget.exhausted || !marketplaces) continue;
+      let newest: { directory: string; mtimeMs: number } | undefined;
+      for (const marketplace of marketplaces) {
+        if (marketplace.startsWith("ew-disabled-")) continue;
+        const versions = yield* cacheCompleteVersions(
+          path.join(cacheDir, marketplace, pluginId),
+          budget,
+        );
+        const candidate = versions[0];
+        if (!candidate) continue;
+        if (!newest || candidate.mtimeMs > newest.mtimeMs) newest = candidate;
+      }
+      if (!newest) continue;
+      yield* addPlugin(newest.directory);
+      resolvedIds.add(pluginId);
+    }
+
+    const unresolved = [...installed.ids].filter((pluginId) => !resolvedIds.has(pluginId));
+    const adoptions: string[] = [];
+    for (const plugin of manifest) {
+      if (enabled(plugin.pluginId)) continue;
+      const versions = yield* cacheCompleteVersions(
+        path.join(cacheDir, plugin.marketplaceSlug, plugin.name),
+        budget,
+      );
+      const newer = versions.find(
+        (version) => path.basename(version.directory) !== plugin.resolvedCommitSha,
+      );
+      if (newer) adoptions.push(newer.directory);
+    }
+    // ponytail: a disabled manifest row stands in for an installed id with no
+    // cache folder only when the counts match. Several unknown ids are
+    // ambiguous, so adopt none until the manifest names each id.
+    if (unresolved.length > 0 && adoptions.length === unresolved.length) {
+      for (const directory of adoptions) yield* addPlugin(directory);
+    }
+  }
+
+  return directories;
+});
+
 const inspectCursorSkills = Effect.fn("inspectCursorSkills")(function* (
   cwd?: string,
   environment: NodeJS.ProcessEnv = process.env,
@@ -228,8 +566,6 @@ const inspectCursorSkills = Effect.fn("inspectCursorSkills")(function* (
     { directory: path.join(base, ".codex", "skills"), scope },
     { directory: path.join(base, ".claude", "skills"), scope },
   ];
-  const roots = [...(cwd ? rootsBelow(cwd, "project") : []), ...rootsBelow(userHome, "user")];
-
   const skillsByName = new Map<string, ServerProviderSkill>();
   const budget: CursorSkillScanBudget = {
     remainingEntries: MAX_SKILL_SCAN_ENTRIES,
@@ -237,6 +573,12 @@ const inspectCursorSkills = Effect.fn("inspectCursorSkills")(function* (
     exhausted: false,
     incomplete: false,
   };
+  const pluginDirectories = yield* cursorPluginSkillDirectories(userHome, environment, budget);
+  const roots = [
+    ...(cwd ? rootsBelow(cwd, "project") : []),
+    ...rootsBelow(userHome, "user"),
+    ...pluginDirectories.map((directory) => ({ directory, scope: "user" as const })),
+  ];
   for (const root of roots) {
     if (budget.exhausted) break;
     const skills = yield* discoverSkillsInRoot({ ...root, budget });
@@ -287,4 +629,13 @@ export function rewriteCursorSkillMentions(
   return prompt.replace(SKILL_MENTION_PATTERN, (match, prefix: string, name: string) =>
     skillNames.has(name) ? `${prefix}/${name}` : match,
   );
+}
+
+/** A composer pick is `$name`. Cursor runs that skill only when the prompt is `/name` alone. */
+export function cursorSkillInvocation(
+  prompt: string,
+  skillNames: ReadonlySet<string>,
+): string | undefined {
+  const trimmed = rewriteCursorSkillMentions(prompt, skillNames).trim();
+  return /^\/[^\s/]+$/.test(trimmed) ? trimmed : undefined;
 }
