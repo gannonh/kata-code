@@ -259,14 +259,13 @@ function httpHeaders(
   env: NodeJS.ProcessEnv,
 ): ReadonlyArray<{ name: string; value: string }> {
   const configured = objectToEntries(rawHeaders, pluginRoot, env);
-  if (accessToken === undefined || hasAuthorizationHeader(rawHeaders)) return configured;
+  if (
+    accessToken === undefined ||
+    configured.some((header) => header.name.toLowerCase() === "authorization")
+  ) {
+    return configured;
+  }
   return [...configured, { name: "Authorization", value: `Bearer ${accessToken}` }];
-}
-
-function hasAuthorizationHeader(value: unknown): boolean {
-  return (
-    isRecord(value) && Object.keys(value).some((name) => name.toLowerCase() === "authorization")
-  );
 }
 
 function objectToEntries(
