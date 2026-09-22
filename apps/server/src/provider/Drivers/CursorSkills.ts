@@ -10,7 +10,9 @@
  * @module provider/Drivers/CursorSkills
  */
 import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
+import * as NodeURL from "node:url";
 
 import type { ServerProviderSkill } from "@kata-sh/code-contracts";
 import * as ByteSize from "effect/ByteSize";
@@ -244,6 +246,88 @@ function pluginIdString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function pluginIdFromInstalledEntry(value: unknown): string | undefined {
+  const direct = pluginIdString(value);
+  if (direct) return direct;
+  if (!isRecord(value)) return undefined;
+  return pluginIdString(value.id);
+}
+
+interface InstalledPluginIdRow {
+  readonly key: string;
+  readonly ids: ReadonlySet<string>;
+}
+
+function installedPluginKeySuffix(key: string): string | undefined {
+  const pipe = key.indexOf("|");
+  if (pipe === -1) return undefined;
+  return key.slice(pipe + 1);
+}
+
+function fileUriToPath(uri: string): string | undefined {
+  if (!uri.startsWith("file:")) return undefined;
+  try {
+    return NodePath.normalize(NodeURL.fileURLToPath(uri));
+  } catch {
+    return undefined;
+  }
+}
+
+function pathContains(root: string, cwd: string): boolean {
+  const relative = NodePath.relative(root, cwd);
+  return relative === "" || (!relative.startsWith("..") && !NodePath.isAbsolute(relative));
+}
+
+function unionPluginIds(rows: ReadonlyArray<InstalledPluginIdRow>): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    for (const id of row.ids) ids.add(id);
+  }
+  return ids;
+}
+
+function selectInstalledPluginIds(
+  rows: ReadonlyArray<InstalledPluginIdRow>,
+  cwd?: string,
+): ReadonlySet<string> {
+  // A key with no window suffix is the whole installed set. Tests and older
+  // Cursor builds write that shape. Per-window rows must not be unioned: a
+  // stale window still names the previous plugin id.
+  const unsuffixed = rows.filter((row) => installedPluginKeySuffix(row.key) === undefined);
+  if (unsuffixed.length > 0) return unionPluginIds(unsuffixed);
+
+  const normalizedCwd = cwd?.trim() ? NodePath.normalize(cwd) : undefined;
+  if (normalizedCwd !== undefined) {
+    const matches = rows.flatMap((row) => {
+      const folders = (installedPluginKeySuffix(row.key) ?? "").split(",").flatMap((part) => {
+        const folder = fileUriToPath(part.trim());
+        return folder ? [folder] : [];
+      });
+      const matched = folders.filter((folder) => pathContains(folder, normalizedCwd));
+      if (matched.length === 0) return [];
+      return [
+        {
+          row,
+          matchLength: Math.max(...matched.map((folder) => folder.length)),
+          folderCount: folders.length,
+        },
+      ];
+    });
+    matches.sort(
+      (left, right) =>
+        right.matchLength - left.matchLength ||
+        left.folderCount - right.folderCount ||
+        left.row.key.localeCompare(right.row.key),
+    );
+    const best = matches[0];
+    if (best) return best.row.ids;
+  }
+
+  const noWorkspace = rows.filter((row) => installedPluginKeySuffix(row.key) === "no-workspace");
+  if (noWorkspace.length > 0) return unionPluginIds(noWorkspace);
+  return new Set();
+}
+
 function staysInside(parent: string, child: string, separator: string): boolean {
   return child === parent || child.startsWith(`${parent}${separator}`);
 }
@@ -291,30 +375,34 @@ const cursorGlobalStateDb = Effect.fn("cursorGlobalStateDb")(function* (
   return undefined;
 });
 
-function readInstalledPluginIdsSync(dbPath: string): InstalledPluginIds {
+function sqliteText(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (value instanceof Uint8Array) return Buffer.from(value).toString("utf8");
+  return undefined;
+}
+
+function readInstalledPluginIdsSync(dbPath: string, cwd?: string): InstalledPluginIds {
   try {
     const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
     try {
       const rows = database
-        .prepare("SELECT value FROM ItemTable WHERE key GLOB 'cursor.plugins.installedIds*'")
-        .all() as ReadonlyArray<{ value?: unknown }>;
-      const ids = new Set<string>();
+        .prepare("SELECT key, value FROM ItemTable WHERE key GLOB 'cursor.plugins.installedIds*'")
+        .all() as ReadonlyArray<{ key?: unknown; value?: unknown }>;
+      const parsed: InstalledPluginIdRow[] = [];
       for (const row of rows) {
-        const text =
-          typeof row.value === "string"
-            ? row.value
-            : row.value instanceof Uint8Array
-              ? Buffer.from(row.value).toString("utf8")
-              : undefined;
-        if (!text) continue;
-        const parsed = decodeUnknownJson(text);
-        if (Option.isNone(parsed) || !Array.isArray(parsed.value)) continue;
-        for (const id of parsed.value) {
-          const normalized = pluginIdString(id);
+        const key = sqliteText(row.key)?.trim();
+        const text = sqliteText(row.value);
+        if (!key || !text) continue;
+        const decoded = decodeUnknownJson(text);
+        if (Option.isNone(decoded) || !Array.isArray(decoded.value)) continue;
+        const ids = new Set<string>();
+        for (const entry of decoded.value) {
+          const normalized = pluginIdFromInstalledEntry(entry);
           if (normalized) ids.add(normalized);
         }
+        parsed.push({ key, ids });
       }
-      return { _tag: "Ready", ids };
+      return { _tag: "Ready", ids: selectInstalledPluginIds(parsed, cwd) };
     } finally {
       database.close();
     }
@@ -454,6 +542,7 @@ const cursorPluginSkillDirectories = Effect.fn("cursorPluginSkillDirectories")(f
   userHome: string,
   environment: NodeJS.ProcessEnv,
   budget: CursorSkillScanBudget,
+  cwd?: string,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -480,7 +569,9 @@ const cursorPluginSkillDirectories = Effect.fn("cursorPluginSkillDirectories")(f
   }
 
   const stateDb = yield* cursorGlobalStateDb(userHome, environment);
-  const installed = stateDb ? readInstalledPluginIdsSync(stateDb) : ({ _tag: "Missing" } as const);
+  const installed = stateDb
+    ? readInstalledPluginIdsSync(stateDb, cwd)
+    : ({ _tag: "Missing" } as const);
   if (installed._tag === "Unreadable") return directories;
 
   const manifest = yield* readCloudPlugins(
@@ -516,11 +607,11 @@ const cursorPluginSkillDirectories = Effect.fn("cursorPluginSkillDirectories")(f
       if (resolvedIds.has(pluginId) || budget.exhausted || !marketplaces) continue;
       let newest: { directory: string; mtimeMs: number } | undefined;
       for (const marketplace of marketplaces) {
-        if (marketplace.startsWith("ew-disabled-")) continue;
-        const versions = yield* cacheCompleteVersions(
-          path.join(cacheDir, marketplace, pluginId),
-          budget,
-        );
+        if (marketplace.startsWith(".") || marketplace.startsWith("ew-disabled-")) continue;
+        const marketplaceDir = path.join(cacheDir, marketplace);
+        const marketplaceInfo = yield* orUndefined(fileSystem.stat(marketplaceDir), budget);
+        if (marketplaceInfo?.type !== "Directory") continue;
+        const versions = yield* cacheCompleteVersions(path.join(marketplaceDir, pluginId), budget);
         const candidate = versions[0];
         if (!candidate) continue;
         if (!newest || candidate.mtimeMs > newest.mtimeMs) newest = candidate;
@@ -573,7 +664,7 @@ const inspectCursorSkills = Effect.fn("inspectCursorSkills")(function* (
     exhausted: false,
     incomplete: false,
   };
-  const pluginDirectories = yield* cursorPluginSkillDirectories(userHome, environment, budget);
+  const pluginDirectories = yield* cursorPluginSkillDirectories(userHome, environment, budget, cwd);
   const roots = [
     ...(cwd ? rootsBelow(cwd, "project") : []),
     ...rootsBelow(userHome, "user"),
