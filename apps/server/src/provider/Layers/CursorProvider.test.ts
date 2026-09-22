@@ -1,5 +1,6 @@
 import * as NodeOS from "node:os";
 import * as NodeSqlite from "node:sqlite";
+import * as NodeURL from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
@@ -583,7 +584,10 @@ describe("Cursor skills", () => {
         database.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
         database
           .prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)")
-          .run("cursor.plugins.installedIds.no-team", encodeJson(["67972749"]));
+          .run(
+            `cursor.plugins.installedIds.no-team|${NodeURL.pathToFileURL(workspace).href}`,
+            encodeJson(["67972749"]),
+          );
         database.close();
 
         const environment = { HOME: userHome };
@@ -726,7 +730,10 @@ describe("Cursor skills", () => {
             database.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
             database
               .prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)")
-              .run("cursor.plugins.installedIds.no-team", encodeJson(ids));
+              .run(
+                `cursor.plugins.installedIds.no-team|${NodeURL.pathToFileURL(workspace).href}`,
+                encodeJson(ids),
+              );
             database.close();
           });
         yield* fileSystem.makeDirectory(enabledRoot, { recursive: true });
@@ -783,6 +790,127 @@ describe("Cursor skills", () => {
             name: "poteto-mode",
             description: "xdg install",
             path: path.join(enabledRoot, "skills", "poteto-mode", "SKILL.md"),
+            scope: "user",
+            enabled: true,
+          },
+        ]);
+      }),
+    ));
+
+  it("uses the cwd window's object plugin ids and ignores a stale window", async () =>
+    await runNode(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const userHome = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-home-",
+        });
+        const workspace = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-workspace-",
+        });
+        const other = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-other-",
+        });
+        const absent = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-absent-",
+        });
+        const enabledSha = "84b6c4b36ff9b9d6b18bf784c761691d30acf4c6";
+        const staleSha = "970df460f1ae6affbedab6e04f6b396917452431";
+        const cache = path.join(userHome, ".cursor", "plugins", "cache");
+        const enabledRoot = path.join(cache, "gannonh-open-pstack", "open-pstack", enabledSha);
+        const staleRoot = path.join(cache, "gannonh-open-pstack", "61242178", staleSha);
+        const writeSkill = Effect.fn("writeCursorPluginSkill")(function* (
+          directory: string,
+          contents: string,
+        ) {
+          yield* fileSystem.makeDirectory(directory, { recursive: true });
+          yield* fileSystem.writeFileString(path.join(directory, "SKILL.md"), contents);
+        });
+        const installed = (id: string) => encodeJson([{ id, sources: ["user"] }]);
+        yield* fileSystem.makeDirectory(enabledRoot, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(enabledRoot, ".cache-complete"), "");
+        yield* writeSkill(
+          path.join(enabledRoot, "skills", "poteto-mode"),
+          "---\ndescription: enabled install\n---\n",
+        );
+        yield* fileSystem.makeDirectory(staleRoot, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(staleRoot, ".cache-complete"), "");
+        yield* writeSkill(
+          path.join(staleRoot, "skills", "stale-only"),
+          "---\ndescription: stale install\n---\n",
+        );
+        yield* fileSystem.writeFileString(path.join(cache, ".DS_Store"), "");
+        yield* fileSystem.writeFileString(path.join(cache, "notes.txt"), "not a marketplace");
+        yield* fileSystem.writeFileString(
+          path.join(cache, ".cloud-plugin-manifest.json"),
+          encodeJson({
+            plugins: [
+              {
+                pluginId: "61242178",
+                name: "open-pstack",
+                marketplaceSlug: "gannonh-open-pstack",
+                resolvedCommitSha: staleSha,
+              },
+            ],
+          }),
+        );
+        const stateDb = path.join(
+          userHome,
+          ".config",
+          "Cursor",
+          "User",
+          "globalStorage",
+          "state.vscdb",
+        );
+        const workspaceUrl = NodeURL.pathToFileURL(workspace).href;
+        const otherUrl = NodeURL.pathToFileURL(other).href;
+        const workspaceKey = `cursor.plugins.installedIds.no-team|${workspaceUrl}`;
+        const staleWindowKey = `cursor.plugins.installedIds.no-team|${otherUrl}`;
+        const multiRootKey = `cursor.plugins.installedIds.no-team|${workspaceUrl},${otherUrl}`;
+        yield* fileSystem.makeDirectory(path.dirname(stateDb), { recursive: true });
+        yield* Effect.sync(() => {
+          const database = new NodeSqlite.DatabaseSync(stateDb);
+          database.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
+          const insert = database.prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)");
+          insert.run(workspaceKey, installed("67972749"));
+          insert.run(staleWindowKey, installed("61242178"));
+          insert.run(multiRootKey, installed("61242178"));
+          insert.run("cursor.plugins.installedIds.no-team", installed("61242178"));
+          insert.run("cursor.plugins.installedIds.no-team|no-workspace", installed("61242178"));
+          database.close();
+        });
+
+        const environment = { HOME: userHome };
+        const enabledSkillPath = yield* fileSystem.realPath(
+          path.join(enabledRoot, "skills", "poteto-mode", "SKILL.md"),
+        );
+        const staleSkillPath = yield* fileSystem.realPath(
+          path.join(staleRoot, "skills", "stale-only", "SKILL.md"),
+        );
+        expect((yield* probeCursorSkills(workspace, environment).pipe(Effect.result))._tag).toBe(
+          "Success",
+        );
+        const skills = yield* discoverCursorSkills(workspace, environment);
+        expect(skills).toEqual([
+          {
+            name: "poteto-mode",
+            description: "enabled install",
+            path: enabledSkillPath,
+            scope: "user",
+            enabled: true,
+          },
+        ]);
+
+        const fallback = yield* discoverCursorSkills(absent, environment);
+        expect(fallback).toEqual([
+          {
+            name: "stale-only",
+            description: "stale install",
+            path: staleSkillPath,
             scope: "user",
             enabled: true,
           },
