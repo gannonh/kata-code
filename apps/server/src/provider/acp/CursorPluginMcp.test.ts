@@ -210,15 +210,10 @@ describe("discoverCursorPluginMcpServers", () => {
           type: "http",
           name: "plugin-linear-configured",
           url: "https://mcp.linear.app/configured",
-          headers: [],
+          headers: [{ name: "Authorization", value: "Bearer fake-stored-token" }],
         },
       ],
-      authRequired: [
-        {
-          identifier: "plugin-linear-configured",
-          displayName: "plugin-linear-configured",
-        },
-      ],
+      authRequired: [],
     });
   });
 
