@@ -290,9 +290,10 @@ function selectInstalledPluginIds(
   path: Path.Path,
   cwd?: string,
 ): ReadonlySet<string> {
+  const scopedRows = rows.filter((row) => installedPluginKeySuffix(row.key) !== undefined);
   const normalizedCwd = cwd?.trim() ? path.normalize(cwd) : undefined;
   if (normalizedCwd !== undefined) {
-    const matches = rows.flatMap((row) => {
+    const matches = scopedRows.flatMap((row) => {
       const folders = (installedPluginKeySuffix(row.key) ?? "").split(",").flatMap((part) => {
         const folder = fileUriToPath(part.trim(), path);
         return folder ? [folder] : [];
@@ -317,7 +318,9 @@ function selectInstalledPluginIds(
     if (best) return best.row.ids;
   }
 
-  const noWorkspace = rows.filter((row) => installedPluginKeySuffix(row.key) === "no-workspace");
+  const noWorkspace = scopedRows.filter(
+    (row) => installedPluginKeySuffix(row.key) === "no-workspace",
+  );
   if (noWorkspace.length > 0) return unionPluginIds(noWorkspace);
   return new Set();
 }
