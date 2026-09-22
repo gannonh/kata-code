@@ -175,6 +175,13 @@ function assertSessionMcpKeepsT3CodeAndHostPlugins(
   const t3Code = servers.find((server) => server.name === "t3-code");
   assert.equal(t3Code?.type, "http");
   assert.equal(t3Code?.url, "http://127.0.0.1:43123/mcp");
+  const linear = servers.find((server) => server.name === "plugin-linear-linear");
+  assert.deepEqual(linear, {
+    type: "http",
+    name: "plugin-linear-linear",
+    url: "https://mcp.linear.app/mcp",
+    headers: [{ name: "Authorization", value: "Bearer fake-linear-token" }],
+  });
 }
 
 // Tests mutate `ServerSettingsService` mid-flight (e.g. setting
@@ -1833,6 +1840,12 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       JSON.stringify({
         serverIdentifier: "plugin-github-github",
         serverName: "github",
+      }),
+    );
+    writeFile(
+      NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd), "mcp-auth.json"),
+      JSON.stringify({
+        "plugin-linear-linear": { tokens: { access_token: "fake-linear-token" } },
       }),
     );
     writeFile(
