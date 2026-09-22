@@ -22,6 +22,19 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 const PLUGIN_ROOT_VARS = ["CURSOR_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] as const;
 const TEMPLATE_PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/g;
 
+export interface CursorPluginMcpDiscovery {
+  readonly servers: ReadonlyArray<EffectAcpSchema.McpServer>;
+  readonly authRequired: ReadonlyArray<{
+    readonly identifier: string;
+    readonly displayName: string;
+  }>;
+}
+
+interface InstalledPlugin {
+  readonly displayName: string;
+  readonly hasMcpAuthTool: boolean;
+}
+
 export function cursorWorkspaceSlug(cwd: string): string {
   return cwd
     .replace(/[^a-zA-Z0-9]/g, "-")
@@ -45,12 +58,12 @@ function homeFromEnv(env: NodeJS.ProcessEnv): string {
 export function discoverCursorPluginMcpServers(
   cwd: string,
   options?: { readonly env?: NodeJS.ProcessEnv; readonly homedir?: string },
-): ReadonlyArray<EffectAcpSchema.McpServer> {
+): CursorPluginMcpDiscovery {
   const env = options?.env ?? process.env;
   const dataDir = cursorDataDir(env, options?.homedir);
   const projectDir = NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd));
-  const installed = readInstalledPluginIdentifiers(NodePath.join(projectDir, "mcps"));
-  if (installed.size === 0) return [];
+  const installed = readInstalledPlugins(NodePath.join(projectDir, "mcps"));
+  if (installed.size === 0) return { servers: [], authRequired: [] };
   const accessTokens = readPluginAccessTokens(NodePath.join(projectDir, "mcp-auth.json"));
   return readPluginCacheMcpServers(
     NodePath.join(dataDir, "plugins", "cache"),
@@ -72,13 +85,13 @@ function readPluginAccessTokens(filePath: string): ReadonlyMap<string, string> {
   return tokens;
 }
 
-function readInstalledPluginIdentifiers(mcpsDir: string): Set<string> {
-  const identifiers = new Set<string>();
+function readInstalledPlugins(mcpsDir: string): ReadonlyMap<string, InstalledPlugin> {
+  const installed = new Map<string, InstalledPlugin>();
   let entries: NodeFS.Dirent[];
   try {
     entries = NodeFS.readdirSync(mcpsDir, { withFileTypes: true });
   } catch {
-    return identifiers;
+    return installed;
   }
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
@@ -86,24 +99,29 @@ function readInstalledPluginIdentifiers(mcpsDir: string): Set<string> {
     const metadata = readJsonObject(metadataPath);
     const identifier =
       stringField(metadata, "serverIdentifier") ?? stringField(metadata, "serverName");
-    if (identifier) identifiers.add(identifier);
+    if (!identifier) continue;
+    installed.set(identifier, {
+      displayName: stringField(metadata, "serverName") ?? identifier,
+      hasMcpAuthTool: isFile(NodePath.join(mcpsDir, entry.name, "tools", "mcp_auth.json")),
+    });
   }
-  return identifiers;
+  return installed;
 }
 
 function readPluginCacheMcpServers(
   cacheDir: string,
-  installed: ReadonlySet<string>,
+  installed: ReadonlyMap<string, InstalledPlugin>,
   accessTokens: ReadonlyMap<string, string>,
   env: NodeJS.ProcessEnv,
-): ReadonlyArray<EffectAcpSchema.McpServer> {
+): CursorPluginMcpDiscovery {
   const servers: EffectAcpSchema.McpServer[] = [];
+  const authRequired: Array<{ identifier: string; displayName: string }> = [];
   const taken = new Set<string>();
   let marketplaces: NodeFS.Dirent[];
   try {
     marketplaces = NodeFS.readdirSync(cacheDir, { withFileTypes: true });
   } catch {
-    return servers;
+    return { servers, authRequired };
   }
   for (const marketplace of marketplaces) {
     if (!marketplace.isDirectory()) continue;
@@ -124,7 +142,8 @@ function readPluginCacheMcpServers(
       if (!isRecord(mcpServers)) continue;
       for (const [serverKey, rawConfig] of Object.entries(mcpServers)) {
         const identifier = `plugin-${plugin.name}-${serverKey}`;
-        if (!installed.has(identifier) || taken.has(identifier)) continue;
+        const installedPlugin = installed.get(identifier);
+        if (!installedPlugin || taken.has(identifier)) continue;
         const converted = toAcpMcpServer(
           identifier,
           rawConfig,
@@ -135,10 +154,27 @@ function readPluginCacheMcpServers(
         if (!converted) continue;
         taken.add(identifier);
         servers.push(converted);
+        if (
+          installedPlugin.hasMcpAuthTool &&
+          "type" in converted &&
+          (converted.type === "http" || converted.type === "sse") &&
+          !converted.headers.some((header) => header.name.toLowerCase() === "authorization")
+        ) {
+          authRequired.push({ identifier, displayName: installedPlugin.displayName });
+        }
       }
     }
   }
-  return servers;
+  authRequired.sort((left, right) => left.identifier.localeCompare(right.identifier));
+  return { servers, authRequired };
+}
+
+function isFile(filePath: string): boolean {
+  try {
+    return NodeFS.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function newestPluginMcpJson(pluginDir: string): string | undefined {

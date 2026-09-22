@@ -549,9 +549,10 @@ export function makeCursorAdapter(
 
           const processEnv = options?.environment ?? process.env;
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+          const pluginMcpDiscovery = discoverCursorPluginMcpServers(cwd, { env: processEnv });
           const mcpServers = acpMcpServersForProviderSession({
             mcpSession,
-            host: discoverCursorPluginMcpServers(cwd, { env: processEnv }),
+            host: pluginMcpDiscovery.servers,
           });
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
@@ -951,6 +952,21 @@ export function makeCursorAdapter(
             threadId: input.threadId,
             payload: { providerThreadId: started.sessionId },
           });
+          if (pluginMcpDiscovery.authRequired.length > 0) {
+            const displayNames = pluginMcpDiscovery.authRequired
+              .map((entry) => entry.displayName)
+              .join(", ");
+            yield* offerRuntimeEvent({
+              type: "runtime.warning",
+              ...(yield* makeEventStamp()),
+              provider: PROVIDER,
+              threadId: input.threadId,
+              payload: {
+                message: `Cursor plugin authentication is required for ${displayNames}. Authenticate with mcp_auth in Cursor desktop for this workspace, then start a new Kata agent session.`,
+                detail: pluginMcpDiscovery.authRequired.map((entry) => entry.identifier),
+              },
+            });
+          }
 
           return session;
         }).pipe(Effect.scoped),
