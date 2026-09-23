@@ -7,6 +7,7 @@ import {
   type RoutineProviderSubmission,
   type VcsRef,
 } from "@kata-sh/code-contracts";
+import { resolveProjectSettings } from "@kata-sh/code-shared/projectSettings";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -21,6 +22,7 @@ import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEng
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ProviderCommandReactor from "../orchestration/Services/ProviderCommandReactor.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { RoutineStore, type RoutineClaim } from "./RoutineStore.ts";
 
 const isoNow = Effect.map(DateTime.now, DateTime.formatIso);
@@ -81,6 +83,7 @@ const makeRoutineDispatcher = Effect.gen(function* () {
   const git = yield* GitWorkflowService.GitWorkflowService;
   const setupScripts = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const providerCommandReactor = yield* ProviderCommandReactor.ProviderCommandReactor;
+  const serverSettings = yield* ServerSettings.ServerSettingsService;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
 
@@ -173,6 +176,15 @@ const makeRoutineDispatcher = Effect.gen(function* () {
       });
       yield* renew(claim);
       const existing = refs.refs.find((ref) => !ref.isRemote && ref.name === branch);
+      // Project setting > environment setting; null lets the new checkout's
+      // t3.json decide. Settings that fail to load fall through the same way.
+      const submodules = yield* serverSettings.getSettings.pipe(
+        Effect.map(
+          (settings) =>
+            resolveProjectSettings(settings, project.id, project).settings.worktreeSubmodules,
+        ),
+        Effect.orElseSucceed(() => null),
+      );
       if (existing !== undefined) {
         if (existing.worktreePath !== null && existing.worktreePath !== worktreePath) {
           return yield* new RoutineError({
@@ -191,21 +203,23 @@ const makeRoutineDispatcher = Effect.gen(function* () {
           });
         }
         if (existing.worktreePath === worktreePath) return { branch, worktreePath };
-        const attached = yield* git.createWorktree({
-          cwd: project.workspaceRoot,
-          refName: branch,
-          path: worktreePath,
-        });
+        const attached = yield* git.createWorktree(
+          { cwd: project.workspaceRoot, refName: branch, path: worktreePath },
+          { submodules },
+        );
         yield* renew(claim);
         return { branch: attached.worktree.refName, worktreePath: attached.worktree.path };
       }
-      const result = yield* git.createWorktree({
-        cwd: project.workspaceRoot,
-        refName,
-        newRefName: branch,
-        baseRefName: baseBranch,
-        path: worktreePath,
-      });
+      const result = yield* git.createWorktree(
+        {
+          cwd: project.workspaceRoot,
+          refName,
+          newRefName: branch,
+          baseRefName: baseBranch,
+          path: worktreePath,
+        },
+        { submodules },
+      );
       yield* renew(claim);
       return { branch: result.worktree.refName, worktreePath: result.worktree.path };
     });
