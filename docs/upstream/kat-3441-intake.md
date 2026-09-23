@@ -51,8 +51,28 @@ Clean merges and new files received the same review as conflicts. Fifteen cleanl
 
 Retained owners changed against the Kata base: `FORK.md` (pin and intake links), `docs/upstream/kat-3307-runbook.md` (pin literals), and `apps/mobile/app.config.ts` (upstream version `1.3.1`; Kata slug, package, and asset paths unchanged). Live pin consumers are `FORK.md`, both `ci.yml` literals, the runbook, and live-tree `currentUpstreamSha` in `scripts/check-upstream-preservation.test.ts`. Each now names `f5ef0ddb9`. `withHistoricalBaselineWorktree` keeps its historical commit's own pin.
 
+`AGENTS.override.md` and `CLAUDE.md` changed only in whitespace (table alignment and blank lines). Kata base `88f8995cc` committed them unformatted, and its push CI failed `vp check` on exactly those two files. The formatting repair keeps this candidate's Check job green.
+
 The lint warnings in `ConnectionsSettings.tsx` for unused inline dialog state already exist at the Kata base. They are outside this run.
 
 ## Verification
 
 Build verification uses the checker and inventory archived from Kata base `88f8995ccedbb9c94855349f6761531cc830a38b`. Required checks: formatting and lint, typecheck, unused-code checks, CI test partitions, desktop build, preload verification, branding, ancestry, the workflow-reference scan, and the preservation checker. Mandatory live browser, device, provider, Android artwork, and macOS Icon Composer evidence stays `NOT RUN` until someone exercises it against an exact candidate.
+
+## Independent review
+
+An independent Opus reviewer read the complete fork delta, including clean merges, and reported no material regressions. It ran a line-level retention check over the 104 files that both sides changed. Every Kata-added line survives except the intended sidebar reconcile and the reformatted Connect copy. Findings:
+
+- Routine worktrees do not pass upstream's new `worktreeSubmodules` setting to `createWorktree`. This is outside this run's scope and is filed as KAT-3442.
+- The `shelfPreferencesLoaded` hook dependencies are now redundant because list items carry the disabled flag, and lint reports extra memoization dependencies as warnings. Behavior is correct. They stay, because they are Kata's #151 retained fix and removing them is cleanup outside this integration.
+- The instruction-file formatting is documented above.
+
+## Host limits
+
+Local verification ran on a macOS arm64 Mac mini. The following fail identically on unmodified Kata base `88f8995cc` and pass on GitHub's Linux runners, so they are not merge regressions. KAT-3443 tracks them:
+
+- 53 server tests in 9 files.
+- The cross-architecture Windows payload test in both `build-desktop-artifact` suites.
+- `verify-preload-bundle.mjs`, which takes the `darwin` branch.
+
+One local historical-baseline run also failed `sandbox-route-driver-registration` under concurrent test load. The same tests pass directly (211/211), and two reruns of the checker reported only the arm64 desktop case.
