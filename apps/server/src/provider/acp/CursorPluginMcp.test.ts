@@ -468,6 +468,88 @@ describe("discoverCursorPluginMcpServers", () => {
       }),
   );
 
+  effectIt.effect(
+    "falls back to an older folder's token when the newest one is rejected and cannot refresh",
+    () =>
+      Effect.gen(function* () {
+        const fixture = makeCursorFixture("cursor-plugin-mcp-fallback-", ["512"]);
+        installCachedPlugin(fixture.dataDir, {
+          id: "512",
+          name: "linear",
+          mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+        });
+        const writeStore = (slug: string, accessToken: string, mtimeSeconds: number) => {
+          const authFile = NodePath.join(fixture.dataDir, "projects", slug, "mcp-auth.json");
+          writeFile(
+            authFile,
+            encodeJson({
+              "plugin-linear-linear": {
+                tokens: { access_token: accessToken, refresh_token: `${accessToken}-refresh` },
+                clientInfo: { client_id: "client-1" },
+              },
+            }),
+          );
+          NodeFS.utimesSync(authFile, mtimeSeconds, mtimeSeconds);
+        };
+        // Another plugin's sign-in touched this file last; its Linear grant is revoked.
+        writeStore("Volumes-EVO-dev-recently-touched", "revoked-token", 2_000);
+        writeStore("Volumes-EVO-dev-factory", "valid-token", 1_000);
+        const { fetchFn } = linearOAuthServer({
+          validAccessToken: "valid-token",
+          token: () => jsonResponse({ error: "invalid_grant" }, 400),
+        });
+
+        expect(yield* discover(CWD, { env: fixture.env, fetch: fetchFn })).toEqual({
+          servers: [
+            {
+              type: "http",
+              name: "plugin-linear-linear",
+              url: LINEAR_MCP,
+              headers: [{ name: "Authorization", value: "Bearer valid-token" }],
+            },
+          ],
+          authRequired: [],
+        });
+      }),
+  );
+
+  effectIt.effect("attaches stored tokens only to HTTPS or loopback HTTP servers", () =>
+    Effect.gen(function* () {
+      const fixture = makeCursorFixture("cursor-plugin-mcp-cleartext-", ["600", "700"]);
+      installCachedPlugin(fixture.dataDir, {
+        id: "600",
+        name: "remote",
+        mcpServers: { remote: { type: "http", url: "http://mcp.example/mcp" } },
+      });
+      installCachedPlugin(fixture.dataDir, {
+        id: "700",
+        name: "local",
+        mcpServers: { local: { type: "http", url: "http://127.0.0.1:8123/mcp" } },
+      });
+      writeFile(
+        NodePath.join(fixture.projectDir, "mcp-auth.json"),
+        encodeJson({
+          "plugin-remote-remote": { tokens: { access_token: "remote-token" } },
+          "plugin-local-local": { tokens: { access_token: "local-token" } },
+        }),
+      );
+
+      const { servers } = yield* discover(CWD, { env: fixture.env });
+      expect(servers).toContainEqual({
+        type: "http",
+        name: "plugin-remote-remote",
+        url: "http://mcp.example/mcp",
+        headers: [],
+      });
+      expect(servers).toContainEqual({
+        type: "http",
+        name: "plugin-local-local",
+        url: "http://127.0.0.1:8123/mcp",
+        headers: [{ name: "Authorization", value: "Bearer local-token" }],
+      });
+    }),
+  );
+
   effectIt.effect("writes a refreshed token back to the folder store it came from", () =>
     Effect.gen(function* () {
       const fixture = makeCursorFixture("cursor-plugin-mcp-other-folder-refresh-", ["512"]);
