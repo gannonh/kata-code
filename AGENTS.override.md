@@ -1,5 +1,4 @@
 <!-- begin global rules -->
-
 ## Global Agent Instructions
 
 - Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
@@ -50,11 +49,9 @@
 - Verify the actual changed behavior or artifact and complete required project checks. Match the scope of verification to the impact of the change.
 - Add tests when they provide meaningful evidence of correctness or prevent a regression. Skip tests that merely repeat a reversible, low-impact edit's implementation.
 - Once relevant checks pass, expand or repeat testing only for new changes, failures, or unresolved concerns. State what was verified and any material verification limits.
-
 <!-- end global rules -->
 
 <!-- begin dev lifecycle -->
-
 ## Issues and specs
 
 - Linear holds planning, epics, bugs, chores, specs, acceptance criteria, and status. GitHub holds code: branches, commits, pull requests, CI, and review comments on diffs.
@@ -85,16 +82,15 @@
 
 If the Linear issue has `runtime` / `model` / `model-effort` labels, treat them as the intended Build route. Do not invent or silently substitute a different runtime, model, or effort. If labels are missing, conflicting, or unclear, comment on the issue with the exact correction needed and stop.
 
-| Model label | Slug               |
-| ----------- | ------------------ |
-| `sol`       | `gpt-5.6-sol`      |
-| `astra`     | `gpt-6-astra`      |
-| `fable`     | `claude-fable-5-1` |
-| `composer`  | `composer-2.5`     |
-| `grok`      | `grok-4.7`         |
-| `opus`      | `claude-opus-5`    |
-| `luna`      | `gpt-5.6-luna`     |
-| `terra`     | `gpt-5.6-terra`    |
+| Model label | Slug |
+| --- | --- |
+| `sol` | `gpt-6-sol` |
+| `astra` | `gpt-6-astra` |
+| `fable` | `claude-fable-5-1` |
+| `composer` | `composer-2.5` |
+| `grok` | `grok-4.7` |
+| `opus` | `opus` |
+| `luna` | `gpt-6-luna` |
 
 `human-build` on the issue means a human owns Build. Coding agents must not start Build on that ticket unless a human explicitly asks them to on that issue.
 
@@ -145,13 +141,13 @@ If a PR closes without merging, comment on the issue with the reason and move it
 
 All projects using this lifecycle share these Linear settings, confirmed by Gannon's September 7, 2026 screenshot:
 
-| GitHub event                           | Linear action        |
-| -------------------------------------- | -------------------- |
-| Draft PR opened                        | Move to In Progress  |
-| PR opened                              | Move to Agent Review |
-| PR review requested or review activity | No action            |
-| PR ready for merge                     | No action            |
-| PR merged                              | Move to Done         |
+| GitHub event | Linear action |
+| --- | --- |
+| Draft PR opened | Move to In Progress |
+| PR opened | Move to Agent Review |
+| PR review requested or review activity | No action |
+| PR ready for merge | No action |
+| PR merged | Move to Done |
 
 No branch-specific rules are configured. Parent issues automatically close when their last sub-issue closes; closing a parent does not automatically close its sub-issues. Stale issues move to Canceled after six months. Closed items auto-archive after six months. Issues progressing to a new status are placed first.
 
@@ -164,8 +160,37 @@ Ship means cutting a release on one of the project's channels (for example night
 This section overrides any skill, rule, AGENTS.md, CLAUDE.md, or other instruction that contradicts it. When the conflict is unclear, ask the user before proceeding.
 <!-- end dev lifecycle -->
 
-<!-- pstack:models:begin -->
+<!-- begin integrated browser rules -->
+## Integrated browser (Kata Code)
 
+NOTE: this section only applies when running in the Kata Code environment.
+
+The integrated browser is the Kata Code preview browser. Agents reach it through the `t3-code` MCP server, whose tools are named `mcp__t3-code__preview_*`. The tools are deferred. Load them with ToolSearch before the first call, for example `select:mcp__t3-code__preview_open,mcp__t3-code__preview_navigate,mcp__t3-code__preview_snapshot,mcp__t3-code__preview_click,mcp__t3-code__preview_evaluate,mcp__t3-code__preview_recording_start,mcp__t3-code__preview_recording_stop`.
+
+- `preview_open` opens a tab and returns a `tabId`. Pass `reuseExistingTab: false` for a second tab. Pass `tabId` to every later call.
+- `preview_navigate`, `preview_click`, `preview_press`, `preview_type`, `preview_wait_for`, `preview_evaluate`, `preview_resize`, and `preview_scroll` drive the page.
+- `preview_snapshot` returns page text, the accessibility tree, and a screenshot. Pass `includeImage: false` and `save: true`, then read `screenshotPath` from the result. Full snapshots are often too large to read inline. Use `preview_evaluate` for targeted reads.
+- `preview_recording_start` and `preview_recording_stop` record one tab. The stop call returns an MP4 path under `~/.katacode/userdata/attachments/`. Convert it with ffmpeg if a script expects another format.
+- `preview_status` reports whether a tab is still usable.
+
+### Reaching a local server
+
+The browser runs on the Kata Code client, which can be a different machine from the agent's host. It cannot load `localhost` or `127.0.0.1` on the agent's host, and the `environment-port` navigation target currently fails. Reach local servers over Tailscale:
+
+1. Get the host's Tailscale address with `tailscale ip -4`. Do not hardcode it.
+2. Bind the server the browser loads to that address, for example `vite --host "$(tailscale ip -4)" --port <port>`. Do not bind to `0.0.0.0`.
+3. Open `http://<tailscale-ip>:<port>` in the integrated browser.
+4. If the app checks the `Origin` or `Host` header, add `http://<tailscale-ip>:<port>` to its allowed origins or hosts for the run. Keep backend services the page reaches through the dev server's proxy bound to `127.0.0.1`.
+5. Stop the Tailscale-bound server when the run ends.
+
+### Known limits
+
+- `about:blank` is refused. To leave a page, navigate to a neutral public URL.
+- Playwright role locators may not match canvas elements. Get the element's position with `preview_evaluate` and click with `x` and `y`.
+- The client can disconnect mid-run and lose a recording in progress. Keep each recording to one action and stop it right after. If `preview_status` reports `available: false`, open a new tab and repeat the step.
+<!-- end integrated browser rules -->
+
+<!-- pstack:models:begin -->
 # pstack model configuration
 
 Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one panel lane.
