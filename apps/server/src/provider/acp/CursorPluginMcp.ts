@@ -34,6 +34,8 @@ const PLUGIN_ROOT_VARS = ["CURSOR_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] as const;
 const PLUGIN_MANIFEST_DIRS = [".cursor-plugin", ".claude-plugin", ".codex-plugin"] as const;
 const TEMPLATE_PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/g;
 const PLUGIN_AUTH_PROBE_TIMEOUT_MS = 5_000;
+/** Bounds the pre-start probes and refreshes spent on one server's stored tokens. */
+const MAX_STORED_TOKEN_CANDIDATES = 3;
 
 export type CursorPluginMcpFetch = typeof globalThis.fetch;
 type HttpCursorPluginMcpServer = Extract<
@@ -72,11 +74,20 @@ export interface CursorPluginMcpDiscovery {
   readonly checkAuth: Effect.Effect<ReadonlyArray<CursorPluginMcpAuthRequirement>>;
 }
 
+/** A plugin's OAuth access token and the `mcp-auth.json` store it came from. */
+interface StoredPluginToken {
+  readonly accessToken: string;
+  readonly authFile: string;
+}
+
 interface PluginAuthProbe {
   readonly requirement: CursorPluginMcpAuthRequirement;
   readonly server: HttpCursorPluginMcpServer;
-  /** The stored OAuth access token forwarded in `server`, when there is one. */
-  readonly storedAccessToken?: string;
+  /**
+   * Stored OAuth tokens for this server, best first. `server` forwards the
+   * first; later ones are fallbacks when it is rejected and cannot refresh.
+   */
+  readonly storedTokens?: ReadonlyArray<StoredPluginToken>;
 }
 
 const NO_AUTH_REQUIRED: CursorPluginMcpDiscovery["checkAuth"] = Effect.succeed([]);
@@ -104,20 +115,18 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
       cwd,
     )).flatMap(({ root, evidence }) => (evidence === "listed" ? [root] : []));
     if (pluginRoots.length === 0) return { servers: [], checkAuth: NO_AUTH_REQUIRED };
-    const authFile = NodePath.join(
-      cursorDataDir(env, userHome),
-      "projects",
-      cursorWorkspaceSlug(cwd),
-      "mcp-auth.json",
+    const discovered = readPluginMcpServers(
+      pluginRoots,
+      readPluginTokens(NodePath.join(cursorDataDir(env, userHome), "projects"), cwd),
+      env,
     );
-    const discovered = readPluginMcpServers(pluginRoots, readPluginAccessTokens(authFile), env);
     const fetchFn = options?.fetch;
     if (fetchFn === undefined || discovered.authProbes.length === 0) {
       return { servers: discovered.servers, checkAuth: NO_AUTH_REQUIRED };
     }
     const checked = yield* Effect.forEach(
       discovered.authProbes,
-      (probe) => withFreshStoredToken(probe, authFile, fetchFn),
+      (probe) => withFreshStoredToken(probe, fetchFn),
       { concurrency: "unbounded" },
     );
     const refreshedServers = new Map(checked.map(({ probe }) => [probe.server.name, probe.server]));
@@ -146,55 +155,127 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
  */
 const withFreshStoredToken = Effect.fn("withFreshStoredToken")(function* (
   probe: PluginAuthProbe,
-  authFile: string,
   fetchFn: CursorPluginMcpFetch,
 ): Effect.fn.Return<{ readonly probe: PluginAuthProbe; readonly needsAuth?: boolean }> {
-  const rejectedAccessToken = probe.storedAccessToken;
-  if (rejectedAccessToken === undefined) return { probe };
-  const resourceMetadata = yield* Effect.promise(() => oauthChallenge(probe.server, fetchFn));
-  if (resourceMetadata === undefined) return { probe, needsAuth: false };
-  const refresh = yield* Effect.promise(() =>
-    refreshCursorPluginAccessToken({
-      authFile,
-      identifier: probe.requirement.identifier,
-      resource: probe.server.url,
-      resourceMetadata,
-      rejectedAccessToken,
-      fetch: fetchFn,
-    }),
-  );
-  if (refresh._tag === "Failed") {
+  for (const storedToken of probe.storedTokens ?? []) {
+    const server = withBearer(probe.server, storedToken.accessToken);
+    const resourceMetadata = yield* Effect.promise(() => oauthChallenge(server, fetchFn));
+    if (resourceMetadata === undefined) return { probe: { ...probe, server }, needsAuth: false };
+    const refresh = yield* Effect.promise(() =>
+      refreshCursorPluginAccessToken({
+        authFile: storedToken.authFile,
+        identifier: probe.requirement.identifier,
+        resource: server.url,
+        resourceMetadata,
+        rejectedAccessToken: storedToken.accessToken,
+        fetch: fetchFn,
+      }),
+    );
+    if (refresh._tag === "Refreshed") {
+      const refreshed = withBearer(probe.server, refresh.accessToken);
+      if ((yield* Effect.promise(() => oauthChallenge(refreshed, fetchFn))) === undefined) {
+        return { probe: { ...probe, server: refreshed }, needsAuth: false };
+      }
+      yield* Effect.logWarning("Cursor plugin server rejected a refreshed OAuth token.", {
+        identifier: probe.requirement.identifier,
+        authFile: storedToken.authFile,
+      });
+      continue;
+    }
     yield* Effect.logWarning("Cursor plugin OAuth refresh failed.", {
       identifier: probe.requirement.identifier,
+      authFile: storedToken.authFile,
       reason: refresh.reason,
     });
-    return { probe, needsAuth: true };
   }
-  // `needsAuth` stays unset so the background check verifies the new token.
-  return {
-    probe: {
-      ...probe,
-      storedAccessToken: refresh.accessToken,
-      server: {
-        ...probe.server,
-        headers: probe.server.headers.map((header) =>
-          header.name.toLowerCase() === "authorization"
-            ? { name: header.name, value: `Bearer ${refresh.accessToken}` }
-            : header,
-        ),
-      },
-    },
-  };
+  return probe.storedTokens === undefined ? { probe } : { probe, needsAuth: true };
 });
 
-function readPluginAccessTokens(filePath: string): ReadonlyMap<string, string> {
-  const tokens = new Map<string, string>();
-  const records = readJsonObject(filePath);
-  if (!records) return tokens;
-  for (const [identifier, rawRecord] of Object.entries(records)) {
-    if (!isRecord(rawRecord) || !isRecord(rawRecord.tokens)) continue;
-    const accessToken = stringField(rawRecord.tokens, "access_token");
-    if (accessToken) tokens.set(identifier, accessToken);
+function withBearer(
+  server: HttpCursorPluginMcpServer,
+  accessToken: string,
+): HttpCursorPluginMcpServer {
+  return {
+    ...server,
+    headers: server.headers.map((header) =>
+      header.name.toLowerCase() === "authorization"
+        ? { name: header.name, value: `Bearer ${accessToken}` }
+        : header,
+    ),
+  };
+}
+
+/**
+ * The checkout a linked git worktree was created from, read from the
+ * worktree's `.git` file (`gitdir: <checkout>/.git/worktrees/<name>`).
+ */
+function gitWorktreeSourceCheckout(cwd: string): string | undefined {
+  let gitFile: string;
+  try {
+    gitFile = NodeFS.readFileSync(NodePath.join(cwd, ".git"), "utf8");
+  } catch {
+    return undefined;
+  }
+  const gitDir = /^gitdir:\s*(.+)$/m.exec(gitFile)?.[1]?.trim();
+  if (gitDir === undefined) return undefined;
+  // Git writes forward slashes even on Windows, so match either separator.
+  const markers = [...gitDir.matchAll(/[\\/]\.git[\\/]worktrees[\\/]/g)];
+  const index = markers.at(-1)?.index ?? -1;
+  return index > 0 ? NodePath.normalize(gitDir.slice(0, index)) : undefined;
+}
+
+/**
+ * Cursor CLI keeps plugin OAuth per folder in `projects/<slug>/mcp-auth.json`,
+ * written where the user signed in through `/mcp`. Candidates come from the
+ * thread's folder, then the checkout a Kata worktree was created from, then,
+ * because plugins are user-scoped, other folders by most recent write.
+ */
+function readPluginTokens(
+  projectsDir: string,
+  cwd: string,
+): ReadonlyMap<string, ReadonlyArray<StoredPluginToken>> {
+  const authFileFor = (folder: string) =>
+    NodePath.join(projectsDir, cursorWorkspaceSlug(folder), "mcp-auth.json");
+  const sourceCheckout = gitWorktreeSourceCheckout(cwd);
+  const preferredAuthFiles = [
+    authFileFor(cwd),
+    ...(sourceCheckout === undefined ? [] : [authFileFor(sourceCheckout)]),
+  ];
+  let slugs: string[];
+  try {
+    slugs = NodeFS.readdirSync(projectsDir);
+  } catch {
+    slugs = [];
+  }
+  const otherAuthFiles = slugs
+    .map((slug) => NodePath.join(projectsDir, slug, "mcp-auth.json"))
+    .filter((authFile) => !preferredAuthFiles.includes(authFile))
+    .flatMap((authFile) => {
+      try {
+        return [{ authFile, mtimeMs: NodeFS.statSync(authFile).mtimeMs }];
+      } catch {
+        return [];
+      }
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .map(({ authFile }) => authFile);
+
+  // A file's mtime also moves when another plugin's record changes, so it
+  // only ranks candidates; a rejected token falls through to the next one.
+  const tokens = new Map<string, StoredPluginToken[]>();
+  for (const authFile of [...preferredAuthFiles, ...otherAuthFiles]) {
+    const records = readJsonObject(authFile);
+    if (!records) continue;
+    for (const [identifier, rawRecord] of Object.entries(records)) {
+      if (!isRecord(rawRecord) || !isRecord(rawRecord.tokens)) continue;
+      const accessToken = stringField(rawRecord.tokens, "access_token");
+      if (!accessToken) continue;
+      const candidates = tokens.get(identifier) ?? [];
+      if (candidates.length < MAX_STORED_TOKEN_CANDIDATES) {
+        candidates.push({ accessToken, authFile });
+        tokens.set(identifier, candidates);
+      }
+    }
   }
   return tokens;
 }
@@ -209,7 +290,7 @@ function readPluginManifest(pluginRoot: string): Record<string, unknown> | undef
 
 function readPluginMcpServers(
   pluginRoots: ReadonlyArray<string>,
-  accessTokens: ReadonlyMap<string, string>,
+  storedTokens: ReadonlyMap<string, ReadonlyArray<StoredPluginToken>>,
   env: NodeJS.ProcessEnv,
 ): {
   readonly servers: ReadonlyArray<EffectAcpSchema.McpServer>;
@@ -230,7 +311,7 @@ function readPluginMcpServers(
         identifier,
         rawConfig,
         pluginRoot,
-        accessTokens.get(identifier),
+        storedTokens.get(identifier)?.[0]?.accessToken,
         env,
       );
       if (!converted) continue;
@@ -243,13 +324,13 @@ function readPluginMcpServers(
         isHttpCursorPluginMcpServer(server) &&
         (converted.usesStoredAccessToken || !declaresAuthorization(rawConfig))
       ) {
-        const storedAccessToken = converted.usesStoredAccessToken
-          ? accessTokens.get(identifier)
+        const candidates = converted.usesStoredAccessToken
+          ? storedTokens.get(identifier)
           : undefined;
         authProbes.push({
           requirement: { identifier, displayName: pluginName },
           server,
-          ...(storedAccessToken === undefined ? {} : { storedAccessToken }),
+          ...(candidates === undefined ? {} : { storedTokens: candidates }),
         });
       }
     }
@@ -337,6 +418,7 @@ function toAcpMcpServer(
   const type = stringField(rawConfig, "type")?.toLowerCase();
   const url = resolveTemplate(stringField(rawConfig, "url"), pluginRoot, env);
   const command = resolveTemplate(stringField(rawConfig, "command"), pluginRoot, env);
+  const bearerToken = url !== undefined && carriesBearerTokens(url) ? accessToken : undefined;
   if (
     url &&
     (type === undefined ||
@@ -344,7 +426,7 @@ function toAcpMcpServer(
       type === "streamable-http" ||
       type === "streamablehttp")
   ) {
-    const resolvedHeaders = httpHeaders(rawConfig.headers, pluginRoot, accessToken, env);
+    const resolvedHeaders = httpHeaders(rawConfig.headers, pluginRoot, bearerToken, env);
     return {
       server: {
         type: "http",
@@ -356,7 +438,7 @@ function toAcpMcpServer(
     };
   }
   if (url && type === "sse") {
-    const resolvedHeaders = httpHeaders(rawConfig.headers, pluginRoot, accessToken, env);
+    const resolvedHeaders = httpHeaders(rawConfig.headers, pluginRoot, bearerToken, env);
     return {
       server: {
         type: "sse",
@@ -384,6 +466,21 @@ function toAcpMcpServer(
     };
   }
   return undefined;
+}
+
+/** Stored OAuth tokens go only to HTTPS or loopback HTTP, never in cleartext over a network. */
+function carriesBearerTokens(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "https:") return true;
+    const host = parsed.hostname.toLowerCase();
+    return (
+      parsed.protocol === "http:" &&
+      (host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host))
+    );
+  } catch {
+    return false;
+  }
 }
 
 function httpHeaders(

@@ -973,7 +973,7 @@ export function makeCursorAdapter(
                       provider: PROVIDER,
                       threadId: input.threadId,
                       payload: {
-                        message: `Cursor plugin authentication is required for ${displayNames}. Authenticate with mcp_auth in Cursor desktop for this workspace, then start a new Kata agent session.`,
+                        message: `Cursor plugin authentication is required for ${displayNames}. Sign in once from Cursor CLI: run "agent", open /mcp, select the plugin, and sign in. Then start a new Kata session.`,
                         detail: authRequired.map((entry) => entry.identifier),
                       },
                     });

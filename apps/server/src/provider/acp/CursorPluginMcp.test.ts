@@ -105,7 +105,11 @@ interface CursorFixture {
 }
 
 /** A Cursor data dir whose `state.vscdb` installs `installedIds` for `CWD`. */
-function makeCursorFixture(prefix: string, installedIds: ReadonlyArray<string>): CursorFixture {
+function makeCursorFixture(
+  prefix: string,
+  installedIds: ReadonlyArray<string>,
+  cwd: string = CWD,
+): CursorFixture {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), prefix));
   const dataDir = NodePath.join(root, "cursor");
   const stateDb = NodePath.join(root, "state.vscdb");
@@ -114,13 +118,13 @@ function makeCursorFixture(prefix: string, installedIds: ReadonlyArray<string>):
   database
     .prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)")
     .run(
-      `cursor.plugins.installedIds.no-team|${NodeURL.pathToFileURL(CWD).href}`,
+      `cursor.plugins.installedIds.no-team|${NodeURL.pathToFileURL(cwd).href}`,
       encodeJson(installedIds.map((id) => ({ id, sources: ["user"] }))),
     );
   database.close();
   return {
     dataDir,
-    projectDir: NodePath.join(dataDir, "projects", cursorWorkspaceSlug(CWD)),
+    projectDir: NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd)),
     env: { HOME: root, CURSOR_DATA_DIR: dataDir, CURSOR_GLOBAL_STATE_DB: stateDb },
   };
 }
@@ -415,6 +419,270 @@ describe("discoverCursorPluginMcpServers", () => {
           "plugin-vercel-vercel": otherPlugin,
         });
       }),
+  );
+
+  effectIt.effect(
+    "uses the newest plugin token from another Cursor folder when the thread's folder has none",
+    () =>
+      Effect.gen(function* () {
+        const fixture = makeCursorFixture("cursor-plugin-mcp-other-folder-", ["512"]);
+        installCachedPlugin(fixture.dataDir, {
+          id: "512",
+          name: "linear",
+          mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+        });
+        const projectsDir = NodePath.join(fixture.dataDir, "projects");
+        const writeStore = (slug: string, accessToken: string, mtimeSeconds: number) => {
+          const authFile = NodePath.join(projectsDir, slug, "mcp-auth.json");
+          writeFile(
+            authFile,
+            encodeJson({
+              "plugin-linear-linear": {
+                tokens: { access_token: accessToken, refresh_token: `${accessToken}-refresh` },
+                clientInfo: { client_id: "client-1" },
+              },
+            }),
+          );
+          NodeFS.utimesSync(authFile, mtimeSeconds, mtimeSeconds);
+          return authFile;
+        };
+        writeStore("Volumes-EVO-dev-older", "older-token", 1_000);
+        writeStore("Volumes-EVO-dev-factory", "newest-token", 2_000);
+        // The thread's own folder holds only an ACP client registration.
+        writeFile(
+          NodePath.join(fixture.projectDir, "mcp-auth.json"),
+          encodeJson({
+            "plugin-linear-linear-0123456789abcdef": { clientInfo: { client_id: "acp" } },
+          }),
+        );
+
+        const linearHeaders = (discovery: { servers: ReadonlyArray<unknown> }) =>
+          discovery.servers.find(
+            (server) => (server as { name: string }).name === "plugin-linear-linear",
+          );
+        expect(linearHeaders(yield* discover(CWD, { env: fixture.env }))).toMatchObject({
+          headers: [{ name: "Authorization", value: "Bearer newest-token" }],
+        });
+
+        // A token in the thread's own folder wins over a newer one elsewhere.
+        writeStore(NodePath.basename(fixture.projectDir), "own-token", 500);
+        expect(linearHeaders(yield* discover(CWD, { env: fixture.env }))).toMatchObject({
+          headers: [{ name: "Authorization", value: "Bearer own-token" }],
+        });
+      }),
+  );
+
+  effectIt.effect(
+    "falls back to an older folder's token when the newest one is rejected and cannot refresh",
+    () =>
+      Effect.gen(function* () {
+        const fixture = makeCursorFixture("cursor-plugin-mcp-fallback-", ["512"]);
+        installCachedPlugin(fixture.dataDir, {
+          id: "512",
+          name: "linear",
+          mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+        });
+        const writeStore = (slug: string, accessToken: string, mtimeSeconds: number) => {
+          const authFile = NodePath.join(fixture.dataDir, "projects", slug, "mcp-auth.json");
+          writeFile(
+            authFile,
+            encodeJson({
+              "plugin-linear-linear": {
+                tokens: { access_token: accessToken, refresh_token: `${accessToken}-refresh` },
+                clientInfo: { client_id: "client-1" },
+              },
+            }),
+          );
+          NodeFS.utimesSync(authFile, mtimeSeconds, mtimeSeconds);
+        };
+        // Another plugin's sign-in touched this file last; its Linear grant is revoked.
+        writeStore("Volumes-EVO-dev-recently-touched", "revoked-token", 2_000);
+        writeStore("Volumes-EVO-dev-factory", "valid-token", 1_000);
+        const { fetchFn } = linearOAuthServer({
+          validAccessToken: "valid-token",
+          token: () => jsonResponse({ error: "invalid_grant" }, 400),
+        });
+
+        expect(yield* discover(CWD, { env: fixture.env, fetch: fetchFn })).toEqual({
+          servers: [
+            {
+              type: "http",
+              name: "plugin-linear-linear",
+              url: LINEAR_MCP,
+              headers: [{ name: "Authorization", value: "Bearer valid-token" }],
+            },
+          ],
+          authRequired: [],
+        });
+      }),
+  );
+
+  effectIt.effect(
+    "prefers the token of the checkout a worktree was created from over newer ones elsewhere",
+    () =>
+      Effect.gen(function* () {
+        const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cursor-plugin-worktree-"));
+        const checkout = NodePath.join(root, "factory");
+        const worktree = NodePath.join(root, "worktrees", "factory", "katacode-1");
+        writeFile(
+          NodePath.join(worktree, ".git"),
+          // Git writes forward slashes, including on Windows.
+          `gitdir: ${checkout.split(NodePath.sep).join("/")}/.git/worktrees/katacode-1\n`,
+        );
+        const fixture = makeCursorFixture("cursor-plugin-mcp-source-", ["512"], worktree);
+        installCachedPlugin(fixture.dataDir, {
+          id: "512",
+          name: "linear",
+          mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+        });
+        const writeStore = (folder: string, accessToken: string, mtimeSeconds: number) => {
+          const authFile = NodePath.join(
+            fixture.dataDir,
+            "projects",
+            cursorWorkspaceSlug(folder),
+            "mcp-auth.json",
+          );
+          writeFile(
+            authFile,
+            encodeJson({ "plugin-linear-linear": { tokens: { access_token: accessToken } } }),
+          );
+          NodeFS.utimesSync(authFile, mtimeSeconds, mtimeSeconds);
+        };
+        writeStore(checkout, "source-checkout-token", 1_000);
+        writeStore("/Volumes/EVO/dev/other-tenant", "other-tenant-token", 2_000);
+
+        expect((yield* discover(worktree, { env: fixture.env })).servers).toContainEqual({
+          type: "http",
+          name: "plugin-linear-linear",
+          url: LINEAR_MCP,
+          headers: [{ name: "Authorization", value: "Bearer source-checkout-token" }],
+        });
+      }),
+  );
+
+  effectIt.effect("moves to the next stored token when a refreshed token is still rejected", () =>
+    Effect.gen(function* () {
+      const fixture = makeCursorFixture("cursor-plugin-mcp-refresh-still-rejected-", ["512"]);
+      installCachedPlugin(fixture.dataDir, {
+        id: "512",
+        name: "linear",
+        mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+      });
+      const writeStore = (slug: string, accessToken: string, mtimeSeconds: number) => {
+        const authFile = NodePath.join(fixture.dataDir, "projects", slug, "mcp-auth.json");
+        writeFile(
+          authFile,
+          encodeJson({
+            "plugin-linear-linear": {
+              tokens: { access_token: accessToken, refresh_token: `${accessToken}-refresh` },
+              clientInfo: { client_id: "client-1" },
+            },
+          }),
+        );
+        NodeFS.utimesSync(authFile, mtimeSeconds, mtimeSeconds);
+      };
+      writeStore("Volumes-EVO-dev-newest", "expired-token", 2_000);
+      writeStore("Volumes-EVO-dev-factory", "valid-token", 1_000);
+      const { fetchFn } = linearOAuthServer({
+        validAccessToken: "valid-token",
+        token: () => jsonResponse({ access_token: "still-rejected", token_type: "Bearer" }),
+      });
+
+      expect(yield* discover(CWD, { env: fixture.env, fetch: fetchFn })).toEqual({
+        servers: [
+          {
+            type: "http",
+            name: "plugin-linear-linear",
+            url: LINEAR_MCP,
+            headers: [{ name: "Authorization", value: "Bearer valid-token" }],
+          },
+        ],
+        authRequired: [],
+      });
+    }),
+  );
+
+  effectIt.effect("attaches stored tokens only to HTTPS or loopback HTTP servers", () =>
+    Effect.gen(function* () {
+      const fixture = makeCursorFixture("cursor-plugin-mcp-cleartext-", ["600", "700"]);
+      installCachedPlugin(fixture.dataDir, {
+        id: "600",
+        name: "remote",
+        mcpServers: { remote: { type: "http", url: "http://mcp.example/mcp" } },
+      });
+      installCachedPlugin(fixture.dataDir, {
+        id: "700",
+        name: "local",
+        mcpServers: { local: { type: "http", url: "http://127.0.0.2:8123/mcp" } },
+      });
+      writeFile(
+        NodePath.join(fixture.projectDir, "mcp-auth.json"),
+        encodeJson({
+          "plugin-remote-remote": { tokens: { access_token: "remote-token" } },
+          "plugin-local-local": { tokens: { access_token: "local-token" } },
+        }),
+      );
+
+      const { servers } = yield* discover(CWD, { env: fixture.env });
+      expect(servers).toContainEqual({
+        type: "http",
+        name: "plugin-remote-remote",
+        url: "http://mcp.example/mcp",
+        headers: [],
+      });
+      expect(servers).toContainEqual({
+        type: "http",
+        name: "plugin-local-local",
+        url: "http://127.0.0.2:8123/mcp",
+        headers: [{ name: "Authorization", value: "Bearer local-token" }],
+      });
+    }),
+  );
+
+  effectIt.effect("writes a refreshed token back to the folder store it came from", () =>
+    Effect.gen(function* () {
+      const fixture = makeCursorFixture("cursor-plugin-mcp-other-folder-refresh-", ["512"]);
+      installCachedPlugin(fixture.dataDir, {
+        id: "512",
+        name: "linear",
+        mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+      });
+      const sourceStore = NodePath.join(
+        fixture.dataDir,
+        "projects",
+        "Volumes-EVO-dev-factory",
+        "mcp-auth.json",
+      );
+      writeFile(
+        sourceStore,
+        encodeJson({
+          "plugin-linear-linear": {
+            tokens: { access_token: "expired-token", refresh_token: "refresh-1" },
+            clientInfo: { client_id: "client-1" },
+          },
+        }),
+      );
+      const { fetchFn } = linearOAuthServer({
+        validAccessToken: "fresh-token",
+        token: () =>
+          jsonResponse({
+            access_token: "fresh-token",
+            token_type: "Bearer",
+            refresh_token: "refresh-2",
+          }),
+      });
+
+      expect(yield* discover(CWD, { env: fixture.env, fetch: fetchFn })).toMatchObject({
+        servers: [{ headers: [{ name: "Authorization", value: "Bearer fresh-token" }] }],
+        authRequired: [],
+      });
+      expect(decodeJson(NodeFS.readFileSync(sourceStore, "utf8"))).toMatchObject({
+        "plugin-linear-linear": {
+          tokens: { access_token: "fresh-token", refresh_token: "refresh-2" },
+        },
+      });
+      expect(NodeFS.existsSync(NodePath.join(fixture.projectDir, "mcp-auth.json"))).toBe(false);
+    }),
   );
 
   effectIt.effect("reports auth required when the server rejects the refreshed token", () =>
