@@ -28,6 +28,7 @@ import {
   cursorInstalledPluginRoots,
   makeCursorPluginScanBudget,
 } from "./CursorInstalledPlugins.ts";
+import { refreshCursorPluginAccessToken } from "./CursorPluginOAuth.ts";
 
 const PLUGIN_ROOT_VARS = ["CURSOR_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] as const;
 const PLUGIN_MANIFEST_DIRS = [".cursor-plugin", ".claude-plugin", ".codex-plugin"] as const;
@@ -74,6 +75,8 @@ export interface CursorPluginMcpDiscovery {
 interface PluginAuthProbe {
   readonly requirement: CursorPluginMcpAuthRequirement;
   readonly server: HttpCursorPluginMcpServer;
+  /** The stored OAuth access token forwarded in `server`, when there is one. */
+  readonly storedAccessToken?: string;
 }
 
 const NO_AUTH_REQUIRED: CursorPluginMcpDiscovery["checkAuth"] = Effect.succeed([]);
@@ -101,25 +104,31 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
       cwd,
     )).flatMap(({ root, evidence }) => (evidence === "listed" ? [root] : []));
     if (pluginRoots.length === 0) return { servers: [], checkAuth: NO_AUTH_REQUIRED };
-    const accessTokens = readPluginAccessTokens(
-      NodePath.join(
-        cursorDataDir(env, userHome),
-        "projects",
-        cursorWorkspaceSlug(cwd),
-        "mcp-auth.json",
-      ),
+    const authFile = NodePath.join(
+      cursorDataDir(env, userHome),
+      "projects",
+      cursorWorkspaceSlug(cwd),
+      "mcp-auth.json",
     );
-    const { servers, authProbes } = readPluginMcpServers(pluginRoots, accessTokens, env);
+    const discovered = readPluginMcpServers(pluginRoots, readPluginAccessTokens(authFile), env);
     const fetchFn = options?.fetch;
-    if (fetchFn === undefined || authProbes.length === 0) {
-      return { servers, checkAuth: NO_AUTH_REQUIRED };
+    if (fetchFn === undefined || discovered.authProbes.length === 0) {
+      return { servers: discovered.servers, checkAuth: NO_AUTH_REQUIRED };
     }
+    const checked = yield* Effect.forEach(
+      discovered.authProbes,
+      (probe) => withFreshStoredToken(probe, authFile, fetchFn),
+      { concurrency: "unbounded" },
+    );
+    const refreshedServers = new Map(checked.map(({ probe }) => [probe.server.name, probe.server]));
     return {
-      servers,
+      servers: discovered.servers.map((server) => refreshedServers.get(server.name) ?? server),
       checkAuth: Effect.promise(async () => {
         const results = await Promise.all(
-          authProbes.map(async ({ requirement, server }) =>
-            (await needsOAuth(server, fetchFn)) ? [requirement] : [],
+          checked.map(async ({ probe, needsAuth }) =>
+            (needsAuth ?? (await oauthChallenge(probe.server, fetchFn)) !== undefined)
+              ? [probe.requirement]
+              : [],
           ),
         );
         return results
@@ -129,6 +138,54 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
     };
   },
 );
+
+/**
+ * Stored access tokens expire, and nothing refreshes a token forwarded to ACP,
+ * so a rejected one is refreshed before the session starts. `needsAuth` is set
+ * when this check already settled the server's auth state.
+ */
+const withFreshStoredToken = Effect.fn("withFreshStoredToken")(function* (
+  probe: PluginAuthProbe,
+  authFile: string,
+  fetchFn: CursorPluginMcpFetch,
+): Effect.fn.Return<{ readonly probe: PluginAuthProbe; readonly needsAuth?: boolean }> {
+  const rejectedAccessToken = probe.storedAccessToken;
+  if (rejectedAccessToken === undefined) return { probe };
+  const resourceMetadata = yield* Effect.promise(() => oauthChallenge(probe.server, fetchFn));
+  if (resourceMetadata === undefined) return { probe, needsAuth: false };
+  const refresh = yield* Effect.promise(() =>
+    refreshCursorPluginAccessToken({
+      authFile,
+      identifier: probe.requirement.identifier,
+      resource: probe.server.url,
+      resourceMetadata,
+      rejectedAccessToken,
+      fetch: fetchFn,
+    }),
+  );
+  if (refresh._tag === "Failed") {
+    yield* Effect.logWarning("Cursor plugin OAuth refresh failed.", {
+      identifier: probe.requirement.identifier,
+      reason: refresh.reason,
+    });
+    return { probe, needsAuth: true };
+  }
+  // `needsAuth` stays unset so the background check verifies the new token.
+  return {
+    probe: {
+      ...probe,
+      storedAccessToken: refresh.accessToken,
+      server: {
+        ...probe.server,
+        headers: probe.server.headers.map((header) =>
+          header.name.toLowerCase() === "authorization"
+            ? { name: header.name, value: `Bearer ${refresh.accessToken}` }
+            : header,
+        ),
+      },
+    },
+  };
+});
 
 function readPluginAccessTokens(filePath: string): ReadonlyMap<string, string> {
   const tokens = new Map<string, string>();
@@ -186,7 +243,14 @@ function readPluginMcpServers(
         isHttpCursorPluginMcpServer(server) &&
         (converted.usesStoredAccessToken || !declaresAuthorization(rawConfig))
       ) {
-        authProbes.push({ requirement: { identifier, displayName: pluginName }, server });
+        const storedAccessToken = converted.usesStoredAccessToken
+          ? accessTokens.get(identifier)
+          : undefined;
+        authProbes.push({
+          requirement: { identifier, displayName: pluginName },
+          server,
+          ...(storedAccessToken === undefined ? {} : { storedAccessToken }),
+        });
       }
     }
   }
@@ -200,14 +264,14 @@ function isHttpCursorPluginMcpServer(
 }
 
 /**
- * True when the server rejects the request and advertises MCP OAuth
- * (`WWW-Authenticate` naming `resource_metadata`, RFC 9728). Other rejections,
- * such as a missing API key header, are not something `mcp_auth` can fix.
+ * The `resource_metadata` URI (RFC 9728) when the server rejects the request
+ * with an MCP OAuth challenge. Other rejections, such as a missing API key
+ * header, are not something `mcp_auth` can fix.
  */
-async function needsOAuth(
+async function oauthChallenge(
   server: HttpCursorPluginMcpServer,
   fetchFn: CursorPluginMcpFetch,
-): Promise<boolean> {
+): Promise<string | undefined> {
   const headers: Array<[string, string]> = server.headers.map((header): [string, string] => [
     header.name,
     header.value,
@@ -247,12 +311,12 @@ async function needsOAuth(
       headers,
       signal: AbortSignal.timeout(PLUGIN_AUTH_PROBE_TIMEOUT_MS),
     });
-    return (
-      (response.status === 401 || response.status === 403) &&
-      /\bresource_metadata=/i.test(response.headers.get("www-authenticate") ?? "")
-    );
+    if (response.status !== 401 && response.status !== 403) return undefined;
+    return /\bresource_metadata="([^"]+)"/i.exec(
+      response.headers.get("www-authenticate") ?? "",
+    )?.[1];
   } catch {
-    return false;
+    return undefined;
   } finally {
     try {
       await response?.body?.cancel();

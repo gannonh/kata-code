@@ -33,6 +33,61 @@ const OAUTH_CHALLENGE = {
     'Bearer realm="OAuth", resource_metadata="https://mcp.example/.well-known/oauth-protected-resource"',
 };
 
+const LINEAR_MCP = "https://mcp.linear.app/mcp";
+const LINEAR_RESOURCE_METADATA = "https://mcp.linear.app/oauth/resource-metadata";
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(encodeJson(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
+ * Linear's MCP endpoint, RFC 9728 and RFC 8414 metadata, and token endpoint.
+ * The MCP endpoint accepts only `validAccessToken`.
+ */
+function linearOAuthServer(options: {
+  readonly validAccessToken: string;
+  readonly token: (body: URLSearchParams) => Response;
+}) {
+  const tokenRequests: URLSearchParams[] = [];
+  const fetchFn: CursorPluginMcpFetch = async (input, init) => {
+    const url = String(input);
+    if (url === LINEAR_MCP) {
+      return new Headers(init?.headers).get("authorization") ===
+        `Bearer ${options.validAccessToken}`
+        ? new Response(null, { status: 200 })
+        : new Response(null, {
+            status: 401,
+            headers: {
+              "WWW-Authenticate": `Bearer resource_metadata="${LINEAR_RESOURCE_METADATA}"`,
+            },
+          });
+    }
+    // Served only at the URI the challenge names, not the RFC 9728 default.
+    if (url === LINEAR_RESOURCE_METADATA) {
+      return jsonResponse({
+        resource: LINEAR_MCP,
+        authorization_servers: ["https://mcp.linear.app"],
+      });
+    }
+    if (url === "https://mcp.linear.app/.well-known/oauth-authorization-server") {
+      return jsonResponse({
+        issuer: "https://mcp.linear.app",
+        token_endpoint: "https://mcp.linear.app/token",
+      });
+    }
+    if (url === "https://mcp.linear.app/token") {
+      const body = new URLSearchParams(String(init?.body));
+      tokenRequests.push(body);
+      return options.token(body);
+    }
+    return new Response(null, { status: 404 });
+  };
+  return { fetchFn, tokenRequests };
+}
+
 /** Discovery with its auth probes resolved, as the adapter sees them once they finish. */
 function discover(cwd: string, options: CursorPluginMcpDiscoveryOptions) {
   return discoverCursorPluginMcpServers(cwd, options).pipe(
@@ -284,6 +339,193 @@ describe("discoverCursorPluginMcpServers", () => {
         ],
         authRequired: [],
       });
+    }),
+  );
+
+  effectIt.effect(
+    "refreshes a rejected stored token, forwards the new one, and writes it back",
+    () =>
+      Effect.gen(function* () {
+        const fixture = makeCursorFixture("cursor-plugin-mcp-refresh-", ["512"]);
+        const authPath = NodePath.join(fixture.projectDir, "mcp-auth.json");
+        const clientInfo = { client_id: "client-1", token_endpoint_auth_method: "none" };
+        const otherPlugin = { clientInfo: { client_id: "other-client" } };
+        writeFile(
+          authPath,
+          encodeJson({
+            "plugin-linear-linear": {
+              tokens: {
+                access_token: "expired-token",
+                token_type: "Bearer",
+                expires_in: 86100,
+                refresh_token: "refresh-1",
+                scope: "read write",
+              },
+              clientInfo,
+            },
+            "plugin-vercel-vercel": otherPlugin,
+          }),
+        );
+        installCachedPlugin(fixture.dataDir, {
+          id: "512",
+          name: "linear",
+          mcpServers: { linear: { type: "streamable-http", url: LINEAR_MCP } },
+        });
+        const { fetchFn, tokenRequests } = linearOAuthServer({
+          validAccessToken: "fresh-token",
+          token: () =>
+            jsonResponse({
+              access_token: "fresh-token",
+              token_type: "Bearer",
+              expires_in: 86100,
+              refresh_token: "refresh-2",
+              scope: "read write",
+            }),
+        });
+
+        expect(yield* discover(CWD, { env: fixture.env, fetch: fetchFn })).toEqual({
+          servers: [
+            {
+              type: "http",
+              name: "plugin-linear-linear",
+              url: LINEAR_MCP,
+              headers: [{ name: "Authorization", value: "Bearer fresh-token" }],
+            },
+          ],
+          authRequired: [],
+        });
+        expect(tokenRequests).toHaveLength(1);
+        expect(Object.fromEntries(tokenRequests[0] ?? [])).toEqual({
+          grant_type: "refresh_token",
+          refresh_token: "refresh-1",
+          client_id: "client-1",
+          resource: LINEAR_MCP,
+        });
+        expect(decodeJson(NodeFS.readFileSync(authPath, "utf8"))).toEqual({
+          "plugin-linear-linear": {
+            tokens: {
+              access_token: "fresh-token",
+              token_type: "Bearer",
+              expires_in: 86100,
+              refresh_token: "refresh-2",
+              scope: "read write",
+            },
+            clientInfo,
+          },
+          "plugin-vercel-vercel": otherPlugin,
+        });
+      }),
+  );
+
+  effectIt.effect("reports auth required when the server rejects the refreshed token", () =>
+    Effect.gen(function* () {
+      const fixture = makeCursorFixture("cursor-plugin-mcp-refresh-rejected-", ["512"]);
+      writeFile(
+        NodePath.join(fixture.projectDir, "mcp-auth.json"),
+        encodeJson({
+          "plugin-linear-linear": {
+            tokens: { access_token: "expired-token", refresh_token: "refresh-1" },
+            clientInfo: { client_id: "client-1" },
+          },
+        }),
+      );
+      installCachedPlugin(fixture.dataDir, {
+        id: "512",
+        name: "linear",
+        mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+      });
+      const { fetchFn } = linearOAuthServer({
+        validAccessToken: "token-with-other-scope",
+        token: () => jsonResponse({ access_token: "fresh-token", token_type: "Bearer" }),
+      });
+
+      expect(yield* discover(CWD, { env: fixture.env, fetch: fetchFn })).toMatchObject({
+        authRequired: [{ identifier: "plugin-linear-linear", displayName: "linear" }],
+      });
+    }),
+  );
+
+  effectIt.effect("keeps a credential Cursor stored while the refresh was in flight", () =>
+    Effect.gen(function* () {
+      const fixture = makeCursorFixture("cursor-plugin-mcp-refresh-race-", ["512"]);
+      const authPath = NodePath.join(fixture.projectDir, "mcp-auth.json");
+      writeFile(
+        authPath,
+        encodeJson({
+          "plugin-linear-linear": {
+            tokens: { access_token: "expired-token", refresh_token: "refresh-1" },
+            clientInfo: { client_id: "client-1" },
+          },
+        }),
+      );
+      installCachedPlugin(fixture.dataDir, {
+        id: "512",
+        name: "linear",
+        mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+      });
+      const reauthenticated = encodeJson({
+        "plugin-linear-linear": {
+          tokens: { access_token: "reauthed-token", refresh_token: "refresh-new" },
+          clientInfo: { client_id: "client-2" },
+        },
+      });
+      const { fetchFn } = linearOAuthServer({
+        validAccessToken: "reauthed-token",
+        token: () => {
+          // Cursor signs in again with a new registration mid-refresh.
+          writeFile(authPath, reauthenticated);
+          return jsonResponse({ access_token: "fresh-token", token_type: "Bearer" });
+        },
+      });
+
+      expect(yield* discover(CWD, { env: fixture.env, fetch: fetchFn })).toEqual({
+        servers: [
+          {
+            type: "http",
+            name: "plugin-linear-linear",
+            url: LINEAR_MCP,
+            headers: [{ name: "Authorization", value: "Bearer reauthed-token" }],
+          },
+        ],
+        authRequired: [],
+      });
+      expect(NodeFS.readFileSync(authPath, "utf8")).toBe(reauthenticated);
+    }),
+  );
+
+  effectIt.effect("reports auth required and keeps the stored tokens when the refresh fails", () =>
+    Effect.gen(function* () {
+      const fixture = makeCursorFixture("cursor-plugin-mcp-refresh-failed-", ["512"]);
+      const authPath = NodePath.join(fixture.projectDir, "mcp-auth.json");
+      const stored = encodeJson({
+        "plugin-linear-linear": {
+          tokens: { access_token: "expired-token", refresh_token: "revoked" },
+          clientInfo: { client_id: "client-1" },
+        },
+      });
+      writeFile(authPath, stored);
+      installCachedPlugin(fixture.dataDir, {
+        id: "512",
+        name: "linear",
+        mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+      });
+      const { fetchFn } = linearOAuthServer({
+        validAccessToken: "fresh-token",
+        token: () => jsonResponse({ error: "invalid_grant" }, 400),
+      });
+
+      expect(yield* discover(CWD, { env: fixture.env, fetch: fetchFn })).toEqual({
+        servers: [
+          {
+            type: "http",
+            name: "plugin-linear-linear",
+            url: LINEAR_MCP,
+            headers: [{ name: "Authorization", value: "Bearer expired-token" }],
+          },
+        ],
+        authRequired: [{ identifier: "plugin-linear-linear", displayName: "linear" }],
+      });
+      expect(NodeFS.readFileSync(authPath, "utf8")).toBe(stored);
     }),
   );
 
