@@ -6,3 +6,4 @@ reviews:
     # Vendored read-only reference checkouts of upstream Effect and Alchemy
     # (see scripts/lib/reference-repos.ts). Nothing imports from them.
     - "!.repos/**"
+    - "!**/*.md"
