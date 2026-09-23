@@ -695,6 +695,27 @@ describe("Cursor skills", () => {
       }),
     ));
 
+  it("reports a filesystem error when Cursor's install database is unreadable", async () =>
+    await runNode(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const userHome = yield* fileSystem.makeTempDirectory({
+          directory: NodeOS.tmpdir(),
+          prefix: "cursor-skills-home-",
+        });
+        const stateDb = path.join(userHome, "state.vscdb");
+        yield* fileSystem.writeFileString(stateDb, "not a sqlite database");
+
+        const result = yield* probeCursorSkills(userHome, {
+          HOME: userHome,
+          CURSOR_GLOBAL_STATE_DB: stateDb,
+        }).pipe(Effect.result);
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") expect(result.failure.reason).toBe("filesystem-error");
+      }),
+    ));
+
   it("reads installed plugin ids from XDG_CONFIG_HOME", async () =>
     await runNode(
       Effect.gen(function* () {

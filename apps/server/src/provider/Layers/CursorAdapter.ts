@@ -550,11 +550,12 @@ export function makeCursorAdapter(
 
           const processEnv = options?.environment ?? process.env;
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
-          const pluginMcpDiscovery = yield* Effect.promise(() =>
-            discoverCursorPluginMcpServers(cwd, {
-              env: processEnv,
-              ...(options?.pluginMcpFetch ? { fetch: options.pluginMcpFetch } : {}),
-            }),
+          const pluginMcpDiscovery = yield* discoverCursorPluginMcpServers(cwd, {
+            env: processEnv,
+            ...(options?.pluginMcpFetch ? { fetch: options.pluginMcpFetch } : {}),
+          }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
           );
           const mcpServers = acpMcpServersForProviderSession({
             mcpSession,
@@ -958,21 +959,28 @@ export function makeCursorAdapter(
             threadId: input.threadId,
             payload: { providerThreadId: started.sessionId },
           });
-          if (pluginMcpDiscovery.authRequired.length > 0) {
-            const displayNames = pluginMcpDiscovery.authRequired
-              .map((entry) => entry.displayName)
-              .join(", ");
-            yield* offerRuntimeEvent({
-              type: "runtime.warning",
-              ...(yield* makeEventStamp()),
-              provider: PROVIDER,
-              threadId: input.threadId,
-              payload: {
-                message: `Cursor plugin authentication is required for ${displayNames}. Authenticate with mcp_auth in Cursor desktop for this workspace, then start a new Kata agent session.`,
-                detail: pluginMcpDiscovery.authRequired.map((entry) => entry.identifier),
-              },
-            });
-          }
+          // Auth probes can wait on a slow MCP server, so they run in the
+          // session scope instead of delaying session start.
+          yield* pluginMcpDiscovery.checkAuth.pipe(
+            Effect.flatMap((authRequired) =>
+              authRequired.length === 0
+                ? Effect.void
+                : Effect.gen(function* () {
+                    const displayNames = authRequired.map((entry) => entry.displayName).join(", ");
+                    yield* offerRuntimeEvent({
+                      type: "runtime.warning",
+                      ...(yield* makeEventStamp()),
+                      provider: PROVIDER,
+                      threadId: input.threadId,
+                      payload: {
+                        message: `Cursor plugin authentication is required for ${displayNames}. Authenticate with mcp_auth in Cursor desktop for this workspace, then start a new Kata agent session.`,
+                        detail: authRequired.map((entry) => entry.identifier),
+                      },
+                    });
+                  }),
+            ),
+            Effect.forkIn(ctx.scope),
+          );
 
           return session;
         }).pipe(Effect.scoped),
