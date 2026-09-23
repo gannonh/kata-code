@@ -63,8 +63,20 @@ export interface CursorPluginMcpAuthRequirement {
 
 export interface CursorPluginMcpDiscovery {
   readonly servers: ReadonlyArray<EffectAcpSchema.McpServer>;
-  readonly authRequired: ReadonlyArray<CursorPluginMcpAuthRequirement>;
+  /**
+   * Probes forwarded HTTP servers and resolves to the plugins whose OAuth
+   * credential is missing or rejected. Callers run it off the session-start
+   * path because each probe can take up to the probe timeout.
+   */
+  readonly checkAuth: Effect.Effect<ReadonlyArray<CursorPluginMcpAuthRequirement>>;
 }
+
+interface PluginAuthProbe {
+  readonly requirement: CursorPluginMcpAuthRequirement;
+  readonly server: HttpCursorPluginMcpServer;
+}
+
+const NO_AUTH_REQUIRED: CursorPluginMcpDiscovery["checkAuth"] = Effect.succeed([]);
 
 export function cursorWorkspaceSlug(cwd: string): string {
   return cwd
@@ -88,7 +100,7 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
       makeCursorPluginScanBudget(),
       cwd,
     )).flatMap(({ root, evidence }) => (evidence === "listed" ? [root] : []));
-    if (pluginRoots.length === 0) return { servers: [], authRequired: [] };
+    if (pluginRoots.length === 0) return { servers: [], checkAuth: NO_AUTH_REQUIRED };
     const accessTokens = readPluginAccessTokens(
       NodePath.join(
         cursorDataDir(env, userHome),
@@ -97,10 +109,24 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
         "mcp-auth.json",
       ),
     );
+    const { servers, authProbes } = readPluginMcpServers(pluginRoots, accessTokens, env);
     const fetchFn = options?.fetch;
-    return yield* Effect.promise(() =>
-      readPluginMcpServers(pluginRoots, accessTokens, env, fetchFn),
-    );
+    if (fetchFn === undefined || authProbes.length === 0) {
+      return { servers, checkAuth: NO_AUTH_REQUIRED };
+    }
+    return {
+      servers,
+      checkAuth: Effect.promise(async () => {
+        const results = await Promise.all(
+          authProbes.map(async ({ requirement, server }) =>
+            (await needsOAuth(server, fetchFn)) ? [requirement] : [],
+          ),
+        );
+        return results
+          .flat()
+          .sort((left, right) => left.identifier.localeCompare(right.identifier));
+      }),
+    };
   },
 );
 
@@ -124,14 +150,16 @@ function readPluginManifest(pluginRoot: string): Record<string, unknown> | undef
   return undefined;
 }
 
-async function readPluginMcpServers(
+function readPluginMcpServers(
   pluginRoots: ReadonlyArray<string>,
   accessTokens: ReadonlyMap<string, string>,
   env: NodeJS.ProcessEnv,
-  fetchFn: CursorPluginMcpFetch | undefined,
-): Promise<CursorPluginMcpDiscovery> {
+): {
+  readonly servers: ReadonlyArray<EffectAcpSchema.McpServer>;
+  readonly authProbes: ReadonlyArray<PluginAuthProbe>;
+} {
   const servers: EffectAcpSchema.McpServer[] = [];
-  const authChecks: Array<Promise<CursorPluginMcpAuthRequirement | undefined>> = [];
+  const authProbes: PluginAuthProbe[] = [];
   const taken = new Set<string>();
   for (const pluginRoot of pluginRoots) {
     const mcpServers = readJsonObject(NodePath.join(pluginRoot, "mcp.json"))?.mcpServers;
@@ -155,23 +183,14 @@ async function readPluginMcpServers(
       // A launch config that declares its own Authorization expects a
       // credential from the environment, which mcp_auth cannot supply.
       if (
-        fetchFn !== undefined &&
         isHttpCursorPluginMcpServer(server) &&
         (converted.usesStoredAccessToken || !declaresAuthorization(rawConfig))
       ) {
-        authChecks.push(
-          isAuthRejected(server, fetchFn).then((rejected) =>
-            rejected ? { identifier, displayName: pluginName } : undefined,
-          ),
-        );
+        authProbes.push({ requirement: { identifier, displayName: pluginName }, server });
       }
     }
   }
-  const authRequired = (await Promise.all(authChecks)).filter(
-    (requirement): requirement is CursorPluginMcpAuthRequirement => requirement !== undefined,
-  );
-  authRequired.sort((left, right) => left.identifier.localeCompare(right.identifier));
-  return { servers, authRequired };
+  return { servers, authProbes };
 }
 
 function isHttpCursorPluginMcpServer(
@@ -180,7 +199,12 @@ function isHttpCursorPluginMcpServer(
   return "type" in server && (server.type === "http" || server.type === "sse");
 }
 
-async function isAuthRejected(
+/**
+ * True when the server rejects the request and advertises MCP OAuth
+ * (`WWW-Authenticate` naming `resource_metadata`, RFC 9728). Other rejections,
+ * such as a missing API key header, are not something `mcp_auth` can fix.
+ */
+async function needsOAuth(
   server: HttpCursorPluginMcpServer,
   fetchFn: CursorPluginMcpFetch,
 ): Promise<boolean> {
@@ -223,7 +247,10 @@ async function isAuthRejected(
       headers,
       signal: AbortSignal.timeout(PLUGIN_AUTH_PROBE_TIMEOUT_MS),
     });
-    return response.status === 401 || response.status === 403;
+    return (
+      (response.status === 401 || response.status === 403) &&
+      /\bresource_metadata=/i.test(response.headers.get("www-authenticate") ?? "")
+    );
   } catch {
     return false;
   } finally {

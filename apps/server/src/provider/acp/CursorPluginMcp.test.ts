@@ -28,8 +28,19 @@ function writeFile(filePath: string, contents: string): void {
   NodeFS.writeFileSync(filePath, contents);
 }
 
+const OAUTH_CHALLENGE = {
+  "WWW-Authenticate":
+    'Bearer realm="OAuth", resource_metadata="https://mcp.example/.well-known/oauth-protected-resource"',
+};
+
+/** Discovery with its auth probes resolved, as the adapter sees them once they finish. */
 function discover(cwd: string, options: CursorPluginMcpDiscoveryOptions) {
-  return discoverCursorPluginMcpServers(cwd, options).pipe(Effect.provide(NodeServices.layer));
+  return discoverCursorPluginMcpServers(cwd, options).pipe(
+    Effect.flatMap(({ servers, checkAuth }) =>
+      Effect.map(checkAuth, (authRequired) => ({ servers, authRequired })),
+    ),
+    Effect.provide(NodeServices.layer),
+  );
 }
 
 interface CursorFixture {
@@ -294,7 +305,7 @@ describe("discoverCursorPluginMcpServers", () => {
       const requests: Array<{ url: string; init: RequestInit }> = [];
       const fetchFn: CursorPluginMcpFetch = async (input, init) => {
         requests.push({ url: String(input), init: init ?? {} });
-        return new Response(null, { status: 401 });
+        return new Response(null, { status: 401, headers: OAUTH_CHALLENGE });
       };
       const discovery = yield* discover(CWD, { env: fixture.env, fetch: fetchFn });
 
@@ -315,10 +326,15 @@ describe("discoverCursorPluginMcpServers", () => {
   );
 
   effectIt.effect(
-    "marks OAuth plugins auth-required when a missing or malformed token is rejected, but not env-credential plugins",
+    "marks OAuth plugins auth-required when a missing or malformed token is rejected, but not env-credential or API-key plugins",
     () =>
       Effect.gen(function* () {
-        const fixture = makeCursorFixture("cursor-plugin-mcp-invalid-auth-", ["512", "600", "700"]);
+        const fixture = makeCursorFixture("cursor-plugin-mcp-invalid-auth-", [
+          "512",
+          "600",
+          "700",
+          "800",
+        ]);
         installCachedPlugin(fixture.dataDir, {
           id: "512",
           name: "linear",
@@ -328,6 +344,17 @@ describe("discoverCursorPluginMcpServers", () => {
           id: "600",
           name: "open",
           mcpServers: { open: { type: "http", url: "https://open.example/mcp" } },
+        });
+        installCachedPlugin(fixture.dataDir, {
+          id: "800",
+          name: "apikey",
+          mcpServers: {
+            apikey: {
+              type: "http",
+              url: "https://apikey.example/mcp",
+              headers: { "X-API-Key": "${MISSING_API_KEY}" },
+            },
+          },
         });
         installCachedPlugin(fixture.dataDir, {
           id: "700",
@@ -343,7 +370,11 @@ describe("discoverCursorPluginMcpServers", () => {
         const probed: string[] = [];
         const fetchFn: CursorPluginMcpFetch = async (input) => {
           probed.push(String(input));
-          return new Response(null, { status: String(input).includes("open") ? 200 : 401 });
+          const url = String(input);
+          if (url.includes("open")) return new Response(null, { status: 200 });
+          // An API-key server rejects without advertising OAuth.
+          if (url.includes("apikey")) return new Response(null, { status: 401 });
+          return new Response(null, { status: 401, headers: OAUTH_CHALLENGE });
         };
         const options = { env: fixture.env, fetch: fetchFn };
         const expectedAuthRequired = [
@@ -367,7 +398,11 @@ describe("discoverCursorPluginMcpServers", () => {
           headers: [],
         });
         expect(discovery.authRequired).toEqual(expectedAuthRequired);
-        expect(probed.sort()).toEqual(["https://mcp.linear.app/mcp", "https://open.example/mcp"]);
+        expect(probed.sort()).toEqual([
+          "https://apikey.example/mcp",
+          "https://mcp.linear.app/mcp",
+          "https://open.example/mcp",
+        ]);
         for (const contents of malformedAuthFiles) {
           writeFile(authPath, contents);
           expect(yield* discover(CWD, options)).toMatchObject({

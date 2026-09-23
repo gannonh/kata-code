@@ -1869,14 +1869,18 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       );
       writeFile(NodePath.join(pluginRoot, ".cache-complete"), "");
     }
-    // Linear rejects requests without its OAuth bearer; GitHub accepts anonymous ones.
+    // Linear answers a request without its OAuth bearer with an MCP OAuth
+    // challenge; GitHub accepts anonymous ones.
     const pluginMcpFetch: typeof globalThis.fetch = async (input, init) =>
-      new Response(null, {
-        status:
-          String(input).includes("linear") && !new Headers(init?.headers).has("authorization")
-            ? 401
-            : 200,
-      });
+      String(input).includes("linear") && !new Headers(init?.headers).has("authorization")
+        ? new Response(null, {
+            status: 401,
+            headers: {
+              "WWW-Authenticate":
+                'Bearer resource_metadata="https://mcp.linear.app/.well-known/oauth-protected-resource/mcp"',
+            },
+          })
+        : new Response(null, { status: 200 });
 
     const createThreadId = ThreadId.make("cursor-plugin-mcp-create");
     const loadThreadId = ThreadId.make("cursor-plugin-mcp-load");
@@ -1960,6 +1964,14 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         Stream.runCollect,
         Effect.forkChild,
       );
+      // The auth probe runs after session start, so wait for its warning.
+      const loadWarningFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter(
+          (event) => event.threadId === loadThreadId && event.type === "runtime.warning",
+        ),
+        Stream.runHead,
+        Effect.forkChild,
+      );
       McpProviderSession.setMcpProviderSession({
         ...mcpSession,
         threadId: loadThreadId,
@@ -1971,6 +1983,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         runtimeMode: "full-access",
         resumeCursor: { schemaVersion: 1, sessionId: "mock-session-1" },
       });
+      yield* Fiber.join(loadWarningFiber).pipe(Effect.timeout("10 seconds"));
       yield* adapter.stopSession(loadThreadId);
       const loadEvents = Array.from(yield* Fiber.join(loadEventsFiber));
       assert.deepEqual(
