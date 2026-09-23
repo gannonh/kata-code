@@ -72,11 +72,17 @@ export interface CursorPluginMcpDiscovery {
   readonly checkAuth: Effect.Effect<ReadonlyArray<CursorPluginMcpAuthRequirement>>;
 }
 
+/** A plugin's OAuth access token and the `mcp-auth.json` store it came from. */
+interface StoredPluginToken {
+  readonly accessToken: string;
+  readonly authFile: string;
+}
+
 interface PluginAuthProbe {
   readonly requirement: CursorPluginMcpAuthRequirement;
   readonly server: HttpCursorPluginMcpServer;
-  /** The stored OAuth access token forwarded in `server`, when there is one. */
-  readonly storedAccessToken?: string;
+  /** The stored OAuth token forwarded in `server`, when there is one. */
+  readonly storedToken?: StoredPluginToken;
 }
 
 const NO_AUTH_REQUIRED: CursorPluginMcpDiscovery["checkAuth"] = Effect.succeed([]);
@@ -104,20 +110,18 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
       cwd,
     )).flatMap(({ root, evidence }) => (evidence === "listed" ? [root] : []));
     if (pluginRoots.length === 0) return { servers: [], checkAuth: NO_AUTH_REQUIRED };
-    const authFile = NodePath.join(
-      cursorDataDir(env, userHome),
-      "projects",
-      cursorWorkspaceSlug(cwd),
-      "mcp-auth.json",
+    const discovered = readPluginMcpServers(
+      pluginRoots,
+      readPluginTokens(NodePath.join(cursorDataDir(env, userHome), "projects"), cwd),
+      env,
     );
-    const discovered = readPluginMcpServers(pluginRoots, readPluginAccessTokens(authFile), env);
     const fetchFn = options?.fetch;
     if (fetchFn === undefined || discovered.authProbes.length === 0) {
       return { servers: discovered.servers, checkAuth: NO_AUTH_REQUIRED };
     }
     const checked = yield* Effect.forEach(
       discovered.authProbes,
-      (probe) => withFreshStoredToken(probe, authFile, fetchFn),
+      (probe) => withFreshStoredToken(probe, fetchFn),
       { concurrency: "unbounded" },
     );
     const refreshedServers = new Map(checked.map(({ probe }) => [probe.server.name, probe.server]));
@@ -146,20 +150,19 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
  */
 const withFreshStoredToken = Effect.fn("withFreshStoredToken")(function* (
   probe: PluginAuthProbe,
-  authFile: string,
   fetchFn: CursorPluginMcpFetch,
 ): Effect.fn.Return<{ readonly probe: PluginAuthProbe; readonly needsAuth?: boolean }> {
-  const rejectedAccessToken = probe.storedAccessToken;
-  if (rejectedAccessToken === undefined) return { probe };
+  const storedToken = probe.storedToken;
+  if (storedToken === undefined) return { probe };
   const resourceMetadata = yield* Effect.promise(() => oauthChallenge(probe.server, fetchFn));
   if (resourceMetadata === undefined) return { probe, needsAuth: false };
   const refresh = yield* Effect.promise(() =>
     refreshCursorPluginAccessToken({
-      authFile,
+      authFile: storedToken.authFile,
       identifier: probe.requirement.identifier,
       resource: probe.server.url,
       resourceMetadata,
-      rejectedAccessToken,
+      rejectedAccessToken: storedToken.accessToken,
       fetch: fetchFn,
     }),
   );
@@ -174,7 +177,7 @@ const withFreshStoredToken = Effect.fn("withFreshStoredToken")(function* (
   return {
     probe: {
       ...probe,
-      storedAccessToken: refresh.accessToken,
+      storedToken: { ...storedToken, accessToken: refresh.accessToken },
       server: {
         ...probe.server,
         headers: probe.server.headers.map((header) =>
@@ -187,14 +190,45 @@ const withFreshStoredToken = Effect.fn("withFreshStoredToken")(function* (
   };
 });
 
-function readPluginAccessTokens(filePath: string): ReadonlyMap<string, string> {
-  const tokens = new Map<string, string>();
-  const records = readJsonObject(filePath);
-  if (!records) return tokens;
-  for (const [identifier, rawRecord] of Object.entries(records)) {
-    if (!isRecord(rawRecord) || !isRecord(rawRecord.tokens)) continue;
-    const accessToken = stringField(rawRecord.tokens, "access_token");
-    if (accessToken) tokens.set(identifier, accessToken);
+/**
+ * Cursor CLI keeps plugin OAuth per folder in `projects/<slug>/mcp-auth.json`,
+ * written where the user signed in through `/mcp`. Plugins are user-scoped, so
+ * a folder without its own token (such as a Kata worktree Cursor never opened)
+ * uses the most recently written token for that plugin from any folder.
+ */
+function readPluginTokens(
+  projectsDir: string,
+  cwd: string,
+): ReadonlyMap<string, StoredPluginToken> {
+  const ownAuthFile = NodePath.join(projectsDir, cursorWorkspaceSlug(cwd), "mcp-auth.json");
+  let slugs: string[];
+  try {
+    slugs = NodeFS.readdirSync(projectsDir);
+  } catch {
+    slugs = [];
+  }
+  const otherAuthFiles = slugs
+    .map((slug) => NodePath.join(projectsDir, slug, "mcp-auth.json"))
+    .filter((authFile) => authFile !== ownAuthFile)
+    .flatMap((authFile) => {
+      try {
+        return [{ authFile, mtimeMs: NodeFS.statSync(authFile).mtimeMs }];
+      } catch {
+        return [];
+      }
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .map(({ authFile }) => authFile);
+
+  const tokens = new Map<string, StoredPluginToken>();
+  for (const authFile of [ownAuthFile, ...otherAuthFiles]) {
+    const records = readJsonObject(authFile);
+    if (!records) continue;
+    for (const [identifier, rawRecord] of Object.entries(records)) {
+      if (tokens.has(identifier) || !isRecord(rawRecord) || !isRecord(rawRecord.tokens)) continue;
+      const accessToken = stringField(rawRecord.tokens, "access_token");
+      if (accessToken) tokens.set(identifier, { accessToken, authFile });
+    }
   }
   return tokens;
 }
@@ -209,7 +243,7 @@ function readPluginManifest(pluginRoot: string): Record<string, unknown> | undef
 
 function readPluginMcpServers(
   pluginRoots: ReadonlyArray<string>,
-  accessTokens: ReadonlyMap<string, string>,
+  storedTokens: ReadonlyMap<string, StoredPluginToken>,
   env: NodeJS.ProcessEnv,
 ): {
   readonly servers: ReadonlyArray<EffectAcpSchema.McpServer>;
@@ -230,7 +264,7 @@ function readPluginMcpServers(
         identifier,
         rawConfig,
         pluginRoot,
-        accessTokens.get(identifier),
+        storedTokens.get(identifier)?.accessToken,
         env,
       );
       if (!converted) continue;
@@ -243,13 +277,13 @@ function readPluginMcpServers(
         isHttpCursorPluginMcpServer(server) &&
         (converted.usesStoredAccessToken || !declaresAuthorization(rawConfig))
       ) {
-        const storedAccessToken = converted.usesStoredAccessToken
-          ? accessTokens.get(identifier)
+        const storedToken = converted.usesStoredAccessToken
+          ? storedTokens.get(identifier)
           : undefined;
         authProbes.push({
           requirement: { identifier, displayName: pluginName },
           server,
-          ...(storedAccessToken === undefined ? {} : { storedAccessToken }),
+          ...(storedToken === undefined ? {} : { storedToken }),
         });
       }
     }

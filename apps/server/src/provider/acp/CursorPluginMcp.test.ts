@@ -417,6 +417,103 @@ describe("discoverCursorPluginMcpServers", () => {
       }),
   );
 
+  effectIt.effect(
+    "uses the newest plugin token from another Cursor folder when the thread's folder has none",
+    () =>
+      Effect.gen(function* () {
+        const fixture = makeCursorFixture("cursor-plugin-mcp-other-folder-", ["512"]);
+        installCachedPlugin(fixture.dataDir, {
+          id: "512",
+          name: "linear",
+          mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+        });
+        const projectsDir = NodePath.join(fixture.dataDir, "projects");
+        const writeStore = (slug: string, accessToken: string, mtimeSeconds: number) => {
+          const authFile = NodePath.join(projectsDir, slug, "mcp-auth.json");
+          writeFile(
+            authFile,
+            encodeJson({
+              "plugin-linear-linear": {
+                tokens: { access_token: accessToken, refresh_token: `${accessToken}-refresh` },
+                clientInfo: { client_id: "client-1" },
+              },
+            }),
+          );
+          NodeFS.utimesSync(authFile, mtimeSeconds, mtimeSeconds);
+          return authFile;
+        };
+        writeStore("Volumes-EVO-dev-older", "older-token", 1_000);
+        writeStore("Volumes-EVO-dev-factory", "newest-token", 2_000);
+        // The thread's own folder holds only an ACP client registration.
+        writeFile(
+          NodePath.join(fixture.projectDir, "mcp-auth.json"),
+          encodeJson({
+            "plugin-linear-linear-0123456789abcdef": { clientInfo: { client_id: "acp" } },
+          }),
+        );
+
+        const linearHeaders = (discovery: { servers: ReadonlyArray<unknown> }) =>
+          discovery.servers.find(
+            (server) => (server as { name: string }).name === "plugin-linear-linear",
+          );
+        expect(linearHeaders(yield* discover(CWD, { env: fixture.env }))).toMatchObject({
+          headers: [{ name: "Authorization", value: "Bearer newest-token" }],
+        });
+
+        // A token in the thread's own folder wins over a newer one elsewhere.
+        writeStore(NodePath.basename(fixture.projectDir), "own-token", 500);
+        expect(linearHeaders(yield* discover(CWD, { env: fixture.env }))).toMatchObject({
+          headers: [{ name: "Authorization", value: "Bearer own-token" }],
+        });
+      }),
+  );
+
+  effectIt.effect("writes a refreshed token back to the folder store it came from", () =>
+    Effect.gen(function* () {
+      const fixture = makeCursorFixture("cursor-plugin-mcp-other-folder-refresh-", ["512"]);
+      installCachedPlugin(fixture.dataDir, {
+        id: "512",
+        name: "linear",
+        mcpServers: { linear: { type: "http", url: LINEAR_MCP } },
+      });
+      const sourceStore = NodePath.join(
+        fixture.dataDir,
+        "projects",
+        "Volumes-EVO-dev-factory",
+        "mcp-auth.json",
+      );
+      writeFile(
+        sourceStore,
+        encodeJson({
+          "plugin-linear-linear": {
+            tokens: { access_token: "expired-token", refresh_token: "refresh-1" },
+            clientInfo: { client_id: "client-1" },
+          },
+        }),
+      );
+      const { fetchFn } = linearOAuthServer({
+        validAccessToken: "fresh-token",
+        token: () =>
+          jsonResponse({
+            access_token: "fresh-token",
+            token_type: "Bearer",
+            refresh_token: "refresh-2",
+          }),
+      });
+
+      expect(yield* discover(CWD, { env: fixture.env, fetch: fetchFn })).toMatchObject({
+        servers: [{ headers: [{ name: "Authorization", value: "Bearer fresh-token" }] }],
+        authRequired: [],
+      });
+      expect(decodeJson(NodeFS.readFileSync(sourceStore, "utf8"))).toMatchObject({
+        "plugin-linear-linear": {
+          tokens: { access_token: "fresh-token", refresh_token: "refresh-2" },
+        },
+      });
+      expect(NodeFS.existsSync(NodePath.join(fixture.projectDir, "mcp-auth.json"))).toBe(false);
+    }),
+  );
+
   effectIt.effect("reports auth required when the server rejects the refreshed token", () =>
     Effect.gen(function* () {
       const fixture = makeCursorFixture("cursor-plugin-mcp-refresh-rejected-", ["512"]);

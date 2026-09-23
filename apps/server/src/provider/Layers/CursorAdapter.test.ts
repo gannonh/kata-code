@@ -2003,7 +2003,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       if (warning?.type === "runtime.warning") {
         assert.equal(
           warning.payload.message,
-          "Cursor plugin authentication is required for linear. Authenticate with mcp_auth in Cursor desktop for this workspace, then start a new Kata agent session.",
+          'Cursor plugin authentication is required for linear. Sign in once from Cursor CLI: run "agent", open /mcp, select the plugin, and sign in. Then start a new Kata session.',
         );
         assert.deepEqual(warning.payload.detail, ["plugin-linear-linear"]);
       }
