@@ -334,8 +334,8 @@ export function RoutineChat({
         <div className="mt-3 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive">
           {error}
           <Button
-            className="ml-2 h-6 px-2"
-            size="sm"
+            className="ml-2"
+            size="xs"
             variant="outline"
             onClick={() => void submit()}
             disabled={pending}
