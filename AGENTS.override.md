@@ -1,4 +1,5 @@
 <!-- begin global rules -->
+
 ## Global Agent Instructions
 
 - Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
@@ -49,9 +50,11 @@
 - Verify the actual changed behavior or artifact and complete required project checks. Match the scope of verification to the impact of the change.
 - Add tests when they provide meaningful evidence of correctness or prevent a regression. Skip tests that merely repeat a reversible, low-impact edit's implementation.
 - Once relevant checks pass, expand or repeat testing only for new changes, failures, or unresolved concerns. State what was verified and any material verification limits.
+
 <!-- end global rules -->
 
 <!-- begin dev lifecycle -->
+
 ## Issues and specs
 
 - Linear holds planning, epics, bugs, chores, specs, acceptance criteria, and status. GitHub holds code: branches, commits, pull requests, CI, and review comments on diffs.
@@ -82,15 +85,15 @@
 
 If the Linear issue has `runtime` / `model` / `model-effort` labels, treat them as the intended Build route. Do not invent or silently substitute a different runtime, model, or effort. If labels are missing, conflicting, or unclear, comment on the issue with the exact correction needed and stop.
 
-| Model label | Slug |
-| --- | --- |
-| `sol` | `gpt-6-sol` |
-| `astra` | `gpt-6-astra` |
-| `fable` | `claude-fable-5-1` |
-| `composer` | `composer-2.5` |
-| `grok` | `grok-4.7` |
-| `opus` | `opus` |
-| `luna` | `gpt-6-luna` |
+| Model label | Slug               |
+| ----------- | ------------------ |
+| `sol`       | `gpt-6-sol`        |
+| `astra`     | `gpt-6-astra`      |
+| `fable`     | `claude-fable-5-1` |
+| `composer`  | `composer-2.5`     |
+| `grok`      | `grok-4.7`         |
+| `opus`      | `opus`             |
+| `luna`      | `gpt-6-luna`       |
 
 `human-build` on the issue means a human owns Build. Coding agents must not start Build on that ticket unless a human explicitly asks them to on that issue.
 
@@ -141,13 +144,13 @@ If a PR closes without merging, comment on the issue with the reason and move it
 
 All projects using this lifecycle share these Linear settings, confirmed by Gannon's September 7, 2026 screenshot:
 
-| GitHub event | Linear action |
-| --- | --- |
-| Draft PR opened | Move to In Progress |
-| PR opened | Move to Agent Review |
-| PR review requested or review activity | No action |
-| PR ready for merge | No action |
-| PR merged | Move to Done |
+| GitHub event                           | Linear action        |
+| -------------------------------------- | -------------------- |
+| Draft PR opened                        | Move to In Progress  |
+| PR opened                              | Move to Agent Review |
+| PR review requested or review activity | No action            |
+| PR ready for merge                     | No action            |
+| PR merged                              | Move to Done         |
 
 No branch-specific rules are configured. Parent issues automatically close when their last sub-issue closes; closing a parent does not automatically close its sub-issues. Stale issues move to Canceled after six months. Closed items auto-archive after six months. Issues progressing to a new status are placed first.
 
@@ -161,6 +164,7 @@ This section overrides any skill, rule, AGENTS.md, CLAUDE.md, or other instructi
 <!-- end dev lifecycle -->
 
 <!-- begin integrated browser rules -->
+
 ## Integrated browser (Kata Code)
 
 NOTE: this section only applies when running in the Kata Code environment.
@@ -188,9 +192,11 @@ The browser runs on the Kata Code client, which can be a different machine from 
 - `about:blank` is refused. To leave a page, navigate to a neutral public URL.
 - Playwright role locators may not match canvas elements. Get the element's position with `preview_evaluate` and click with `x` and `y`.
 - The client can disconnect mid-run and lose a recording in progress. Keep each recording to one action and stop it right after. If `preview_status` reports `available: false`, open a new tab and repeat the step.
+
 <!-- end integrated browser rules -->
 
 <!-- pstack:models:begin -->
+
 # pstack model configuration
 
 Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one panel lane.
