@@ -3149,7 +3149,7 @@ describe("ProviderCommandReactor", () => {
     });
     const now = "2026-01-01T00:00:00.000Z";
     const startTurn = (id: string) =>
-      Effect.runPromise(
+      harness.runEffect(
         harness.engine.dispatch({
           type: "thread.turn.start",
           commandId: CommandId.make(`cmd-turn-start-${id}`),
@@ -3166,7 +3166,7 @@ describe("ProviderCommandReactor", () => {
         }),
       );
 
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "thread.meta.update",
         commandId: CommandId.make("cmd-thread-worktree"),
@@ -3181,7 +3181,7 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 2);
     expect(harness.startSession).toHaveBeenCalledTimes(1);
 
-    await Effect.runPromise(
+    await harness.runEffect(
       harness.engine.dispatch({
         type: "project.meta.update",
         commandId: CommandId.make("cmd-project-move"),
