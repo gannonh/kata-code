@@ -82,8 +82,9 @@ export default defineConfig({
   staged: {
     // Formatter only. Oxfmt has no shell parser, so "*" is unsafe: a bash-only
     // commit forwards .sh paths and oxfmt exits when it has no target files.
+    // The flag covers commits that stage only files in fmt.ignorePatterns.
     "*.{js,jsx,cjs,mjs,ts,tsx,cts,mts,json,jsonc,json5,yml,yaml,toml,html,css,scss,less,md,mdx}":
-      "vp fmt",
+      "vp fmt --no-error-on-unmatched-pattern",
   },
   fmt: {
     ignorePatterns: [
@@ -92,6 +93,9 @@ export default defineConfig({
       ".agents/**",
       ".claude/**",
       ".cursor/**",
+      "AGENTS.override.md",
+      "CLAUDE.md",
+      "OPENCODE.md",
       ".alchemy",
       "dist",
       "dist-electron",
