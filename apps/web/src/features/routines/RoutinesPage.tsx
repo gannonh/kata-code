@@ -2479,7 +2479,7 @@ export function RoutinesPage() {
 
   if (!isReady)
     return (
-      <SidebarInset className="min-h-0 bg-background">
+      <SidebarInset className="min-h-0">
         <Empty>
           <EmptyHeader>
             <EmptyTitle>Loading routines…</EmptyTitle>
@@ -2489,7 +2489,7 @@ export function RoutinesPage() {
     );
 
   return (
-    <SidebarInset className="min-h-0 overflow-auto bg-background text-foreground">
+    <SidebarInset className="min-h-0 overflow-auto">
       <WorkspacePageHeader className="border-b border-border/60">
         <div className="flex items-center gap-2 text-sm">
           <span className="font-medium text-foreground">Routines</span>

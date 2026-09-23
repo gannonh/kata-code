@@ -517,7 +517,7 @@ export function AddEnvironmentDialog({
           />
         </Field>
         {state.error ? <ErrorText>{state.error}</ErrorText> : null}
-        <DialogFooter variant="bare" className="px-0">
+        <DialogFooter variant="bare" className="-mx-6">
           <BackButton disabled={isSubmitting} onClick={() => dispatch({ type: "back" })} />
           <Button disabled={isSubmitting} type="submit">
             {isSubmitting ? "Adding…" : "Add environment"}
@@ -611,7 +611,7 @@ export function AddEnvironmentDialog({
             </p>
           ) : null}
         </div>
-        <DialogFooter variant="bare" className="px-0">
+        <DialogFooter variant="bare" className="-mx-6">
           <BackButton disabled={isSubmitting} onClick={() => dispatch({ type: "back" })} />
           <Button disabled={isSubmitting} type="submit">
             {isSubmitting ? "Adding…" : "Add environment"}
@@ -649,7 +649,7 @@ export function AddEnvironmentDialog({
         {providerGroups.local.length === 0 && providerGroups.cloud.length === 0 ? (
           <p className="text-sm text-muted-foreground">No sandbox providers are available.</p>
         ) : null}
-        <DialogFooter variant="bare" className="px-0">
+        <DialogFooter variant="bare" className="-mx-6">
           <BackButton onClick={() => dispatch({ type: "back" })} />
         </DialogFooter>
       </div>
@@ -702,7 +702,7 @@ export function AddEnvironmentDialog({
             Refresh operation
           </Button>
         ) : null}
-        <DialogFooter variant="bare" className="px-0">
+        <DialogFooter variant="bare" className="-mx-6">
           <BackButton
             disabled={isBusy}
             onClick={() =>
@@ -774,12 +774,7 @@ export function AddEnvironmentDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
-          <Button
-            size="xs"
-            variant="ghost"
-            className="h-5 gap-1 rounded-sm px-1 text-[11px] font-normal text-muted-foreground/60 hover:text-muted-foreground"
-            aria-label="Add environment"
-          >
+          <Button size="xs" variant="ghost-muted" aria-label="Add environment">
             <PlusIcon className="size-3" />
             <span>Add environment</span>
           </Button>

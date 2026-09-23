@@ -1,14 +1,14 @@
 "use client";
 
 import type { SandboxGitHubRepositorySummary } from "@kata-sh/code-kata-sandbox-contracts/http";
-import { GitBranchIcon, GithubIcon, SearchIcon } from "lucide-react";
+import { GitBranchIcon, GithubIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "../../components/ui/button";
 import {
   Combobox,
   ComboboxEmpty,
-  ComboboxInput,
+  ComboboxSearchInput,
   ComboboxItem,
   ComboboxList,
   ComboboxPopup,
@@ -206,25 +206,12 @@ export function SandboxGitHubSourcePicker({
             </span>
           </ComboboxTrigger>
           <ComboboxPopup className="flex w-[min(28rem,90vw)] flex-col" align="start">
-            <div className="shrink-0 px-3 pt-2.5">
-              <div className="relative -translate-y-px border-b border-border/70 pb-1.5 focus-within:border-ring">
-                <SearchIcon
-                  aria-hidden="true"
-                  className="pointer-events-none absolute top-1.5 left-0 size-4 text-muted-foreground/55"
-                />
-                <ComboboxInput
-                  className="[&_input]:h-6.5 [&_input]:ps-5"
-                  inputClassName="rounded-none bg-transparent text-sm"
-                  placeholder="Search repositories…"
-                  showTrigger={false}
-                  size="sm"
-                  unstyled
-                  value={repositoryQuery}
-                  onChange={(event) => setRepositoryQuery(event.target.value)}
-                  aria-label="Search GitHub repositories"
-                />
-              </div>
-            </div>
+            <ComboboxSearchInput
+              placeholder="Search repositories…"
+              value={repositoryQuery}
+              onChange={(event) => setRepositoryQuery(event.target.value)}
+              aria-label="Search GitHub repositories"
+            />
             <ComboboxEmpty>
               {repositoryState === "loading" ? "Loading…" : "No repositories found."}
             </ComboboxEmpty>
@@ -244,8 +231,8 @@ export function SandboxGitHubSourcePicker({
               <div className="px-2 pb-2">
                 <Button
                   variant="ghost"
-                  size="sm"
-                  className="w-full text-xs"
+                  size="compact"
+                  className="w-full"
                   onClick={() => void loadRepositories(repositoryPage + 1)}
                 >
                   Load more
@@ -255,11 +242,13 @@ export function SandboxGitHubSourcePicker({
             {repositoryState === "loading" ? (
               <ComboboxStatus>Loading repositories…</ComboboxStatus>
             ) : repositoryState === "error" ? (
-              <ComboboxStatus className="flex items-center justify-between gap-2">
-                <span>{repositoryError ?? "Failed to load repositories."}</span>
-                <Button variant="ghost" size="sm" onClick={() => void loadRepositories(1)}>
-                  Retry
-                </Button>
+              <ComboboxStatus>
+                <div className="flex items-center justify-between gap-2">
+                  <span>{repositoryError ?? "Failed to load repositories."}</span>
+                  <Button variant="ghost" size="sm" onClick={() => void loadRepositories(1)}>
+                    Retry
+                  </Button>
+                </div>
               </ComboboxStatus>
             ) : null}
           </ComboboxPopup>
@@ -301,25 +290,12 @@ export function SandboxGitHubSourcePicker({
             </span>
           </ComboboxTrigger>
           <ComboboxPopup className="flex w-[min(28rem,90vw)] flex-col" align="start">
-            <div className="shrink-0 px-3 pt-2.5">
-              <div className="relative -translate-y-px border-b border-border/70 pb-1.5 focus-within:border-ring">
-                <SearchIcon
-                  aria-hidden="true"
-                  className="pointer-events-none absolute top-1.5 left-0 size-4 text-muted-foreground/55"
-                />
-                <ComboboxInput
-                  className="[&_input]:h-6.5 [&_input]:ps-5"
-                  inputClassName="rounded-none bg-transparent text-sm"
-                  placeholder="Search branches…"
-                  showTrigger={false}
-                  size="sm"
-                  unstyled
-                  value={branchQuery}
-                  onChange={(event) => setBranchQuery(event.target.value)}
-                  aria-label="Search branches"
-                />
-              </div>
-            </div>
+            <ComboboxSearchInput
+              placeholder="Search branches…"
+              value={branchQuery}
+              onChange={(event) => setBranchQuery(event.target.value)}
+              aria-label="Search branches"
+            />
             <ComboboxEmpty>
               {branchState === "loading" ? "Loading…" : "No branches found."}
             </ComboboxEmpty>
@@ -334,8 +310,8 @@ export function SandboxGitHubSourcePicker({
               <div className="px-2 pb-2">
                 <Button
                   variant="ghost"
-                  size="sm"
-                  className="w-full text-xs"
+                  size="compact"
+                  className="w-full"
                   onClick={() => void loadBranches(repository, branchPage + 1)}
                 >
                   Load more
@@ -345,11 +321,17 @@ export function SandboxGitHubSourcePicker({
             {branchState === "loading" ? (
               <ComboboxStatus>Loading branches…</ComboboxStatus>
             ) : branchState === "error" ? (
-              <ComboboxStatus className="flex items-center justify-between gap-2">
-                <span>{branchError ?? "Failed to load branches."}</span>
-                <Button variant="ghost" size="sm" onClick={() => void loadBranches(repository, 1)}>
-                  Retry
-                </Button>
+              <ComboboxStatus>
+                <div className="flex items-center justify-between gap-2">
+                  <span>{branchError ?? "Failed to load branches."}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void loadBranches(repository, 1)}
+                  >
+                    Retry
+                  </Button>
+                </div>
               </ComboboxStatus>
             ) : null}
           </ComboboxPopup>
