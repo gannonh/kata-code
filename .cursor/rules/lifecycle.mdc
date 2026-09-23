@@ -35,14 +35,13 @@ If the Linear issue has `runtime` / `model` / `model-effort` labels, treat them 
 
 | Model label | Slug |
 | --- | --- |
-| `sol` | `gpt-5.6-sol` |
+| `sol` | `gpt-6-sol` |
 | `astra` | `gpt-6-astra` |
 | `fable` | `claude-fable-5-1` |
 | `composer` | `composer-2.5` |
-| `grok` | `grok-4.6` |
-| `opus` | `claude-opus-5` |
-| `luna` | `gpt-5.6-luna` |
-| `terra` | `gpt-5.6-terra` |
+| `grok` | `grok-4.7` |
+| `opus` | `opus` |
+| `luna` | `gpt-6-luna` |
 
 `human-build` on the issue means a human owns Build. Coding agents must not start Build on that ticket unless a human explicitly asks them to on that issue.
 
