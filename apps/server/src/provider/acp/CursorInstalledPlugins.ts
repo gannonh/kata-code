@@ -392,7 +392,10 @@ export const cursorInstalledPluginRoots = Effect.fn("cursorInstalledPluginRoots"
   const installed = stateDb
     ? readInstalledPluginIdsSync(stateDb, cwd, path)
     : ({ _tag: "Missing" } as const);
-  if (installed._tag === "Unreadable") return roots;
+  if (installed._tag === "Unreadable") {
+    budget.incomplete = true;
+    return roots;
+  }
 
   const manifest = yield* readCloudPlugins(
     path.join(cacheDir, ".cloud-plugin-manifest.json"),
