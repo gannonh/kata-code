@@ -31,16 +31,13 @@ function useMemberProjectFiles(scope: ReturnType<typeof resolveSettingsScope>) {
                 T3_PROJECT_FILE_NAME,
               ),
             );
-            if (result.waiting) continue;
-            // A pending in-app save overlays the query, like useProjectFileQuery.
-            const data =
-              get(
-                optimisticFileAtom(
-                  member.environmentId,
-                  member.workspaceRoot,
-                  T3_PROJECT_FILE_NAME,
-                ),
-              )?.data ?? Option.getOrNull(AsyncResult.value(result));
+            // A pending in-app save overlays the query, like useProjectFileQuery,
+            // including while the save's confirming refresh is in flight.
+            const optimistic = get(
+              optimisticFileAtom(member.environmentId, member.workspaceRoot, T3_PROJECT_FILE_NAME),
+            )?.data;
+            if (optimistic === undefined && result.waiting) continue;
+            const data = optimistic ?? Option.getOrNull(AsyncResult.value(result));
             files.set(
               member.physicalProjectKey,
               data === null || data.truncated ? null : parseT3ProjectFile(data.contents),
