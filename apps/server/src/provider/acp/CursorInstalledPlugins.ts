@@ -350,20 +350,32 @@ const localPluginRoots = Effect.fn("localPluginRoots")(function* (
   return roots;
 });
 
+/**
+ * `listed`: `enabled_plugins` or the workspace install record names the plugin.
+ * `inferred`: the manifest stands in for a missing install record, or a cache
+ * version is adopted for an installed id that nothing maps to a plugin.
+ */
+export type CursorPluginEvidence = "listed" | "inferred";
+
+export interface CursorPluginRoot {
+  readonly root: string;
+  readonly evidence: CursorPluginEvidence;
+}
+
 /** Plugin roots enabled for `cwd`, local plugins first, deduplicated. */
 export const cursorInstalledPluginRoots = Effect.fn("cursorInstalledPluginRoots")(function* (
   userHome: string,
   environment: NodeJS.ProcessEnv,
   budget: CursorPluginScanBudget,
   cwd?: string,
-): Effect.fn.Return<ReadonlyArray<string>, never, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<ReadonlyArray<CursorPluginRoot>, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const dataDir = cursorDataDir(environment, userHome);
   const cacheDir = path.join(dataDir, "plugins", "cache");
-  const roots: string[] = [];
-  const addPlugin = (pluginRoot: string) => {
-    if (!roots.includes(pluginRoot)) roots.push(pluginRoot);
+  const roots: CursorPluginRoot[] = [];
+  const addPlugin = (root: string, evidence: CursorPluginEvidence) => {
+    if (!roots.some((entry) => entry.root === root)) roots.push({ root, evidence });
   };
 
   for (const pluginRoot of yield* localPluginRoots(
@@ -373,7 +385,7 @@ export const cursorInstalledPluginRoots = Effect.fn("cursorInstalledPluginRoots"
   )) {
     const info = yield* orUndefined(fileSystem.stat(pluginRoot), budget);
     if (info?.type !== "Directory") continue;
-    addPlugin(pluginRoot);
+    addPlugin(pluginRoot, "listed");
   }
 
   const stateDb = yield* cursorGlobalStateDb(userHome, environment);
@@ -403,7 +415,7 @@ export const cursorInstalledPluginRoots = Effect.fn("cursorInstalledPluginRoots"
     );
     for (const candidate of candidates) {
       if (!(yield* hasCompleteCache(candidate))) continue;
-      addPlugin(candidate);
+      addPlugin(candidate, installed._tag === "Ready" ? "listed" : "inferred");
       resolvedIds.add(plugin.pluginId);
       break;
     }
@@ -425,7 +437,7 @@ export const cursorInstalledPluginRoots = Effect.fn("cursorInstalledPluginRoots"
         if (!newest || candidate.mtimeMs > newest.mtimeMs) newest = candidate;
       }
       if (!newest) continue;
-      addPlugin(newest.directory);
+      addPlugin(newest.directory, "listed");
       resolvedIds.add(pluginId);
     }
 
@@ -446,7 +458,7 @@ export const cursorInstalledPluginRoots = Effect.fn("cursorInstalledPluginRoots"
     // cache folder only when the counts match. Several unknown ids are
     // ambiguous, so adopt none until the manifest names each id.
     if (unresolved.length > 0 && adoptions.length === unresolved.length) {
-      for (const directory of adoptions) addPlugin(directory);
+      for (const directory of adoptions) addPlugin(directory, "inferred");
     }
   }
 

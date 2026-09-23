@@ -246,8 +246,8 @@ const cursorPluginSkillDirectories = Effect.fn("cursorPluginSkillDirectories")(f
   cwd?: string,
 ) {
   const directories: string[] = [];
-  for (const pluginRoot of yield* cursorInstalledPluginRoots(userHome, environment, budget, cwd)) {
-    directories.push(...(yield* pluginSkillDirectories(pluginRoot, budget)));
+  for (const { root } of yield* cursorInstalledPluginRoots(userHome, environment, budget, cwd)) {
+    directories.push(...(yield* pluginSkillDirectories(root, budget)));
   }
   return directories;
 });

@@ -80,12 +80,14 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
   ): Effect.fn.Return<CursorPluginMcpDiscovery, never, FileSystem.FileSystem | Path.Path> {
     const env = options?.env ?? process.env;
     const userHome = options?.homedir ?? cursorHome(env);
-    const pluginRoots = yield* cursorInstalledPluginRoots(
+    // MCP servers launch processes and carry credentials, so only plugins the
+    // install record names explicitly are forwarded.
+    const pluginRoots = (yield* cursorInstalledPluginRoots(
       userHome,
       env,
       makeCursorPluginScanBudget(),
       cwd,
-    );
+    )).flatMap(({ root, evidence }) => (evidence === "listed" ? [root] : []));
     if (pluginRoots.length === 0) return { servers: [], authRequired: [] };
     const accessTokens = readPluginAccessTokens(
       NodePath.join(

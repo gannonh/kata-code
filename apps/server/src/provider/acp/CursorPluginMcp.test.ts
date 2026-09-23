@@ -59,12 +59,25 @@ function makeCursorFixture(prefix: string, installedIds: ReadonlyArray<string>):
   };
 }
 
-/** Writes a complete plugin cache version keyed by id, as Cursor does, and returns its root. */
+/** Writes a complete plugin cache version, keyed by id as Cursor does unless `folder` is set. */
 function installCachedPlugin(
   dataDir: string,
-  plugin: { readonly id: string; readonly name: string; readonly mcpServers: unknown },
+  plugin: {
+    readonly id: string;
+    readonly name: string;
+    readonly mcpServers: unknown;
+    readonly marketplace?: string;
+    readonly folder?: string;
+    readonly sha?: string;
+  },
 ): string {
-  const root = NodePath.join(dataDir, "plugins/cache/cursor-public", plugin.id, "sha1");
+  const root = NodePath.join(
+    dataDir,
+    "plugins/cache",
+    plugin.marketplace ?? "cursor-public",
+    plugin.folder ?? plugin.id,
+    plugin.sha ?? "sha1",
+  );
   writeFile(
     NodePath.join(root, ".cursor-plugin", "plugin.json"),
     encodeJson({ name: plugin.name }),
@@ -72,6 +85,21 @@ function installCachedPlugin(
   writeFile(NodePath.join(root, "mcp.json"), encodeJson({ mcpServers: plugin.mcpServers }));
   writeFile(NodePath.join(root, ".cache-complete"), "");
   return root;
+}
+
+function writeCloudManifest(
+  dataDir: string,
+  plugins: ReadonlyArray<{
+    readonly pluginId: string;
+    readonly name: string;
+    readonly marketplaceSlug: string;
+    readonly resolvedCommitSha: string;
+  }>,
+): void {
+  writeFile(
+    NodePath.join(dataDir, "plugins/cache/.cloud-plugin-manifest.json"),
+    encodeJson({ plugins }),
+  );
 }
 
 describe("cursorWorkspaceSlug", () => {
@@ -425,6 +453,63 @@ describe("discoverCursorPluginMcpServers", () => {
       expect(
         yield* discover(CWD, { env: { USERPROFILE: home, CURSOR_GLOBAL_STATE_DB: stateDb } }),
       ).toEqual(expected);
+    }),
+  );
+
+  effectIt.effect("forwards nothing when Cursor has no install record for the workspace", () =>
+    Effect.gen(function* () {
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cursor-plugin-mcp-no-db-"));
+      const dataDir = NodePath.join(root, "cursor");
+      writeCloudManifest(dataDir, [
+        {
+          pluginId: "512",
+          name: "linear",
+          marketplaceSlug: "cursor-public",
+          resolvedCommitSha: "sha1",
+        },
+      ]);
+      installCachedPlugin(dataDir, {
+        id: "512",
+        name: "linear",
+        mcpServers: { linear: { type: "http", url: "https://mcp.linear.app/mcp" } },
+      });
+
+      expect(
+        yield* discover(CWD, {
+          env: {
+            HOME: root,
+            CURSOR_DATA_DIR: dataDir,
+            CURSOR_GLOBAL_STATE_DB: NodePath.join(root, "missing.vscdb"),
+          },
+        }),
+      ).toEqual({ servers: [], authRequired: [] });
+    }),
+  );
+
+  effectIt.effect("does not forward a cache version adopted for an unmapped installed id", () =>
+    Effect.gen(function* () {
+      const fixture = makeCursorFixture("cursor-plugin-mcp-adopted-", ["999"]);
+      writeCloudManifest(fixture.dataDir, [
+        {
+          pluginId: "61242178",
+          name: "open-pstack",
+          marketplaceSlug: "gannonh-open-pstack",
+          resolvedCommitSha: "oldsha",
+        },
+      ]);
+      installCachedPlugin(fixture.dataDir, {
+        id: "61242178",
+        name: "open-pstack",
+        marketplace: "gannonh-open-pstack",
+        folder: "open-pstack",
+        sha: "newsha",
+        mcpServers: { tools: { command: "node", args: ["server.js"] } },
+      });
+
+      expect(yield* discover(CWD, { env: fixture.env })).toEqual({
+        servers: [],
+        authRequired: [],
+      });
     }),
   );
 
