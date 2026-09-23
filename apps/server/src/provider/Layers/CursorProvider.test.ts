@@ -330,20 +330,24 @@ const cursorCliCommandMissingMessage = [
   "See https://cursor.com/docs/cli/installation.",
 ].join(" ");
 
+// Skill discovery reports realpaths, and macOS puts tmpdir behind the /var -> /private/var link.
+const makeSkillFixtureDirectory = Effect.fn("makeSkillFixtureDirectory")(function* (
+  prefix: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  return yield* fileSystem.realPath(
+    yield* fileSystem.makeTempDirectory({ directory: NodeOS.tmpdir(), prefix }),
+  );
+});
+
 describe("Cursor skills", () => {
   it("discovers recursive project skills with project precedence", async () =>
     await runNode(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const userHome = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-home-",
-        });
-        const workspace = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-workspace-",
-        });
+        const userHome = yield* makeSkillFixtureDirectory("cursor-skills-home-");
+        const workspace = yield* makeSkillFixtureDirectory("cursor-skills-workspace-");
         const writeSkill = Effect.fn("writeCursorSkill")(function* (
           root: string,
           name: string,
@@ -415,18 +419,9 @@ describe("Cursor skills", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const userHome = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-home-",
-        });
-        const workspace = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-workspace-",
-        });
-        const library = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-library-",
-        });
+        const userHome = yield* makeSkillFixtureDirectory("cursor-skills-home-");
+        const workspace = yield* makeSkillFixtureDirectory("cursor-skills-workspace-");
+        const library = yield* makeSkillFixtureDirectory("cursor-skills-library-");
         const writeSkill = Effect.fn("writeCursorSkill")(function* (
           directory: string,
           contents: string,
@@ -465,14 +460,8 @@ describe("Cursor skills", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const userHome = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-home-",
-        });
-        const workspace = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-workspace-",
-        });
+        const userHome = yield* makeSkillFixtureDirectory("cursor-skills-home-");
+        const workspace = yield* makeSkillFixtureDirectory("cursor-skills-workspace-");
         const enabledSha = "84b6c4b36ff9b9d6b18bf784c761691d30acf4c6";
         const staleSha = "970df460f1ae6affbedab6e04f6b396917452431";
         const publicSha = "efa2a531985e0a8084d36ff3cf87233be8a9f34b";
@@ -636,14 +625,8 @@ describe("Cursor skills", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const userHome = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-home-",
-        });
-        const workspace = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-workspace-",
-        });
+        const userHome = yield* makeSkillFixtureDirectory("cursor-skills-home-");
+        const workspace = yield* makeSkillFixtureDirectory("cursor-skills-workspace-");
         const enabledSha = "84b6c4b36ff9b9d6b18bf784c761691d30acf4c6";
         const staleSha = "970df460f1ae6affbedab6e04f6b396917452431";
         const cache = path.join(userHome, ".cursor", "plugins", "cache");
@@ -700,10 +683,7 @@ describe("Cursor skills", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const userHome = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-home-",
-        });
+        const userHome = yield* makeSkillFixtureDirectory("cursor-skills-home-");
         const stateDb = path.join(userHome, "state.vscdb");
         yield* fileSystem.writeFileString(stateDb, "not a sqlite database");
 
@@ -721,18 +701,9 @@ describe("Cursor skills", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const userHome = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-home-",
-        });
-        const configHome = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-xdg-",
-        });
-        const workspace = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-workspace-",
-        });
+        const userHome = yield* makeSkillFixtureDirectory("cursor-skills-home-");
+        const configHome = yield* makeSkillFixtureDirectory("cursor-skills-xdg-");
+        const workspace = yield* makeSkillFixtureDirectory("cursor-skills-workspace-");
         const enabledSha = "84b6c4b36ff9b9d6b18bf784c761691d30acf4c6";
         const staleSha = "970df460f1ae6affbedab6e04f6b396917452431";
         const cache = path.join(userHome, ".cursor", "plugins", "cache");
@@ -823,22 +794,10 @@ describe("Cursor skills", () => {
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
-        const userHome = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-home-",
-        });
-        const workspace = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-workspace-",
-        });
-        const other = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-other-",
-        });
-        const absent = yield* fileSystem.makeTempDirectory({
-          directory: NodeOS.tmpdir(),
-          prefix: "cursor-skills-absent-",
-        });
+        const userHome = yield* makeSkillFixtureDirectory("cursor-skills-home-");
+        const workspace = yield* makeSkillFixtureDirectory("cursor-skills-workspace-");
+        const other = yield* makeSkillFixtureDirectory("cursor-skills-other-");
+        const absent = yield* makeSkillFixtureDirectory("cursor-skills-absent-");
         const enabledSha = "84b6c4b36ff9b9d6b18bf784c761691d30acf4c6";
         const staleSha = "970df460f1ae6affbedab6e04f6b396917452431";
         const cache = path.join(userHome, ".cursor", "plugins", "cache");
@@ -906,12 +865,6 @@ describe("Cursor skills", () => {
         });
 
         const environment = { HOME: userHome };
-        const enabledSkillPath = yield* fileSystem.realPath(
-          path.join(enabledRoot, "skills", "poteto-mode", "SKILL.md"),
-        );
-        const staleSkillPath = yield* fileSystem.realPath(
-          path.join(staleRoot, "skills", "stale-only", "SKILL.md"),
-        );
         expect((yield* probeCursorSkills(workspace, environment).pipe(Effect.result))._tag).toBe(
           "Success",
         );
@@ -920,7 +873,7 @@ describe("Cursor skills", () => {
           {
             name: "poteto-mode",
             description: "enabled install",
-            path: enabledSkillPath,
+            path: path.join(enabledRoot, "skills", "poteto-mode", "SKILL.md"),
             scope: "user",
             enabled: true,
           },
@@ -931,7 +884,7 @@ describe("Cursor skills", () => {
           {
             name: "stale-only",
             description: "stale install",
-            path: staleSkillPath,
+            path: path.join(staleRoot, "skills", "stale-only", "SKILL.md"),
             scope: "user",
             enabled: true,
           },

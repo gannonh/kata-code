@@ -55,6 +55,8 @@ interface ResolvedHttpHeaders {
 
 export interface CursorPluginMcpDiscoveryOptions {
   readonly env?: NodeJS.ProcessEnv;
+  /** The Kata project folder, when the thread runs in one of its worktrees. */
+  readonly workspaceRoot?: string;
   readonly homedir?: string;
   readonly fetch?: CursorPluginMcpFetch;
 }
@@ -117,7 +119,10 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
     if (pluginRoots.length === 0) return { servers: [], checkAuth: NO_AUTH_REQUIRED };
     const discovered = readPluginMcpServers(
       pluginRoots,
-      readPluginTokens(NodePath.join(cursorDataDir(env, userHome), "projects"), cwd),
+      readPluginTokens(
+        NodePath.join(cursorDataDir(env, userHome), "projects"),
+        options?.workspaceRoot === undefined ? [cwd] : [cwd, options.workspaceRoot],
+      ),
       env,
     );
     const fetchFn = options?.fetch;
@@ -206,40 +211,21 @@ function withBearer(
 }
 
 /**
- * The checkout a linked git worktree was created from, read from the
- * worktree's `.git` file (`gitdir: <checkout>/.git/worktrees/<name>`).
- */
-function gitWorktreeSourceCheckout(cwd: string): string | undefined {
-  let gitFile: string;
-  try {
-    gitFile = NodeFS.readFileSync(NodePath.join(cwd, ".git"), "utf8");
-  } catch {
-    return undefined;
-  }
-  const gitDir = /^gitdir:\s*(.+)$/m.exec(gitFile)?.[1]?.trim();
-  if (gitDir === undefined) return undefined;
-  // Git writes forward slashes even on Windows, so match either separator.
-  const markers = [...gitDir.matchAll(/[\\/]\.git[\\/]worktrees[\\/]/g)];
-  const index = markers.at(-1)?.index ?? -1;
-  return index > 0 ? NodePath.normalize(gitDir.slice(0, index)) : undefined;
-}
-
-/**
  * Cursor CLI keeps plugin OAuth per folder in `projects/<slug>/mcp-auth.json`,
- * written where the user signed in through `/mcp`. Candidates come from the
- * thread's folder, then the checkout a Kata worktree was created from, then,
- * because plugins are user-scoped, other folders by most recent write.
+ * written where the user signed in through `/mcp`. Candidates come from
+ * `preferredFolders` in order (the thread's folder, then its Kata project),
+ * then, because plugins are user-scoped, other folders by most recent write.
  */
 function readPluginTokens(
   projectsDir: string,
-  cwd: string,
+  preferredFolders: ReadonlyArray<string>,
 ): ReadonlyMap<string, ReadonlyArray<StoredPluginToken>> {
-  const authFileFor = (folder: string) =>
-    NodePath.join(projectsDir, cursorWorkspaceSlug(folder), "mcp-auth.json");
-  const sourceCheckout = gitWorktreeSourceCheckout(cwd);
   const preferredAuthFiles = [
-    authFileFor(cwd),
-    ...(sourceCheckout === undefined ? [] : [authFileFor(sourceCheckout)]),
+    ...new Set(
+      preferredFolders.map((folder) =>
+        NodePath.join(projectsDir, cursorWorkspaceSlug(folder), "mcp-auth.json"),
+      ),
+    ),
   ];
   let slugs: string[];
   try {

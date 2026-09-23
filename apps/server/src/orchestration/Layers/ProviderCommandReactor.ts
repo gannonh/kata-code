@@ -770,6 +770,7 @@ const make = Effect.gen(function* () {
           ...(preferredProvider ? { provider: preferredProvider } : {}),
           providerInstanceId: desiredInstanceId,
           ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+          ...(project ? { workspaceRoot: project.workspaceRoot } : {}),
           ...(thread.title ? { title: thread.title } : {}),
           modelSelection: desiredModelSelection,
           ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
@@ -811,6 +812,10 @@ const make = Effect.gen(function* () {
     if (existingSessionThreadId) {
       const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
+      // Adapters read the project folder only at start, e.g. to pick Cursor plugin tokens.
+      const workspaceRootChanged =
+        activeSession?.workspaceRoot !== undefined &&
+        activeSession.workspaceRoot !== project?.workspaceRoot;
       const sessionModelSwitch = (yield* providerService.getCapabilities(desiredInstanceId))
         .sessionModelSwitch;
       const modelChanged =
@@ -829,6 +834,7 @@ const make = Effect.gen(function* () {
       if (
         !runtimeModeChanged &&
         !cwdChanged &&
+        !workspaceRootChanged &&
         !instanceChanged &&
         !shouldRestartForModelChange &&
         !shouldRestartForModelSelectionChange
@@ -853,6 +859,7 @@ const make = Effect.gen(function* () {
         previousCwd: activeSession?.cwd,
         desiredCwd: effectiveCwd,
         cwdChanged,
+        workspaceRootChanged,
         modelChanged,
         instanceChanged,
         shouldRestartForModelChange,

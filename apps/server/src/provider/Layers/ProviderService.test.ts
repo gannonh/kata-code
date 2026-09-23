@@ -3044,7 +3044,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
-  it.effect("recovers stale sessions for sendTurn using persisted cwd", () =>
+  it.effect("recovers stale sessions for sendTurn using persisted cwd and workspace root", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
 
@@ -3053,6 +3053,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-1"),
         cwd: fixtureCwd("project-send-turn"),
+        workspaceRoot: "/projects/send-turn",
         runtimeMode: "full-access",
       });
 
@@ -3073,15 +3074,29 @@ routing.layer("ProviderServiceLive routing", (it) => {
         const startPayload = resumedStartInput as {
           provider?: string;
           cwd?: string;
+          workspaceRoot?: string;
           resumeCursor?: unknown;
           threadId?: string;
         };
         assert.equal(startPayload.provider, "codex");
         assert.equal(startPayload.cwd, fixtureCwd("project-send-turn"));
+        assert.equal(startPayload.workspaceRoot, "/projects/send-turn");
         assert.deepEqual(startPayload.resumeCursor, initial.resumeCursor);
         assert.equal(startPayload.threadId, initial.threadId);
       }
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+      const [recovered] = yield* provider.listSessions();
+      assert.equal(recovered?.workspaceRoot, "/projects/send-turn");
+
+      // The recovery's binding write keeps the root for the next recovery.
+      yield* routing.codex.stopAll();
+      routing.codex.startSession.mockClear();
+      yield* provider.sendTurn({ threadId: initial.threadId, input: "again", attachments: [] });
+      assert.equal(
+        (routing.codex.startSession.mock.calls[0]?.[0] as { workspaceRoot?: string } | undefined)
+          ?.workspaceRoot,
+        "/projects/send-turn",
+      );
     }),
   );
 
