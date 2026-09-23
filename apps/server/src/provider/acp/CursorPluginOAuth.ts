@@ -24,10 +24,15 @@ export interface CursorPluginOAuthRefreshInput {
   readonly identifier: string;
   /** MCP server URL, the OAuth protected resource. */
   readonly resource: string;
+  /** `resource_metadata` URI from the server's `WWW-Authenticate` challenge. */
+  readonly resourceMetadata: string;
   /** The access token the server rejected. */
   readonly rejectedAccessToken: string;
   readonly fetch: typeof globalThis.fetch;
 }
+
+/** Upper bound for the whole refresh, which runs before the session starts. */
+const REFRESH_TIMEOUT_MS = 10_000;
 
 const inFlight = new Map<string, Promise<CursorPluginOAuthRefresh>>();
 
@@ -61,7 +66,9 @@ async function performRefresh(
     return { _tag: "Failed", reason: "no stored refresh token or client registration" };
   }
 
+  const signal = AbortSignal.timeout(REFRESH_TIMEOUT_MS);
   const request = {
+    signal,
     [oauth.customFetch]: <Method extends string>(
       url: string,
       options: oauth.CustomFetchOptions<Method, URLSearchParams | undefined>,
@@ -75,10 +82,13 @@ async function performRefresh(
       }),
   };
   try {
-    const resource = new URL(input.resource);
     const resourceServer = await oauth.processResourceDiscoveryResponse(
-      resource,
-      await oauth.resourceDiscoveryRequest(resource, request),
+      new URL(input.resource),
+      await input.fetch(input.resourceMetadata, {
+        headers: { accept: "application/json" },
+        redirect: "manual",
+        signal,
+      }),
     );
     const issuer = resourceServer.authorization_servers?.[0];
     if (!issuer)
@@ -131,10 +141,16 @@ function writeTokens(authFile: string, identifier: string, tokens: Record<string
     `.${NodePath.basename(authFile)}.${process.pid}.tmp`,
   );
   const mode = NodeFS.statSync(authFile).mode & 0o777;
-  NodeFS.writeFileSync(temporary, JSON.stringify(records, null, 2));
-  // Set the mode explicitly so the process umask cannot narrow it.
-  NodeFS.chmodSync(temporary, mode);
-  NodeFS.renameSync(temporary, authFile);
+  try {
+    // Owner-only until the tokens are in place, then Cursor's mode exactly,
+    // which the process umask cannot narrow.
+    NodeFS.writeFileSync(temporary, JSON.stringify(records, null, 2), { mode: 0o600 });
+    NodeFS.chmodSync(temporary, mode);
+    NodeFS.renameSync(temporary, authFile);
+  } catch (error) {
+    NodeFS.rmSync(temporary, { force: true });
+    throw error;
+  }
 }
 
 function readAuthRecords(filePath: string): Record<string, unknown> | undefined {

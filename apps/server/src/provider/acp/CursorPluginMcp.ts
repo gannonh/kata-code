@@ -126,7 +126,9 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
       checkAuth: Effect.promise(async () => {
         const results = await Promise.all(
           checked.map(async ({ probe, needsAuth }) =>
-            (needsAuth ?? (await needsOAuth(probe.server, fetchFn))) ? [probe.requirement] : [],
+            (needsAuth ?? (await oauthChallenge(probe.server, fetchFn)) !== undefined)
+              ? [probe.requirement]
+              : [],
           ),
         );
         return results
@@ -149,14 +151,14 @@ const withFreshStoredToken = Effect.fn("withFreshStoredToken")(function* (
 ): Effect.fn.Return<{ readonly probe: PluginAuthProbe; readonly needsAuth?: boolean }> {
   const rejectedAccessToken = probe.storedAccessToken;
   if (rejectedAccessToken === undefined) return { probe };
-  if (!(yield* Effect.promise(() => needsOAuth(probe.server, fetchFn)))) {
-    return { probe, needsAuth: false };
-  }
+  const resourceMetadata = yield* Effect.promise(() => oauthChallenge(probe.server, fetchFn));
+  if (resourceMetadata === undefined) return { probe, needsAuth: false };
   const refresh = yield* Effect.promise(() =>
     refreshCursorPluginAccessToken({
       authFile,
       identifier: probe.requirement.identifier,
       resource: probe.server.url,
+      resourceMetadata,
       rejectedAccessToken,
       fetch: fetchFn,
     }),
@@ -262,14 +264,14 @@ function isHttpCursorPluginMcpServer(
 }
 
 /**
- * True when the server rejects the request and advertises MCP OAuth
- * (`WWW-Authenticate` naming `resource_metadata`, RFC 9728). Other rejections,
- * such as a missing API key header, are not something `mcp_auth` can fix.
+ * The `resource_metadata` URI (RFC 9728) when the server rejects the request
+ * with an MCP OAuth challenge. Other rejections, such as a missing API key
+ * header, are not something `mcp_auth` can fix.
  */
-async function needsOAuth(
+async function oauthChallenge(
   server: HttpCursorPluginMcpServer,
   fetchFn: CursorPluginMcpFetch,
-): Promise<boolean> {
+): Promise<string | undefined> {
   const headers: Array<[string, string]> = server.headers.map((header): [string, string] => [
     header.name,
     header.value,
@@ -309,12 +311,12 @@ async function needsOAuth(
       headers,
       signal: AbortSignal.timeout(PLUGIN_AUTH_PROBE_TIMEOUT_MS),
     });
-    return (
-      (response.status === 401 || response.status === 403) &&
-      /\bresource_metadata=/i.test(response.headers.get("www-authenticate") ?? "")
-    );
+    if (response.status !== 401 && response.status !== 403) return undefined;
+    return /\bresource_metadata="([^"]+)"/i.exec(
+      response.headers.get("www-authenticate") ?? "",
+    )?.[1];
   } catch {
-    return false;
+    return undefined;
   } finally {
     try {
       await response?.body?.cancel();

@@ -34,6 +34,7 @@ const OAUTH_CHALLENGE = {
 };
 
 const LINEAR_MCP = "https://mcp.linear.app/mcp";
+const LINEAR_RESOURCE_METADATA = "https://mcp.linear.app/oauth/resource-metadata";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(encodeJson(body), {
@@ -57,9 +58,15 @@ function linearOAuthServer(options: {
       return new Headers(init?.headers).get("authorization") ===
         `Bearer ${options.validAccessToken}`
         ? new Response(null, { status: 200 })
-        : new Response(null, { status: 401, headers: OAUTH_CHALLENGE });
+        : new Response(null, {
+            status: 401,
+            headers: {
+              "WWW-Authenticate": `Bearer resource_metadata="${LINEAR_RESOURCE_METADATA}"`,
+            },
+          });
     }
-    if (url === "https://mcp.linear.app/.well-known/oauth-protected-resource/mcp") {
+    // Served only at the URI the challenge names, not the RFC 9728 default.
+    if (url === LINEAR_RESOURCE_METADATA) {
       return jsonResponse({
         resource: LINEAR_MCP,
         authorization_servers: ["https://mcp.linear.app"],
