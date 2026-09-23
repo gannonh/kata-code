@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
+import * as NodeSqlite from "node:sqlite";
 import * as NodeURL from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -1829,47 +1830,53 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
     const cwd = NodePath.join(dataDir, "workspace");
     NodeFS.mkdirSync(cwd, { recursive: true });
     const projectDir = NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd));
-    const projectMcps = NodePath.join(projectDir, "mcps");
-    writeFile(
-      NodePath.join(projectMcps, "plugin-linear-linear", "SERVER_METADATA.json"),
-      JSON.stringify({
-        serverIdentifier: "plugin-linear-linear",
-        serverName: "Linear",
-      }),
-    );
-    writeFile(
-      NodePath.join(projectMcps, "plugin-linear-linear", "tools", "mcp_auth.json"),
-      JSON.stringify({ name: "mcp_auth" }),
-    );
-    writeFile(
-      NodePath.join(projectMcps, "plugin-github-github", "SERVER_METADATA.json"),
-      JSON.stringify({
-        serverIdentifier: "plugin-github-github",
-        serverName: "github",
-      }),
-    );
+    const stateDb = NodePath.join(dataDir, "state.vscdb");
+    const database = new NodeSqlite.DatabaseSync(stateDb);
+    database.exec("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)");
+    database
+      .prepare("INSERT INTO ItemTable (key, value) VALUES (?, ?)")
+      .run(
+        `cursor.plugins.installedIds.no-team|${NodeURL.pathToFileURL(cwd).href}`,
+        JSON.stringify([{ id: "512" }, { id: "48677658" }]),
+      );
+    database.close();
     writeFile(
       NodePath.join(projectDir, "mcp-auth.json"),
       JSON.stringify({
         "plugin-linear-linear": { tokens: { access_token: "fake-linear-token" } },
       }),
     );
-    writeFile(
-      NodePath.join(dataDir, "plugins/cache/cursor-public/linear/aaa111/mcp.json"),
-      JSON.stringify({
-        mcpServers: {
-          linear: { type: "streamable-http", url: "https://mcp.linear.app/mcp" },
-        },
-      }),
-    );
-    writeFile(
-      NodePath.join(dataDir, "plugins/cache/cursor-public/github/bbb222/mcp.json"),
-      JSON.stringify({
-        mcpServers: {
-          github: { type: "http", url: "https://api.githubcopilot.com/mcp/" },
-        },
-      }),
-    );
+    for (const plugin of [
+      {
+        id: "512",
+        name: "linear",
+        mcpServers: { linear: { type: "streamable-http", url: "https://mcp.linear.app/mcp" } },
+      },
+      {
+        id: "48677658",
+        name: "github",
+        mcpServers: { github: { type: "http", url: "https://api.githubcopilot.com/mcp/" } },
+      },
+    ]) {
+      const pluginRoot = NodePath.join(dataDir, "plugins/cache/cursor-public", plugin.id, "sha1");
+      writeFile(
+        NodePath.join(pluginRoot, ".cursor-plugin", "plugin.json"),
+        JSON.stringify({ name: plugin.name }),
+      );
+      writeFile(
+        NodePath.join(pluginRoot, "mcp.json"),
+        JSON.stringify({ mcpServers: plugin.mcpServers }),
+      );
+      writeFile(NodePath.join(pluginRoot, ".cache-complete"), "");
+    }
+    // Linear rejects requests without its OAuth bearer; GitHub accepts anonymous ones.
+    const pluginMcpFetch: typeof globalThis.fetch = async (input, init) =>
+      new Response(null, {
+        status:
+          String(input).includes("linear") && !new Headers(init?.headers).has("authorization")
+            ? 401
+            : 200,
+      });
 
     const createThreadId = ThreadId.make("cursor-plugin-mcp-create");
     const loadThreadId = ThreadId.make("cursor-plugin-mcp-load");
@@ -1889,7 +1896,12 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         const resolveSettings = yield* makeResolveCursorSettings;
         return yield* makeCursorAdapter(cursorConfig, {
           resolveSettings,
-          environment: { ...process.env, CURSOR_DATA_DIR: dataDir },
+          environment: {
+            ...process.env,
+            CURSOR_DATA_DIR: dataDir,
+            CURSOR_GLOBAL_STATE_DB: stateDb,
+          },
+          pluginMcpFetch,
         });
       }),
     ).pipe(
@@ -1978,7 +1990,7 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       if (warning?.type === "runtime.warning") {
         assert.equal(
           warning.payload.message,
-          "Cursor plugin authentication is required for Linear. Authenticate with mcp_auth in Cursor desktop for this workspace, then start a new Kata agent session.",
+          "Cursor plugin authentication is required for linear. Authenticate with mcp_auth in Cursor desktop for this workspace, then start a new Kata agent session.",
         );
         assert.deepEqual(warning.payload.detail, ["plugin-linear-linear"]);
       }

@@ -550,11 +550,12 @@ export function makeCursorAdapter(
 
           const processEnv = options?.environment ?? process.env;
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
-          const pluginMcpDiscovery = yield* Effect.promise(() =>
-            discoverCursorPluginMcpServers(cwd, {
-              env: processEnv,
-              ...(options?.pluginMcpFetch ? { fetch: options.pluginMcpFetch } : {}),
-            }),
+          const pluginMcpDiscovery = yield* discoverCursorPluginMcpServers(cwd, {
+            env: processEnv,
+            ...(options?.pluginMcpFetch ? { fetch: options.pluginMcpFetch } : {}),
+          }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
           );
           const mcpServers = acpMcpServersForProviderSession({
             mcpSession,

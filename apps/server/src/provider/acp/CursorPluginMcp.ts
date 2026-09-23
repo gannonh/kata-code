@@ -9,17 +9,28 @@
  * merged into that lease by name, so Kata Code must pass plugin launch
  * configs alongside t3-code.
  *
- * Launch config comes from the plugin cache `mcp.json` (stdio/http/url), not
- * from project MCP tool schema JSON files. Project `SERVER_METADATA.json` only
- * names which plugins are installed for `cwd`.
+ * Installed plugin roots come from `CursorInstalledPlugins`. Each root's
+ * `mcp.json` holds the launch config, and Cursor names each server
+ * `plugin-<plugin.json name>-<server key>`, the key it uses in the project's
+ * `mcp-auth.json` OAuth store.
  */
 import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
+import {
+  cursorDataDir,
+  cursorHome,
+  cursorInstalledPluginRoots,
+  makeCursorPluginScanBudget,
+} from "./CursorInstalledPlugins.ts";
+
 const PLUGIN_ROOT_VARS = ["CURSOR_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] as const;
+const PLUGIN_MANIFEST_DIRS = [".cursor-plugin", ".claude-plugin", ".codex-plugin"] as const;
 const TEMPLATE_PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/g;
 const PLUGIN_AUTH_PROBE_TIMEOUT_MS = 5_000;
 
@@ -55,11 +66,6 @@ export interface CursorPluginMcpDiscovery {
   readonly authRequired: ReadonlyArray<CursorPluginMcpAuthRequirement>;
 }
 
-interface InstalledPlugin {
-  readonly displayName: string;
-  readonly hasMcpAuthTool: boolean;
-}
-
 export function cursorWorkspaceSlug(cwd: string): string {
   return cwd
     .replace(/[^a-zA-Z0-9]/g, "-")
@@ -67,37 +73,34 @@ export function cursorWorkspaceSlug(cwd: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-export function cursorDataDir(
-  env: NodeJS.ProcessEnv = process.env,
-  homedir = homeFromEnv(env),
-): string {
-  const override = env.CURSOR_DATA_DIR?.trim();
-  if (override) return override;
-  return NodePath.join(homedir, ".cursor");
-}
-
-function homeFromEnv(env: NodeJS.ProcessEnv): string {
-  return env.HOME?.trim() || env.USERPROFILE?.trim() || NodeOS.homedir();
-}
-
-export async function discoverCursorPluginMcpServers(
-  cwd: string,
-  options?: CursorPluginMcpDiscoveryOptions,
-): Promise<CursorPluginMcpDiscovery> {
-  const env = options?.env ?? process.env;
-  const dataDir = cursorDataDir(env, options?.homedir);
-  const projectDir = NodePath.join(dataDir, "projects", cursorWorkspaceSlug(cwd));
-  const installed = readInstalledPlugins(NodePath.join(projectDir, "mcps"));
-  if (installed.size === 0) return { servers: [], authRequired: [] };
-  const accessTokens = readPluginAccessTokens(NodePath.join(projectDir, "mcp-auth.json"));
-  return readPluginCacheMcpServers(
-    NodePath.join(dataDir, "plugins", "cache"),
-    installed,
-    accessTokens,
-    env,
-    options?.fetch,
-  );
-}
+export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcpServers")(
+  function* (
+    cwd: string,
+    options?: CursorPluginMcpDiscoveryOptions,
+  ): Effect.fn.Return<CursorPluginMcpDiscovery, never, FileSystem.FileSystem | Path.Path> {
+    const env = options?.env ?? process.env;
+    const userHome = options?.homedir ?? cursorHome(env);
+    const pluginRoots = yield* cursorInstalledPluginRoots(
+      userHome,
+      env,
+      makeCursorPluginScanBudget(),
+      cwd,
+    );
+    if (pluginRoots.length === 0) return { servers: [], authRequired: [] };
+    const accessTokens = readPluginAccessTokens(
+      NodePath.join(
+        cursorDataDir(env, userHome),
+        "projects",
+        cursorWorkspaceSlug(cwd),
+        "mcp-auth.json",
+      ),
+    );
+    const fetchFn = options?.fetch;
+    return yield* Effect.promise(() =>
+      readPluginMcpServers(pluginRoots, accessTokens, env, fetchFn),
+    );
+  },
+);
 
 function readPluginAccessTokens(filePath: string): ReadonlyMap<string, string> {
   const tokens = new Map<string, string>();
@@ -111,96 +114,57 @@ function readPluginAccessTokens(filePath: string): ReadonlyMap<string, string> {
   return tokens;
 }
 
-function readInstalledPlugins(mcpsDir: string): ReadonlyMap<string, InstalledPlugin> {
-  const installed = new Map<string, InstalledPlugin>();
-  let entries: NodeFS.Dirent[];
-  try {
-    entries = NodeFS.readdirSync(mcpsDir, { withFileTypes: true });
-  } catch {
-    return installed;
+function readPluginManifest(pluginRoot: string): Record<string, unknown> | undefined {
+  for (const directory of PLUGIN_MANIFEST_DIRS) {
+    const manifest = readJsonObject(NodePath.join(pluginRoot, directory, "plugin.json"));
+    if (manifest) return manifest;
   }
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const metadataPath = NodePath.join(mcpsDir, entry.name, "SERVER_METADATA.json");
-    const metadata = readJsonObject(metadataPath);
-    const identifier =
-      stringField(metadata, "serverIdentifier") ?? stringField(metadata, "serverName");
-    if (!identifier) continue;
-    installed.set(identifier, {
-      displayName: stringField(metadata, "serverName") ?? identifier,
-      hasMcpAuthTool: isFile(NodePath.join(mcpsDir, entry.name, "tools", "mcp_auth.json")),
-    });
-  }
-  return installed;
+  return undefined;
 }
 
-async function readPluginCacheMcpServers(
-  cacheDir: string,
-  installed: ReadonlyMap<string, InstalledPlugin>,
+async function readPluginMcpServers(
+  pluginRoots: ReadonlyArray<string>,
   accessTokens: ReadonlyMap<string, string>,
   env: NodeJS.ProcessEnv,
   fetchFn: CursorPluginMcpFetch | undefined,
 ): Promise<CursorPluginMcpDiscovery> {
   const servers: EffectAcpSchema.McpServer[] = [];
-  const authRequired: CursorPluginMcpAuthRequirement[] = [];
-  const rejectedAuthChecks: Array<Promise<CursorPluginMcpAuthRequirement | undefined>> = [];
+  const authChecks: Array<Promise<CursorPluginMcpAuthRequirement | undefined>> = [];
   const taken = new Set<string>();
-  let marketplaces: NodeFS.Dirent[];
-  try {
-    marketplaces = NodeFS.readdirSync(cacheDir, { withFileTypes: true });
-  } catch {
-    return { servers, authRequired };
-  }
-  for (const marketplace of marketplaces) {
-    if (!marketplace.isDirectory()) continue;
-    const marketplaceDir = NodePath.join(cacheDir, marketplace.name);
-    let plugins: NodeFS.Dirent[];
-    try {
-      plugins = NodeFS.readdirSync(marketplaceDir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const plugin of plugins) {
-      if (!plugin.isDirectory() || plugin.name.startsWith("ew-disabled-")) continue;
-      const mcpJsonPath = newestPluginMcpJson(NodePath.join(marketplaceDir, plugin.name));
-      if (!mcpJsonPath) continue;
-      const pluginRoot = NodePath.dirname(mcpJsonPath);
-      const parsed = readJsonObject(mcpJsonPath);
-      const mcpServers = parsed?.mcpServers;
-      if (!isRecord(mcpServers)) continue;
-      for (const [serverKey, rawConfig] of Object.entries(mcpServers)) {
-        const identifier = `plugin-${plugin.name}-${serverKey}`;
-        const installedPlugin = installed.get(identifier);
-        if (!installedPlugin || taken.has(identifier)) continue;
-        const converted = toAcpMcpServer(
-          identifier,
-          rawConfig,
-          pluginRoot,
-          accessTokens.get(identifier),
-          env,
+  for (const pluginRoot of pluginRoots) {
+    const mcpServers = readJsonObject(NodePath.join(pluginRoot, "mcp.json"))?.mcpServers;
+    if (!isRecord(mcpServers)) continue;
+    const manifest = readPluginManifest(pluginRoot);
+    const pluginName = stringField(manifest, "name") ?? NodePath.basename(pluginRoot);
+    for (const [serverKey, rawConfig] of Object.entries(mcpServers)) {
+      const identifier = `plugin-${pluginName}-${serverKey}`;
+      if (taken.has(identifier)) continue;
+      const converted = toAcpMcpServer(
+        identifier,
+        rawConfig,
+        pluginRoot,
+        accessTokens.get(identifier),
+        env,
+      );
+      if (!converted) continue;
+      taken.add(identifier);
+      servers.push(converted.server);
+      const server = converted.server;
+      if (
+        fetchFn !== undefined &&
+        isHttpCursorPluginMcpServer(server) &&
+        (converted.usesStoredAccessToken || !server.headers.some(hasUsableAuthorization))
+      ) {
+        authChecks.push(
+          isAuthRejected(server, fetchFn).then((rejected) =>
+            rejected ? { identifier, displayName: pluginName } : undefined,
+          ),
         );
-        if (!converted) continue;
-        taken.add(identifier);
-        servers.push(converted.server);
-        if (installedPlugin.hasMcpAuthTool && isHttpCursorPluginMcpServer(converted.server)) {
-          if (!converted.server.headers.some(hasUsableAuthorization)) {
-            authRequired.push({ identifier, displayName: installedPlugin.displayName });
-          } else if (converted.usesStoredAccessToken && fetchFn !== undefined) {
-            rejectedAuthChecks.push(
-              hasRejectedStoredAccessToken(converted.server, fetchFn).then((rejected) =>
-                rejected ? { identifier, displayName: installedPlugin.displayName } : undefined,
-              ),
-            );
-          }
-        }
       }
     }
   }
-  const rejectedAuthRequirements = await Promise.all(rejectedAuthChecks);
-  authRequired.push(
-    ...rejectedAuthRequirements.filter(
-      (requirement): requirement is CursorPluginMcpAuthRequirement => requirement !== undefined,
-    ),
+  const authRequired = (await Promise.all(authChecks)).filter(
+    (requirement): requirement is CursorPluginMcpAuthRequirement => requirement !== undefined,
   );
   authRequired.sort((left, right) => left.identifier.localeCompare(right.identifier));
   return { servers, authRequired };
@@ -212,7 +176,7 @@ function isHttpCursorPluginMcpServer(
   return "type" in server && (server.type === "http" || server.type === "sse");
 }
 
-async function hasRejectedStoredAccessToken(
+async function isAuthRejected(
   server: HttpCursorPluginMcpServer,
   fetchFn: CursorPluginMcpFetch,
 ): Promise<boolean> {
@@ -265,40 +229,6 @@ async function hasRejectedStoredAccessToken(
       // Closing an optional probe response is best effort.
     }
   }
-}
-
-function isFile(filePath: string): boolean {
-  try {
-    return NodeFS.statSync(filePath).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function newestPluginMcpJson(pluginDir: string): string | undefined {
-  const direct = NodePath.join(pluginDir, "mcp.json");
-  if (NodeFS.existsSync(direct) && NodeFS.statSync(direct).isFile()) return direct;
-  let shas: NodeFS.Dirent[];
-  try {
-    shas = NodeFS.readdirSync(pluginDir, { withFileTypes: true });
-  } catch {
-    return undefined;
-  }
-  const ranked = shas
-    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("ew-disabled-"))
-    .map((entry) => {
-      const dir = NodePath.join(pluginDir, entry.name);
-      const mcpJson = NodePath.join(dir, "mcp.json");
-      try {
-        const stat = NodeFS.statSync(mcpJson);
-        return stat.isFile() ? { mcpJson, mtimeMs: stat.mtimeMs } : undefined;
-      } catch {
-        return undefined;
-      }
-    })
-    .filter((entry): entry is { mcpJson: string; mtimeMs: number } => entry !== undefined)
-    .sort((left, right) => right.mtimeMs - left.mtimeMs);
-  return ranked[0]?.mcpJson;
 }
 
 function toAcpMcpServer(
