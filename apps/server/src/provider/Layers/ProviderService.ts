@@ -400,6 +400,7 @@ function toRuntimePayloadFromSession(
   session: ProviderSession,
   extra?: {
     readonly modelSelection?: unknown;
+    readonly workspaceRoot?: string;
     readonly continueAfterServerUpdate?: TurnId;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
@@ -414,6 +415,7 @@ function toRuntimePayloadFromSession(
       ? { continueAfterServerUpdate: extra.continueAfterServerUpdate }
       : {}),
     ...(extra?.modelSelection !== undefined ? { modelSelection: extra.modelSelection } : {}),
+    ...(extra?.workspaceRoot !== undefined ? { workspaceRoot: extra.workspaceRoot } : {}),
     ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
@@ -431,15 +433,16 @@ function readPersistedModelSelection(
   return isModelSelection(raw) ? raw : undefined;
 }
 
-function readPersistedCwd(
+function readPersistedPath(
   runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
+  key: "cwd" | "workspaceRoot",
 ): string | undefined {
   if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
     return undefined;
   }
-  const rawCwd = "cwd" in runtimePayload ? runtimePayload.cwd : undefined;
-  if (typeof rawCwd !== "string") return undefined;
-  const trimmed = rawCwd.trim();
+  const raw: unknown = Reflect.get(runtimePayload, key);
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
@@ -1074,6 +1077,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     threadId: ThreadId,
     extra?: {
       readonly modelSelection?: unknown;
+      readonly workspaceRoot?: string;
       readonly continueAfterServerUpdate?: TurnId;
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
@@ -1393,7 +1397,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         );
       }
 
-      const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
+      const persistedCwd = readPersistedPath(input.binding.runtimePayload, "cwd");
+      const persistedWorkspaceRoot = readPersistedPath(
+        input.binding.runtimePayload,
+        "workspaceRoot",
+      );
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
       yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
@@ -1403,6 +1411,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           provider: input.binding.provider,
           providerInstanceId: bindingInstanceId,
           ...(persistedCwd ? { cwd: persistedCwd } : {}),
+          ...(persistedWorkspaceRoot ? { workspaceRoot: persistedWorkspaceRoot } : {}),
           ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
@@ -1587,11 +1596,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           (persistedBinding?.providerInstanceId === resolvedInstanceId
             ? persistedBinding.resumeCursor
             : undefined);
-        const effectiveCwd =
-          input.cwd ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? readPersistedCwd(persistedBinding.runtimePayload)
-            : undefined);
+        const persistedPath = (key: "cwd" | "workspaceRoot") =>
+          persistedBinding?.providerInstanceId === resolvedInstanceId
+            ? readPersistedPath(persistedBinding.runtimePayload, key)
+            : undefined;
+        const effectiveCwd = input.cwd ?? persistedPath("cwd");
+        const effectiveWorkspaceRoot = input.workspaceRoot ?? persistedPath("workspaceRoot");
         yield* Effect.annotateCurrentSpan({
           "provider.kind": resolvedProvider,
           "provider.resume_cursor.source":
@@ -1633,6 +1643,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             ...input,
             providerInstanceId: resolvedInstanceId,
             ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
+            ...(effectiveWorkspaceRoot !== undefined
+              ? { workspaceRoot: effectiveWorkspaceRoot }
+              : {}),
             ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
           })
           .pipe(Effect.onError(() => clearMcpSession(threadId)));
@@ -1655,6 +1668,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
           modelSelection: input.modelSelection,
+          ...(effectiveWorkspaceRoot !== undefined
+            ? { workspaceRoot: effectiveWorkspaceRoot }
+            : {}),
         });
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,

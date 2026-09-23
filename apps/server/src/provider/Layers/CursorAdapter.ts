@@ -552,6 +552,7 @@ export function makeCursorAdapter(
           const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
           const pluginMcpDiscovery = yield* discoverCursorPluginMcpServers(cwd, {
             env: processEnv,
+            ...(input.workspaceRoot ? { workspaceRoot: path.resolve(input.workspaceRoot) } : {}),
             ...(options?.pluginMcpFetch ? { fetch: options.pluginMcpFetch } : {}),
           }).pipe(
             Effect.provideService(FileSystem.FileSystem, fileSystem),

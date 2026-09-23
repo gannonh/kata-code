@@ -518,18 +518,19 @@ describe("discoverCursorPluginMcpServers", () => {
   );
 
   effectIt.effect(
-    "prefers the token of the checkout a worktree was created from over newer ones elsewhere",
+    "prefers the Kata project's token over the main checkout's when the project is a linked worktree",
     () =>
       Effect.gen(function* () {
         const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "cursor-plugin-worktree-"));
-        const checkout = NodePath.join(root, "factory");
-        const worktree = NodePath.join(root, "worktrees", "factory", "katacode-1");
+        const mainCheckout = NodePath.join(root, "factory");
+        const project = NodePath.join(root, "factory-feature");
+        const worktree = NodePath.join(root, "worktrees", "factory-feature", "katacode-1");
+        // Git records the main checkout for every linked worktree, including the project's children.
         writeFile(
           NodePath.join(worktree, ".git"),
-          // Git writes forward slashes, including on Windows.
-          `gitdir: ${checkout.split(NodePath.sep).join("/")}/.git/worktrees/katacode-1\n`,
+          `gitdir: ${mainCheckout.split(NodePath.sep).join("/")}/.git/worktrees/katacode-1\n`,
         );
-        const fixture = makeCursorFixture("cursor-plugin-mcp-source-", ["512"], worktree);
+        const fixture = makeCursorFixture("cursor-plugin-mcp-project-", ["512"], worktree);
         installCachedPlugin(fixture.dataDir, {
           id: "512",
           name: "linear",
@@ -548,14 +549,16 @@ describe("discoverCursorPluginMcpServers", () => {
           );
           NodeFS.utimesSync(authFile, mtimeSeconds, mtimeSeconds);
         };
-        writeStore(checkout, "source-checkout-token", 1_000);
-        writeStore("/Volumes/EVO/dev/other-tenant", "other-tenant-token", 2_000);
+        writeStore(project, "project-token", 1_000);
+        writeStore(mainCheckout, "main-checkout-token", 2_000);
 
-        expect((yield* discover(worktree, { env: fixture.env })).servers).toContainEqual({
+        expect(
+          (yield* discover(worktree, { env: fixture.env, workspaceRoot: project })).servers,
+        ).toContainEqual({
           type: "http",
           name: "plugin-linear-linear",
           url: LINEAR_MCP,
-          headers: [{ name: "Authorization", value: "Bearer source-checkout-token" }],
+          headers: [{ name: "Authorization", value: "Bearer project-token" }],
         });
       }),
   );
