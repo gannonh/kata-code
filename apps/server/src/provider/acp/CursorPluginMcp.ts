@@ -171,9 +171,16 @@ const withFreshStoredToken = Effect.fn("withFreshStoredToken")(function* (
         fetch: fetchFn,
       }),
     );
-    // `needsAuth` stays unset so the background check verifies the new token.
     if (refresh._tag === "Refreshed") {
-      return { probe: { ...probe, server: withBearer(probe.server, refresh.accessToken) } };
+      const refreshed = withBearer(probe.server, refresh.accessToken);
+      if ((yield* Effect.promise(() => oauthChallenge(refreshed, fetchFn))) === undefined) {
+        return { probe: { ...probe, server: refreshed }, needsAuth: false };
+      }
+      yield* Effect.logWarning("Cursor plugin server rejected a refreshed OAuth token.", {
+        identifier: probe.requirement.identifier,
+        authFile: storedToken.authFile,
+      });
+      continue;
     }
     yield* Effect.logWarning("Cursor plugin OAuth refresh failed.", {
       identifier: probe.requirement.identifier,
@@ -199,16 +206,39 @@ function withBearer(
 }
 
 /**
+ * The checkout a linked git worktree was created from, read from the
+ * worktree's `.git` file (`gitdir: <checkout>/.git/worktrees/<name>`).
+ */
+function gitWorktreeSourceCheckout(cwd: string): string | undefined {
+  let gitFile: string;
+  try {
+    gitFile = NodeFS.readFileSync(NodePath.join(cwd, ".git"), "utf8");
+  } catch {
+    return undefined;
+  }
+  const gitDir = /^gitdir:\s*(.+)$/m.exec(gitFile)?.[1]?.trim();
+  const marker = `${NodePath.sep}.git${NodePath.sep}worktrees${NodePath.sep}`;
+  const index = gitDir?.lastIndexOf(marker) ?? -1;
+  return gitDir !== undefined && index > 0 ? gitDir.slice(0, index) : undefined;
+}
+
+/**
  * Cursor CLI keeps plugin OAuth per folder in `projects/<slug>/mcp-auth.json`,
- * written where the user signed in through `/mcp`. Plugins are user-scoped, so
- * a folder without its own token (such as a Kata worktree Cursor never opened)
- * uses the most recently written token for that plugin from any folder.
+ * written where the user signed in through `/mcp`. Candidates come from the
+ * thread's folder, then the checkout a Kata worktree was created from, then,
+ * because plugins are user-scoped, other folders by most recent write.
  */
 function readPluginTokens(
   projectsDir: string,
   cwd: string,
 ): ReadonlyMap<string, ReadonlyArray<StoredPluginToken>> {
-  const ownAuthFile = NodePath.join(projectsDir, cursorWorkspaceSlug(cwd), "mcp-auth.json");
+  const authFileFor = (folder: string) =>
+    NodePath.join(projectsDir, cursorWorkspaceSlug(folder), "mcp-auth.json");
+  const sourceCheckout = gitWorktreeSourceCheckout(cwd);
+  const preferredAuthFiles = [
+    authFileFor(cwd),
+    ...(sourceCheckout === undefined ? [] : [authFileFor(sourceCheckout)]),
+  ];
   let slugs: string[];
   try {
     slugs = NodeFS.readdirSync(projectsDir);
@@ -217,7 +247,7 @@ function readPluginTokens(
   }
   const otherAuthFiles = slugs
     .map((slug) => NodePath.join(projectsDir, slug, "mcp-auth.json"))
-    .filter((authFile) => authFile !== ownAuthFile)
+    .filter((authFile) => !preferredAuthFiles.includes(authFile))
     .flatMap((authFile) => {
       try {
         return [{ authFile, mtimeMs: NodeFS.statSync(authFile).mtimeMs }];
@@ -231,7 +261,7 @@ function readPluginTokens(
   // A file's mtime also moves when another plugin's record changes, so it
   // only ranks candidates; a rejected token falls through to the next one.
   const tokens = new Map<string, StoredPluginToken[]>();
-  for (const authFile of [ownAuthFile, ...otherAuthFiles]) {
+  for (const authFile of [...preferredAuthFiles, ...otherAuthFiles]) {
     const records = readJsonObject(authFile);
     if (!records) continue;
     for (const [identifier, rawRecord] of Object.entries(records)) {
@@ -441,9 +471,10 @@ function carriesBearerTokens(url: string): boolean {
   try {
     const parsed = new URL(url);
     if (parsed.protocol === "https:") return true;
+    const host = parsed.hostname.toLowerCase();
     return (
       parsed.protocol === "http:" &&
-      ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname.toLowerCase())
+      (host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host))
     );
   } catch {
     return false;
