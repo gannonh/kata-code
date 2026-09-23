@@ -131,7 +131,9 @@ function writeTokens(authFile: string, identifier: string, tokens: Record<string
     `.${NodePath.basename(authFile)}.${process.pid}.tmp`,
   );
   const mode = NodeFS.statSync(authFile).mode & 0o777;
-  NodeFS.writeFileSync(temporary, JSON.stringify(records, null, 2), { mode });
+  NodeFS.writeFileSync(temporary, JSON.stringify(records, null, 2));
+  // Set the mode explicitly so the process umask cannot narrow it.
+  NodeFS.chmodSync(temporary, mode);
   NodeFS.renameSync(temporary, authFile);
 }
 
