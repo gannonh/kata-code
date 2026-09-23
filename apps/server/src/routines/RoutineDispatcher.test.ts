@@ -10,14 +10,18 @@ import {
   RoutineRequestId,
   RuntimeMode,
   TurnId,
+  type OrchestrationProjectShell,
   type RoutineProviderSubmission,
   type RoutineRun,
+  type WorktreeSubmodules,
 } from "@kata-sh/code-contracts";
 import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
@@ -28,6 +32,7 @@ import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSna
 import { ProviderCommandReactor } from "../orchestration/Services/ProviderCommandReactor.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { ProjectSetupScriptRunner } from "../project/ProjectSetupScriptRunner.ts";
+import * as ServerSettingsModule from "../serverSettings.ts";
 import { RoutineDispatcher, RoutineDispatcherLive } from "./RoutineDispatcher.ts";
 import { RoutineStore, RoutineStoreLive } from "./RoutineStore.ts";
 
@@ -47,7 +52,16 @@ type ProviderTurn = (
   input: { readonly run: RoutineRun; readonly submission: RoutineProviderSubmission },
 ) => Effect.Effect<void, RoutineError>;
 
-const dispatcherLayer = (providerTurn: ProviderTurn) => {
+type SettingsOverrides = Parameters<typeof ServerSettingsModule.layerTest>[0];
+
+interface DispatcherServices {
+  readonly settings?: SettingsOverrides;
+  readonly engine?: Partial<OrchestrationEngineService["Service"]>;
+  readonly projection?: Partial<ProjectionSnapshotQuery["Service"]>;
+  readonly git?: Partial<GitWorkflowService["Service"]>;
+}
+
+const dispatcherLayer = (providerTurn: ProviderTurn, services: DispatcherServices = {}) => {
   const store = RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory));
   const reactor = Layer.effect(
     ProviderCommandReactor,
@@ -63,10 +77,11 @@ const dispatcherLayer = (providerTurn: ProviderTurn) => {
   return RoutineDispatcherLive.pipe(
     Layer.provideMerge(reactor),
     Layer.provideMerge(store),
-    Layer.provide(Layer.mock(OrchestrationEngineService)({})),
-    Layer.provide(Layer.mock(ProjectionSnapshotQuery)({})),
-    Layer.provide(Layer.mock(GitWorkflowService)({})),
+    Layer.provide(Layer.mock(OrchestrationEngineService)(services.engine ?? {})),
+    Layer.provide(Layer.mock(ProjectionSnapshotQuery)(services.projection ?? {})),
+    Layer.provide(Layer.mock(GitWorkflowService)(services.git ?? {})),
     Layer.provide(Layer.mock(ProjectSetupScriptRunner)({})),
+    Layer.provide(ServerSettingsModule.layerTest(services.settings)),
     Layer.provide(NodeServices.layer),
   );
 };
@@ -184,5 +199,110 @@ for (const [scenario, loseFence] of Object.entries(fenceLosses)) {
         assert.isTrue(yield* Ref.get(interrupted));
       }).pipe(Effect.provide(dispatcherLayer(providerTurn)));
     }),
+  );
+}
+
+const submoduleSettings: ReadonlyArray<{
+  readonly scenario: string;
+  readonly settings: SettingsOverrides;
+  readonly expected: WorktreeSubmodules;
+}> = [
+  {
+    scenario: "the project overrides it to none",
+    settings: {
+      worktreeSubmodules: "recursive",
+      projectSettingsOverrides: { [configuration.projectId]: { worktreeSubmodules: "none" } },
+    },
+    expected: "none",
+  },
+  {
+    scenario: "the environment sets it to top-level",
+    settings: { worktreeSubmodules: "top-level" },
+    expected: "top-level",
+  },
+];
+
+for (const { scenario, settings, expected } of submoduleSettings) {
+  it.effect(`creates a routine worktree with ${expected} submodules when ${scenario}`, () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const tempDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "routine-dispatcher-submodules-",
+      });
+      const workspaceRoot = `${tempDir}/repo`;
+      const project = {
+        id: configuration.projectId,
+        title: "Routine project",
+        workspaceRoot,
+        defaultModelSelection: null,
+        scripts: [],
+        createdAt: "2026-09-23T00:00:00.000Z",
+        updatedAt: "2026-09-23T00:00:00.000Z",
+      } as unknown as OrchestrationProjectShell;
+      const createWorktreeCalls = yield* Ref.make<
+        ReadonlyArray<Parameters<GitWorkflowService["Service"]["createWorktree"]>[1]>
+      >([]);
+      const services: DispatcherServices = {
+        settings,
+        engine: { dispatch: () => Effect.succeed({ sequence: 1 }) },
+        projection: {
+          getProjectShellById: () => Effect.succeedSome(project),
+          getThreadShellById: () => Effect.succeedNone,
+        },
+        git: {
+          listRefs: () =>
+            Effect.succeed({
+              refs: [{ name: "main", current: true, isDefault: true, worktreePath: null }],
+              isRepo: true,
+              hasPrimaryRemote: false,
+              nextCursor: null,
+              totalCount: 1,
+            }),
+          createWorktree: (input, options) =>
+            Ref.update(createWorktreeCalls, (calls) => [...calls, options]).pipe(
+              Effect.as({ worktree: { refName: input.newRefName!, path: input.path! } }),
+            ),
+        },
+      };
+
+      yield* Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const dispatcher = yield* RoutineDispatcher;
+        // Preparation updates stamp wall-clock time, so the lease must be current.
+        const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
+        yield* TestClock.setTime(now);
+        const routine = yield* store.save(
+          environmentId,
+          {
+            id: RoutineId.make("routine-worktree-submodules"),
+            expectedRevision: 0,
+            configuration: {
+              ...configuration,
+              workspace: {
+                kind: "worktree",
+                baseBranch: "main",
+                startFromOrigin: false,
+                runSetupScript: false,
+              },
+            },
+          },
+          now,
+        );
+        yield* store.testRun(
+          environmentId,
+          {
+            id: routine.id,
+            expectedRevision: routine.revision,
+            requestId: RoutineRequestId.make("request-worktree-submodules"),
+          },
+          now,
+        );
+        const claim = yield* store.claim("worker-a", now);
+        assert.isNotNull(claim);
+        yield* dispatcher.dispatchClaim(claim!);
+
+        assert.deepEqual(yield* Ref.get(createWorktreeCalls), [{ submodules: expected }]);
+      }).pipe(Effect.provide(dispatcherLayer(() => Effect.void, services)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 }
