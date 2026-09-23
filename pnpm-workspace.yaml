@@ -49,6 +49,11 @@ catalog:
   jose: 6.2.2
   lightningcss: 1.33.0
   tailwindcss: 4.3.3
+  # A workspace that runs vite-plus and pulls in a dependency whose typescript peer
+  # stops at ^6 (infra/relay via alchemy's capnp-es) must declare `typescript: catalog:`.
+  # Otherwise pnpm auto-installs TypeScript 6 there, and the vitest <->
+  # @vitest/browser-preview peer cycle gets a second variant whose lockfile snapshot
+  # IDs flip between `pnpm install` and `pnpm add` (KAT-3450).
   typescript: 7.0.2
   vite: npm:@voidzero-dev/vite-plus-core@0.3.3
   vite-plus: 0.3.3
