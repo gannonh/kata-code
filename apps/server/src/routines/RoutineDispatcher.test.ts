@@ -206,6 +206,7 @@ const submoduleSettings: ReadonlyArray<{
   readonly scenario: string;
   readonly settings: SettingsOverrides;
   readonly expected: WorktreeSubmodules;
+  readonly existingBranch?: boolean;
 }> = [
   {
     scenario: "the project overrides it to none",
@@ -220,9 +221,15 @@ const submoduleSettings: ReadonlyArray<{
     settings: { worktreeSubmodules: "top-level" },
     expected: "top-level",
   },
+  {
+    scenario: "it attaches an existing routine branch",
+    settings: { worktreeSubmodules: "none" },
+    expected: "none",
+    existingBranch: true,
+  },
 ];
 
-for (const { scenario, settings, expected } of submoduleSettings) {
+for (const { scenario, settings, expected, existingBranch = false } of submoduleSettings) {
   it.effect(`creates a routine worktree with ${expected} submodules when ${scenario}`, () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -250,9 +257,15 @@ for (const { scenario, settings, expected } of submoduleSettings) {
           getThreadShellById: () => Effect.succeedNone,
         },
         git: {
-          listRefs: () =>
+          listRefs: ({ query }) =>
             Effect.succeed({
-              refs: [{ name: "main", current: true, isDefault: true, worktreePath: null }],
+              refs: [
+                { name: "main", current: true, isDefault: true, worktreePath: null },
+                // The dispatcher looks its routine branch up by name.
+                ...(existingBranch && query !== undefined
+                  ? [{ name: query, current: false, isDefault: false, worktreePath: null }]
+                  : []),
+              ],
               isRepo: true,
               hasPrimaryRemote: false,
               nextCursor: null,
@@ -260,7 +273,9 @@ for (const { scenario, settings, expected } of submoduleSettings) {
             }),
           createWorktree: (input, options) =>
             Ref.update(createWorktreeCalls, (calls) => [...calls, options]).pipe(
-              Effect.as({ worktree: { refName: input.newRefName!, path: input.path! } }),
+              Effect.as({
+                worktree: { refName: input.newRefName ?? input.refName, path: input.path! },
+              }),
             ),
         },
       };
