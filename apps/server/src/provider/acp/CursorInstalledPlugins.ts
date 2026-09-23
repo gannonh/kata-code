@@ -83,7 +83,7 @@ type InstalledPluginIds =
   | { readonly _tag: "Unreadable" }
   | { readonly _tag: "Ready"; readonly ids: ReadonlySet<string> };
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
