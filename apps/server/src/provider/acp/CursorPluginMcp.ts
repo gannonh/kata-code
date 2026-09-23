@@ -217,9 +217,11 @@ function gitWorktreeSourceCheckout(cwd: string): string | undefined {
     return undefined;
   }
   const gitDir = /^gitdir:\s*(.+)$/m.exec(gitFile)?.[1]?.trim();
-  const marker = `${NodePath.sep}.git${NodePath.sep}worktrees${NodePath.sep}`;
-  const index = gitDir?.lastIndexOf(marker) ?? -1;
-  return gitDir !== undefined && index > 0 ? gitDir.slice(0, index) : undefined;
+  if (gitDir === undefined) return undefined;
+  // Git writes forward slashes even on Windows, so match either separator.
+  const markers = [...gitDir.matchAll(/[\\/]\.git[\\/]worktrees[\\/]/g)];
+  const index = markers.at(-1)?.index ?? -1;
+  return index > 0 ? NodePath.normalize(gitDir.slice(0, index)) : undefined;
 }
 
 /**

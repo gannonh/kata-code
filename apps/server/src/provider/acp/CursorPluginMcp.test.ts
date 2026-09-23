@@ -526,7 +526,8 @@ describe("discoverCursorPluginMcpServers", () => {
         const worktree = NodePath.join(root, "worktrees", "factory", "katacode-1");
         writeFile(
           NodePath.join(worktree, ".git"),
-          `gitdir: ${NodePath.join(checkout, ".git", "worktrees", "katacode-1")}\n`,
+          // Git writes forward slashes, including on Windows.
+          `gitdir: ${checkout.split(NodePath.sep).join("/")}/.git/worktrees/katacode-1\n`,
         );
         const fixture = makeCursorFixture("cursor-plugin-mcp-source-", ["512"], worktree);
         installCachedPlugin(fixture.dataDir, {
