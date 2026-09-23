@@ -279,6 +279,12 @@ describe("ProviderCommandReactor", () => {
         typeof input.cwd === "string"
           ? { cwd: input.cwd }
           : {}),
+        ...(typeof input === "object" &&
+        input !== null &&
+        "workspaceRoot" in input &&
+        typeof input.workspaceRoot === "string"
+          ? { workspaceRoot: input.workspaceRoot }
+          : {}),
         ...((inputModelSelection?.model ?? modelSelection.model)
           ? { model: inputModelSelection?.model ?? modelSelection.model }
           : {}),
@@ -3140,6 +3146,65 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make("codex_work"));
   });
 
+  it("restarts a worktree thread's provider session when its project folder changes", async () => {
+    const harness = await createHarness({
+      threadModelSelection: {
+        instanceId: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-sonnet-4-6",
+      },
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const startTurn = (id: string) =>
+      harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-turn-start-${id}`),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId(`user-message-${id}`),
+            role: "user",
+            text: id,
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-worktree"),
+        threadId: ThreadId.make("thread-1"),
+        worktreePath: "/tmp/provider-project-worktree",
+      }),
+    );
+    await startTurn("project-root-1");
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+
+    await startTurn("project-root-unchanged");
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    expect(harness.startSession).toHaveBeenCalledTimes(1);
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "project.meta.update",
+        commandId: CommandId.make("cmd-project-move"),
+        projectId: asProjectId("project-1"),
+        workspaceRoot: "/tmp/provider-project-moved",
+      }),
+    );
+    await startTurn("project-root-2");
+    await waitFor(() => harness.sendTurn.mock.calls.length === 3);
+
+    expect(harness.startSession).toHaveBeenCalledTimes(2);
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      cwd: "/tmp/provider-project-worktree",
+      workspaceRoot: "/tmp/provider-project-moved",
+    });
+  });
+
   it("restarts the provider session when the thread workspace changes", async () => {
     const harness = await createHarness({
       threadModelSelection: {
@@ -3204,6 +3269,7 @@ describe("ProviderCommandReactor", () => {
     expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
       threadId: ThreadId.make("thread-1"),
       cwd: "/tmp/provider-project-worktree",
+      workspaceRoot: "/tmp/provider-project",
       resumeCursor: { opaque: "resume-1" },
       modelSelection: {
         instanceId: ProviderInstanceId.make("claudeAgent"),

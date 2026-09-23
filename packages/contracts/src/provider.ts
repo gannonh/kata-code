@@ -42,6 +42,8 @@ export const ProviderSession = Schema.Struct({
   status: ProviderSessionStatus,
   runtimeMode: RuntimeMode,
   cwd: Schema.optional(TrimmedNonEmptyString),
+  /** The project folder the session started with, from its persisted binding. */
+  workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   model: Schema.optional(TrimmedNonEmptyString),
   threadId: ThreadId,
   resumeCursor: Schema.optional(Schema.Unknown),
@@ -58,6 +60,8 @@ export const ProviderSessionStartInput = Schema.Struct({
   // See ProviderSession for the migration story.
   providerInstanceId: Schema.optional(ProviderInstanceId),
   cwd: Schema.optional(TrimmedNonEmptyString),
+  /** The project folder. Differs from `cwd` when the thread runs in a Kata worktree. */
+  workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   resumeCursor: Schema.optional(Schema.Unknown),
