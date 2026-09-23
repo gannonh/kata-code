@@ -3085,6 +3085,18 @@ routing.layer("ProviderServiceLive routing", (it) => {
         assert.equal(startPayload.threadId, initial.threadId);
       }
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+      const [recovered] = yield* provider.listSessions();
+      assert.equal(recovered?.workspaceRoot, "/projects/send-turn");
+
+      // The recovery's binding write keeps the root for the next recovery.
+      yield* routing.codex.stopAll();
+      routing.codex.startSession.mockClear();
+      yield* provider.sendTurn({ threadId: initial.threadId, input: "again", attachments: [] });
+      assert.equal(
+        (routing.codex.startSession.mock.calls[0]?.[0] as { workspaceRoot?: string } | undefined)
+          ?.workspaceRoot,
+        "/projects/send-turn",
+      );
     }),
   );
 

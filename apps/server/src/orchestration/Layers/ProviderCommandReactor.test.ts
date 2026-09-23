@@ -279,6 +279,12 @@ describe("ProviderCommandReactor", () => {
         typeof input.cwd === "string"
           ? { cwd: input.cwd }
           : {}),
+        ...(typeof input === "object" &&
+        input !== null &&
+        "workspaceRoot" in input &&
+        typeof input.workspaceRoot === "string"
+          ? { workspaceRoot: input.workspaceRoot }
+          : {}),
         ...((inputModelSelection?.model ?? modelSelection.model)
           ? { model: inputModelSelection?.model ?? modelSelection.model }
           : {}),

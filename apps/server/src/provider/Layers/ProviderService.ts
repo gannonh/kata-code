@@ -400,7 +400,6 @@ function toRuntimePayloadFromSession(
   session: ProviderSession,
   extra?: {
     readonly modelSelection?: unknown;
-    readonly workspaceRoot?: string;
     readonly continueAfterServerUpdate?: TurnId;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
@@ -408,6 +407,7 @@ function toRuntimePayloadFromSession(
 ): Record<string, unknown> {
   return {
     cwd: session.cwd ?? null,
+    ...(session.workspaceRoot !== undefined ? { workspaceRoot: session.workspaceRoot } : {}),
     model: session.model ?? null,
     activeTurnId: session.activeTurnId ?? null,
     lastError: session.lastError ?? null,
@@ -415,7 +415,6 @@ function toRuntimePayloadFromSession(
       ? { continueAfterServerUpdate: extra.continueAfterServerUpdate }
       : {}),
     ...(extra?.modelSelection !== undefined ? { modelSelection: extra.modelSelection } : {}),
-    ...(extra?.workspaceRoot !== undefined ? { workspaceRoot: extra.workspaceRoot } : {}),
     ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
@@ -1077,7 +1076,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     threadId: ThreadId,
     extra?: {
       readonly modelSelection?: unknown;
-      readonly workspaceRoot?: string;
       readonly continueAfterServerUpdate?: TurnId;
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
@@ -1660,6 +1658,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         const sessionWithInstance = {
           ...session,
           providerInstanceId: resolvedInstanceId,
+          ...(effectiveWorkspaceRoot !== undefined
+            ? { workspaceRoot: effectiveWorkspaceRoot }
+            : {}),
         };
 
         yield* stopStaleSessionsForThread({
@@ -1668,9 +1669,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
           modelSelection: input.modelSelection,
-          ...(effectiveWorkspaceRoot !== undefined
-            ? { workspaceRoot: effectiveWorkspaceRoot }
-            : {}),
         });
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,
@@ -2363,6 +2361,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           resumeCursor?: ProviderSession["resumeCursor"];
           runtimeMode?: ProviderSession["runtimeMode"];
           providerInstanceId?: ProviderSession["providerInstanceId"];
+          workspaceRoot?: ProviderSession["workspaceRoot"];
         } = {};
         overrides.providerInstanceId = dieOnMissingBindingInstanceId(
           "ProviderService.listSessions",
@@ -2387,6 +2386,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }
         if (binding.runtimeMode !== undefined) {
           overrides.runtimeMode = binding.runtimeMode;
+        }
+        const workspaceRoot = readPersistedPath(binding.runtimePayload, "workspaceRoot");
+        if (workspaceRoot !== undefined) {
+          overrides.workspaceRoot = workspaceRoot;
         }
         sessions.push(Object.assign({}, session, overrides));
       }

@@ -42,6 +42,8 @@ export const ProviderSession = Schema.Struct({
   status: ProviderSessionStatus,
   runtimeMode: RuntimeMode,
   cwd: Schema.optional(TrimmedNonEmptyString),
+  /** The project folder the session started with, from its persisted binding. */
+  workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   model: Schema.optional(TrimmedNonEmptyString),
   threadId: ThreadId,
   resumeCursor: Schema.optional(Schema.Unknown),

@@ -298,8 +298,6 @@ const make = Effect.gen(function* () {
   ) => markRoutineBlockedBeforeSubmission(submission, formatFailureDetail(cause));
 
   const threadModelSelections = new Map<string, ModelSelection>();
-  /** The project folder each thread's session started with; adapters read it only at start. */
-  const threadWorkspaceRoots = new Map<ThreadId, string>();
   const compactingThreadIds = new Set<ThreadId>();
   type QueuedTurnStart = Extract<ProviderIntentEvent, { type: "thread.turn-start-requested" }>;
   // Turn starts received while a thread compacts, replayed in order once its session is restored.
@@ -778,16 +776,7 @@ const make = Effect.gen(function* () {
           ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
           runtimeMode: desiredRuntimeMode,
         })
-        .pipe(
-          Effect.tap(() =>
-            Effect.sync(() =>
-              project
-                ? threadWorkspaceRoots.set(threadId, project.workspaceRoot)
-                : threadWorkspaceRoots.delete(threadId),
-            ),
-          ),
-          Effect.tap(() => refreshWorkspaceSnapshot),
-        );
+        .pipe(Effect.tap(() => refreshWorkspaceSnapshot));
 
     const bindSessionToThread = (session: ProviderSession) =>
       Effect.gen(function* () {
@@ -823,9 +812,10 @@ const make = Effect.gen(function* () {
     if (existingSessionThreadId) {
       const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
-      const previousWorkspaceRoot = threadWorkspaceRoots.get(threadId);
+      // Adapters read the project folder only at start, e.g. to pick Cursor plugin tokens.
       const workspaceRootChanged =
-        previousWorkspaceRoot !== undefined && previousWorkspaceRoot !== project?.workspaceRoot;
+        activeSession?.workspaceRoot !== undefined &&
+        activeSession.workspaceRoot !== project?.workspaceRoot;
       const sessionModelSwitch = (yield* providerService.getCapabilities(desiredInstanceId))
         .sessionModelSwitch;
       const modelChanged =
