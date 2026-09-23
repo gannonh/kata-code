@@ -142,7 +142,7 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
 /**
  * Stored access tokens expire, and nothing refreshes a token forwarded to ACP,
  * so a rejected one is refreshed before the session starts. `needsAuth` is set
- * when the server was already checked here.
+ * when this check already settled the server's auth state.
  */
 const withFreshStoredToken = Effect.fn("withFreshStoredToken")(function* (
   probe: PluginAuthProbe,
@@ -170,8 +170,8 @@ const withFreshStoredToken = Effect.fn("withFreshStoredToken")(function* (
     });
     return { probe, needsAuth: true };
   }
+  // `needsAuth` stays unset so the background check verifies the new token.
   return {
-    needsAuth: false,
     probe: {
       ...probe,
       storedAccessToken: refresh.accessToken,

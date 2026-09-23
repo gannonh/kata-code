@@ -113,7 +113,7 @@ async function performRefresh(
         },
       ),
     );
-    writeTokens(input.authFile, input.identifier, {
+    const written = writeTokensIfUnchanged(input.authFile, input.identifier, record, {
       ...tokens,
       access_token: response.access_token,
       // oauth4webapi lowercases token_type; keep Cursor's stored spelling.
@@ -125,16 +125,36 @@ async function performRefresh(
       refresh_token: response.refresh_token ?? refreshToken,
       ...(response.scope === undefined ? {} : { scope: response.scope }),
     });
-    return { _tag: "Refreshed", accessToken: response.access_token };
+    if (written) return { _tag: "Refreshed", accessToken: response.access_token };
+    // Cursor signed out or signed in again while the refresh was in flight;
+    // its credential wins over one derived from the older record.
+    const current = readAuthRecords(input.authFile)?.[input.identifier];
+    const currentAccessToken = stringField(
+      isRecord(current) && isRecord(current.tokens) ? current.tokens : undefined,
+      "access_token",
+    );
+    return currentAccessToken
+      ? { _tag: "Refreshed", accessToken: currentAccessToken }
+      : { _tag: "Failed", reason: "stored credentials changed during the refresh" };
   } catch (error) {
     return { _tag: "Failed", reason: error instanceof Error ? error.message : String(error) };
   }
 }
 
-/** Re-reads the file so concurrent writes to other keys survive, then swaps it in atomically. */
-function writeTokens(authFile: string, identifier: string, tokens: Record<string, unknown>): void {
+/**
+ * Writes `tokens` only while this key still holds `expected`, the record the
+ * refresh started from. Re-reads the file so concurrent writes to other keys
+ * survive, then swaps it in atomically.
+ */
+function writeTokensIfUnchanged(
+  authFile: string,
+  identifier: string,
+  expected: unknown,
+  tokens: Record<string, unknown>,
+): boolean {
   const records = readAuthRecords(authFile) ?? {};
-  const record = isRecord(records[identifier]) ? records[identifier] : {};
+  const record = records[identifier];
+  if (!isRecord(record) || JSON.stringify(record) !== JSON.stringify(expected)) return false;
   records[identifier] = { ...record, tokens };
   const temporary = NodePath.join(
     NodePath.dirname(authFile),
@@ -151,6 +171,7 @@ function writeTokens(authFile: string, identifier: string, tokens: Record<string
     NodeFS.rmSync(temporary, { force: true });
     throw error;
   }
+  return true;
 }
 
 function readAuthRecords(filePath: string): Record<string, unknown> | undefined {
