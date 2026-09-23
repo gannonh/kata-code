@@ -31,6 +31,7 @@
     "diff": "8.0.3",
     "effect": "catalog:",
     "node-pty": "^1.1.0",
+    "oauth4webapi": "^3.8.8",
     "stream-chain": "^4.2.5",
     "stream-json": "3.6.0",
     "yaml": "catalog:",

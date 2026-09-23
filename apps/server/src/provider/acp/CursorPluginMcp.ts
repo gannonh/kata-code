@@ -28,6 +28,7 @@ import {
   cursorInstalledPluginRoots,
   makeCursorPluginScanBudget,
 } from "./CursorInstalledPlugins.ts";
+import { refreshCursorPluginAccessToken } from "./CursorPluginOAuth.ts";
 
 const PLUGIN_ROOT_VARS = ["CURSOR_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] as const;
 const PLUGIN_MANIFEST_DIRS = [".cursor-plugin", ".claude-plugin", ".codex-plugin"] as const;
@@ -74,6 +75,8 @@ export interface CursorPluginMcpDiscovery {
 interface PluginAuthProbe {
   readonly requirement: CursorPluginMcpAuthRequirement;
   readonly server: HttpCursorPluginMcpServer;
+  /** The stored OAuth access token forwarded in `server`, when there is one. */
+  readonly storedAccessToken?: string;
 }
 
 const NO_AUTH_REQUIRED: CursorPluginMcpDiscovery["checkAuth"] = Effect.succeed([]);
@@ -101,25 +104,29 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
       cwd,
     )).flatMap(({ root, evidence }) => (evidence === "listed" ? [root] : []));
     if (pluginRoots.length === 0) return { servers: [], checkAuth: NO_AUTH_REQUIRED };
-    const accessTokens = readPluginAccessTokens(
-      NodePath.join(
-        cursorDataDir(env, userHome),
-        "projects",
-        cursorWorkspaceSlug(cwd),
-        "mcp-auth.json",
-      ),
+    const authFile = NodePath.join(
+      cursorDataDir(env, userHome),
+      "projects",
+      cursorWorkspaceSlug(cwd),
+      "mcp-auth.json",
     );
-    const { servers, authProbes } = readPluginMcpServers(pluginRoots, accessTokens, env);
+    const discovered = readPluginMcpServers(pluginRoots, readPluginAccessTokens(authFile), env);
     const fetchFn = options?.fetch;
-    if (fetchFn === undefined || authProbes.length === 0) {
-      return { servers, checkAuth: NO_AUTH_REQUIRED };
+    if (fetchFn === undefined || discovered.authProbes.length === 0) {
+      return { servers: discovered.servers, checkAuth: NO_AUTH_REQUIRED };
     }
+    const checked = yield* Effect.forEach(
+      discovered.authProbes,
+      (probe) => withFreshStoredToken(probe, authFile, fetchFn),
+      { concurrency: "unbounded" },
+    );
+    const refreshedServers = new Map(checked.map(({ probe }) => [probe.server.name, probe.server]));
     return {
-      servers,
+      servers: discovered.servers.map((server) => refreshedServers.get(server.name) ?? server),
       checkAuth: Effect.promise(async () => {
         const results = await Promise.all(
-          authProbes.map(async ({ requirement, server }) =>
-            (await needsOAuth(server, fetchFn)) ? [requirement] : [],
+          checked.map(async ({ probe, needsAuth }) =>
+            (needsAuth ?? (await needsOAuth(probe.server, fetchFn))) ? [probe.requirement] : [],
           ),
         );
         return results
@@ -129,6 +136,54 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
     };
   },
 );
+
+/**
+ * Stored access tokens expire, and nothing refreshes a token forwarded to ACP,
+ * so a rejected one is refreshed before the session starts. `needsAuth` is set
+ * when the server was already checked here.
+ */
+const withFreshStoredToken = Effect.fn("withFreshStoredToken")(function* (
+  probe: PluginAuthProbe,
+  authFile: string,
+  fetchFn: CursorPluginMcpFetch,
+): Effect.fn.Return<{ readonly probe: PluginAuthProbe; readonly needsAuth?: boolean }> {
+  const rejectedAccessToken = probe.storedAccessToken;
+  if (rejectedAccessToken === undefined) return { probe };
+  if (!(yield* Effect.promise(() => needsOAuth(probe.server, fetchFn)))) {
+    return { probe, needsAuth: false };
+  }
+  const refresh = yield* Effect.promise(() =>
+    refreshCursorPluginAccessToken({
+      authFile,
+      identifier: probe.requirement.identifier,
+      resource: probe.server.url,
+      rejectedAccessToken,
+      fetch: fetchFn,
+    }),
+  );
+  if (refresh._tag === "Failed") {
+    yield* Effect.logWarning("Cursor plugin OAuth refresh failed.", {
+      identifier: probe.requirement.identifier,
+      reason: refresh.reason,
+    });
+    return { probe, needsAuth: true };
+  }
+  return {
+    needsAuth: false,
+    probe: {
+      ...probe,
+      storedAccessToken: refresh.accessToken,
+      server: {
+        ...probe.server,
+        headers: probe.server.headers.map((header) =>
+          header.name.toLowerCase() === "authorization"
+            ? { name: header.name, value: `Bearer ${refresh.accessToken}` }
+            : header,
+        ),
+      },
+    },
+  };
+});
 
 function readPluginAccessTokens(filePath: string): ReadonlyMap<string, string> {
   const tokens = new Map<string, string>();
@@ -186,7 +241,14 @@ function readPluginMcpServers(
         isHttpCursorPluginMcpServer(server) &&
         (converted.usesStoredAccessToken || !declaresAuthorization(rawConfig))
       ) {
-        authProbes.push({ requirement: { identifier, displayName: pluginName }, server });
+        const storedAccessToken = converted.usesStoredAccessToken
+          ? accessTokens.get(identifier)
+          : undefined;
+        authProbes.push({
+          requirement: { identifier, displayName: pluginName },
+          server,
+          ...(storedAccessToken === undefined ? {} : { storedAccessToken }),
+        });
       }
     }
   }
