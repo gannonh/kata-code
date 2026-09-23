@@ -276,7 +276,7 @@ describe("discoverCursorPluginMcpServers", () => {
     });
   });
 
-  it("marks HTTP plugins auth-required when a missing or malformed token is rejected", async () => {
+  it("marks OAuth plugins auth-required when a missing or malformed token is rejected, but not env-credential plugins", async () => {
     const fixture = makeCursorFixture("cursor-plugin-mcp-invalid-auth-", ["512", "600", "700"]);
     installCachedPlugin(fixture.dataDir, {
       id: "512",
@@ -302,9 +302,9 @@ describe("discoverCursorPluginMcpServers", () => {
     const probed: string[] = [];
     const fetchFn: CursorPluginMcpFetch = async (input) => {
       probed.push(String(input));
-      return new Response(null, { status: String(input).includes("linear") ? 401 : 200 });
+      return new Response(null, { status: String(input).includes("open") ? 200 : 401 });
     };
-    const options = { env: { ...fixture.env, CONFIGURED_TOKEN: "configured" }, fetch: fetchFn };
+    const options = { env: fixture.env, fetch: fetchFn };
     const expectedAuthRequired = [{ identifier: "plugin-linear-linear", displayName: "linear" }];
     const authPath = NodePath.join(fixture.projectDir, "mcp-auth.json");
     const malformedAuthFiles = [

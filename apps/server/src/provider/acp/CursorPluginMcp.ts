@@ -150,10 +150,12 @@ async function readPluginMcpServers(
       taken.add(identifier);
       servers.push(converted.server);
       const server = converted.server;
+      // A launch config that declares its own Authorization expects a
+      // credential from the environment, which mcp_auth cannot supply.
       if (
         fetchFn !== undefined &&
         isHttpCursorPluginMcpServer(server) &&
-        (converted.usesStoredAccessToken || !server.headers.some(hasUsableAuthorization))
+        (converted.usesStoredAccessToken || !declaresAuthorization(rawConfig))
       ) {
         authChecks.push(
           isAuthRejected(server, fetchFn).then((rejected) =>
@@ -308,6 +310,14 @@ function httpHeaders(
     headers: [...usableConfigured, { name: "Authorization", value: `Bearer ${accessToken}` }],
     usesStoredAccessToken: true,
   };
+}
+
+function declaresAuthorization(rawConfig: unknown): boolean {
+  return (
+    isRecord(rawConfig) &&
+    isRecord(rawConfig.headers) &&
+    Object.keys(rawConfig.headers).some((name) => name.toLowerCase() === "authorization")
+  );
 }
 
 function hasUsableAuthorization(header: { name: string; value: string }): boolean {
