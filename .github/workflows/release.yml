@@ -736,6 +736,11 @@ jobs:
             --token "$VERCEL_TOKEN" \
             --non-interactive
 
+          node scripts/prune-sandbox-images.ts \
+            --repository "$repository" \
+            --project-id "$VCR_PROJECT_ID" \
+            --team-slug "${VERCEL_TEAM_SLUG:-kata-sh}"
+
           node packages/kata-sandbox-docker/scripts/build-image.mjs \
             --platform linux/amd64,linux/arm64 \
             --push \
