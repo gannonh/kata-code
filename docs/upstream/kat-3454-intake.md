@@ -2,16 +2,18 @@
 
 ## Frozen refs
 
-| Value                  | Commit                                                                |
-| ---------------------- | --------------------------------------------------------------------- |
-| Kata base              | `c699005eb5b8beae930afba9c662ec3728edfb05` (`origin/main` 2026-09-24) |
-| Previous upstream pin  | `f5ef0ddb90a8c36584e181b1913e7b8a5df30ffc`                            |
-| Frozen upstream target | `e67abcf798f8c4d8458755e3b4dde02c2c1f628b` (frozen 2026-09-24T07:00Z) |
-| Original upstream root | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f`                            |
+| Value                  | Commit                                                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Kata base              | `14469eaf6a1aa52a3943d12338dcf780f0596c30` (`origin/main` after KAT-3458; first base `c699005eb5b8beae930afba9c662ec3728edfb05`) |
+| Previous upstream pin  | `f5ef0ddb90a8c36584e181b1913e7b8a5df30ffc`                                                                                       |
+| Frozen upstream target | `e67abcf798f8c4d8458755e3b4dde02c2c1f628b` (frozen 2026-09-24T07:00Z)                                                            |
+| Original upstream root | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f`                                                                                       |
 
 Run `kat-upstream-20260924T070041Z-claude-mini` froze a range of 15 commits and 124 changed paths. The previous pin is an ancestor of the target. The range has no migration, `.repos/`, or `.plans/` paths. It touches three workflow files and `.github/VOUCHED.td`.
 
 KAT-3441 landed the previous pin through PR #256 as merge commit `ee596604f92ac088fa8e3ece1b516736ba50a831`, the first integration since PR #212 to land as a merge instead of a squash. `f5ef0ddb9` is an ancestor of the Kata base, and `git merge-base --all HEAD e67abcf79` returned exactly the previous pin, so this run records no ancestry anchor.
+
+Main advanced during review by KAT-3458 (`1eca16e046`, `14469eaf6a`: sandbox image pruning in `release.yml` and `scripts/prune-sandbox-images.ts`). The branch merged `14469eaf6` without conflicts, and `release.yml` still differs from main only by this integration's test jobs. Candidate-bound evidence was regenerated against the new base.
 
 ## TAKE
 
