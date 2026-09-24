@@ -5,6 +5,7 @@ interface AndroidAgentNotifications {
   configure(deviceId: string, userId: string, scheme: string, ongoingEnabled: boolean): void;
   clear(): void;
   openLiveUpdateSettings?(): boolean;
+  showShowcaseActivity?(scheme: string, data: Record<string, string>): void;
 }
 
 type NativeLoader = () => AndroidAgentNotifications | null;
@@ -28,18 +29,25 @@ export function supportsAndroidAgentNotifications(): boolean {
   return typeof native?.configure === "function" && typeof native?.clear === "function";
 }
 
+function appScheme(): string {
+  const scheme = Constants.expoConfig?.scheme;
+  return (Array.isArray(scheme) ? scheme[0] : scheme) ?? "katacode";
+}
+
 export function configureAndroidAgentNotifications(
   deviceId: string,
   userId: string,
   ongoingEnabled: boolean,
 ): void {
-  const scheme = Constants.expoConfig?.scheme;
-  nativeLoader()?.configure?.(
-    deviceId,
-    userId,
-    (Array.isArray(scheme) ? scheme[0] : scheme) ?? "katacode",
-    ongoingEnabled,
-  );
+  nativeLoader()?.configure?.(deviceId, userId, appScheme(), ongoingEnabled);
+}
+
+/** Posts a staged relay payload for the showcase capture; false when unsupported. */
+export function showAndroidShowcaseAgentActivity(data: Record<string, string>): boolean {
+  const native = nativeLoader();
+  if (!native?.showShowcaseActivity) return false;
+  native.showShowcaseActivity(appScheme(), data);
+  return true;
 }
 
 export function clearAndroidAgentNotifications(): void {

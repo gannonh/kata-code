@@ -237,6 +237,7 @@ import {
 } from "../integration/TransferBudgetReport.integration.ts";
 import { symlinksSupported } from "@kata-sh/code-shared/testing/symlinks";
 import { DEFAULT_SIGNAL_EXPORT, otlpSerializationLayer } from "@kata-sh/code-shared/observability";
+import * as OtelEnvironment from "@kata-sh/code-shared/otelEnvironment";
 
 const defaultProjectId = ProjectId.make("project-default");
 const defaultThreadId = ThreadId.make("thread-default");
@@ -605,6 +606,7 @@ const buildAppUnderTest = (options?: {
       otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
       otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
       otlpServiceName: "t3-server",
+      otelEnvironment: OtelEnvironment.none,
       mode: "desktop",
       port: 0,
       host: "127.0.0.1",

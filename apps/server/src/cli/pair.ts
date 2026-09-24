@@ -17,6 +17,7 @@ import {
 import { WIRE_ENVIRONMENT_WELL_KNOWN_PATH } from "@kata-sh/code-contracts/wireIdentity";
 import { resolveWorktreeKatacodeHome } from "@kata-sh/code-shared/devHome";
 import { DEFAULT_SIGNAL_EXPORT } from "@kata-sh/code-shared/observability";
+import * as OtelEnvironment from "@kata-sh/code-shared/otelEnvironment";
 import {
   buildTailscaleHttpsBaseUrl,
   DEFAULT_TAILSCALE_SERVE_PORT,
@@ -327,6 +328,7 @@ const makePairServerConfig = Effect.fn(function* (input: {
     otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
     otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
     otlpServiceName: "t3-server",
+    otelEnvironment: OtelEnvironment.none,
     mode: "web",
     port: state.port,
     host: state.host,
