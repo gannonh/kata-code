@@ -1,3 +1,7 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off - Vite loads this config before any Effect runtime exists.
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+
 import "vite-plus/test/config";
 import { defineConfig, mergeConfig } from "vite-plus";
 
@@ -135,6 +139,9 @@ export default mergeConfig(
       fileParallelism: false,
       // Appended to the root setup, which mergeConfig concatenates.
       setupFiles: ["./src/testUtils/gitConfig.setup.ts"],
+      // macOS puts the temp dir behind the /var -> /private/var symlink. Code under
+      // test canonicalizes paths, so fixtures must start from the real path too.
+      env: { TMPDIR: NodeFS.realpathSync(NodeOS.tmpdir()) },
       // Server integration tests exercise sqlite, git, and orchestration together.
       // Under package-wide runs they can exceed the default budget on loaded CI hosts.
       hookTimeout: 120_000,

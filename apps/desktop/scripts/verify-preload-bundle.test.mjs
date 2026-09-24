@@ -93,6 +93,32 @@ describe("desktop preload bundle verifier", () => {
     );
   });
 
+  it("accepts a macOS branch that registers window listeners", () => {
+    assert.doesNotThrow(() =>
+      verifyPreloadBundle(`
+        ${validPreload}
+        if (process.platform === "darwin") {
+          window.addEventListener("resize", () => undefined);
+        }
+      `),
+    );
+  });
+
+  it("executes the preload for every desktop platform regardless of host", () => {
+    for (const platform of ["darwin", "linux", "win32"]) {
+      assert.throws(
+        () =>
+          verifyPreloadBundle(
+            validPreload.replace(
+              "getClientPlatform: () => process.platform,",
+              `getClientPlatform: process.platform === "${platform}" ? undefined : () => process.platform,`,
+            ),
+          ),
+        `Desktop preload bundle is missing executable APIs: getClientPlatform (${platform})`,
+      );
+    }
+  });
+
   it("ignores require-like text in strings and comments", () => {
     assert.doesNotThrow(() =>
       verifyPreloadBundle(`
