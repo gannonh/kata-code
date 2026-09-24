@@ -673,6 +673,19 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
 
+      # Registry retention belongs to the workflow revision, not the release
+      # ref: a stable release rebuilds an older nightly commit.
+      - name: Checkout registry retention tooling
+        if: ${{ needs.preflight.outputs.dry_run != 'true' }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .release-tooling
+          sparse-checkout: |
+            /scripts/prune-sandbox-images.ts
+            /scripts/release-sandbox-image.ts
+          sparse-checkout-cone-mode: false
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -735,6 +748,15 @@ jobs:
             --scope "$vcr_scope" \
             --token "$VERCEL_TOKEN" \
             --non-interactive
+
+          # Best effort: a full registry still fails the push below.
+          release_tooling="$GITHUB_WORKSPACE/.release-tooling"
+          if ! node "$release_tooling/scripts/prune-sandbox-images.ts" \
+            --repository "$repository" \
+            --project-id "$VCR_PROJECT_ID" \
+            --team-slug "${VERCEL_TEAM_SLUG:-kata-sh}"; then
+            echo "::warning::Sandbox image pruning failed; pushing anyway."
+          fi
 
           node packages/kata-sandbox-docker/scripts/build-image.mjs \
             --platform linux/amd64,linux/arm64 \
