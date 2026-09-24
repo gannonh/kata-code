@@ -258,11 +258,11 @@ Docker pulls. The job injects hosted `VERCEL_ORG_ID` and `VERCEL_PROJECT_ID` for
 Registry login, `vcr config`, and readiness polling use `VCR_*`.
 A second `docker pull` of the same index digest fails with `cannot overwrite digest`.
 
-VCR caps the number of images per repository, and each release adds an index plus one manifest per
-platform. Before pushing, `scripts/prune-sandbox-images.ts` deletes prerelease indexes older than
+VCR caps the number of images per repository (50 on the Vercel Hobby plan), and each release adds
+an index plus one manifest per platform. Before pushing, `scripts/prune-sandbox-images.ts` deletes prerelease indexes older than
 the 10 newest, along with their manifests. It keeps every image with a stable version tag or a
-moving tag (`latest`, `nightly`) and skips manifests pushed within the last 2 hours. GHCR keeps
-every tag.
+moving tag (`latest`, `nightly`) and skips manifests pushed within the last 2 hours. The VCR API
+allows 100 requests per minute, so the prune waits and retries on HTTP 429. GHCR keeps every tag.
 
 The first GHCR publish creates a private package. Open the package settings, change its visibility
 to public, and rerun the failed release. The anonymous manifest check must pass before the workflow

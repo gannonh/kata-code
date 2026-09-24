@@ -6,10 +6,11 @@ import * as NodeUtil from "node:util";
 
 import { vcrReadinessUrl } from "./release-sandbox-image.ts";
 
-// VCR caps the number of images per repository, and every release adds an
-// index plus one manifest per platform. Images with a stable or moving tag stay
-// forever; prerelease indexes older than the newest few go, along with their
-// manifests.
+// VCR caps the number of images per repository (50 on the Hobby plan), and
+// every release adds an index plus one manifest per platform. Images with a
+// stable or moving tag stay forever; prerelease indexes older than the newest
+// few go, along with their manifests. Ten prereleases plus the stable and
+// nightly indexes leave about 37 images before a push.
 export const KEEP_PRERELEASE_INDEXES = 10;
 // Manifests land before the index that references them, so a push running in
 // another release job owns manifests no index points at yet.
