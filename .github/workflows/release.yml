@@ -263,8 +263,8 @@ jobs:
     needs: [preflight]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
-    # Upstream runs this on an 8-vCPU Blacksmith runner. The full check,
-    # typecheck, and test suite needs more than 10 minutes on hosted runners.
+    # Upstream runs this on an 8-vCPU Blacksmith runner. Hosted runners keep
+    # the longer budget Kata set when this job also ran the test suite.
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -292,11 +292,72 @@ jobs:
       - name: Typecheck
         run: vp run typecheck
 
+  # Keep tests on their own runners, using the same package split and server
+  # shards as CI, so the release check job does not spend its budget on tests.
+  test:
+    name: Release tests
+    needs: [preflight]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Ensure Electron runtime is installed
+        run: vp run --filter @kata-sh/code-desktop ensure:electron
+
       - name: Install browser secret helper build libraries
-        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config build-essential
 
       - name: Test
-        run: vp run test
+        run: vp run --parallel --concurrency-limit 4 --filter '!@kata-sh/code-cli' --filter '!@kata-sh/code-monorepo' test
+
+  test_server:
+    name: Release server tests ${{ matrix.shard }}
+    needs: [preflight]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      # No Electron setup here: `@kata-sh/code-cli` (apps/server) has no Electron dependency
+      # and none of its tests touch the runtime. Only the non-server `test`
+      # job, which covers @kata-sh/code-desktop, needs the download.
+      - name: Test
+        run: vp run --filter @kata-sh/code-cli test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
   relay_public_config:
     name: Resolve Kata Code Connect public config
@@ -816,6 +877,8 @@ jobs:
         preflight,
         relay_public_config,
         quality,
+        test,
+        test_server,
         desktop_mac_arm64,
         desktop_linux_x64,
         desktop_linux_arm64,
@@ -823,7 +886,7 @@ jobs:
         desktop_win_arm64,
         build_sandbox_image,
       ]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.quality.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' && needs.desktop_win_x64.result == 'success' && needs.desktop_win_arm64.result == 'success' && needs.build_sandbox_image.result == 'success' }}
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.quality.result == 'success' && needs.test.result == 'success' && needs.test_server.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' && needs.desktop_win_x64.result == 'success' && needs.desktop_win_arm64.result == 'success' && needs.build_sandbox_image.result == 'success' }}
     runs-on: ubuntu-24.04 # ubuntu-24.04
     timeout-minutes: 15
     permissions:

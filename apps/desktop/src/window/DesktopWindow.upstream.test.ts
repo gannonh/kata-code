@@ -39,6 +39,7 @@ import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
+import { TRACKPAD_SCROLL_END_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 
@@ -315,6 +316,33 @@ describe("DesktopWindow upstream window-button and local-environment coverage", 
         fakeWindow.isFullScreen.mockReturnValue(false);
         fakeWindow.windowListeners.get("leave-full-screen")?.();
         assert.deepEqual(fakeWindow.setWindowButtonPosition.mock.lastCall, [{ x: 16, y: 19 }]);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("forwards native trackpad release to the renderer", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const webContents = fakeWindow.window.webContents;
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({ window: fakeWindow.window, createCount, mainWindow });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+        // The mock types its calls from the last `on` overload, so read them untyped.
+        const onCalls = vi.mocked(webContents.on).mock.calls as unknown as ReadonlyArray<
+          readonly [string, (event: unknown, input: { readonly type: string }) => void]
+        >;
+        const onInput = onCalls.find(([eventName]) => eventName === "input-event")?.[1];
+        if (!onInput) return yield* Effect.die("input-event listener was not registered");
+        const sentChannels = () =>
+          vi.mocked(webContents.send).mock.calls.map(([channel]) => channel);
+        onInput({}, { type: "gestureScrollUpdate" });
+        assert.notInclude(sentChannels(), TRACKPAD_SCROLL_END_CHANNEL);
+        onInput({}, { type: "gestureScrollEnd" });
+        assert.include(sentChannels(), TRACKPAD_SCROLL_END_CHANNEL);
       }).pipe(Effect.provide(layer));
     }),
   );
