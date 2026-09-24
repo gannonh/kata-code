@@ -331,11 +331,11 @@ describe("DesktopWindow upstream window-button and local-environment coverage", 
       yield* Effect.gen(function* () {
         const desktopWindow = yield* DesktopWindow.DesktopWindow;
         yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
-        const onInput = vi
-          .mocked(webContents.on)
-          .mock.calls.find(([eventName]) => eventName === "input-event")?.[1] as
-          | ((event: unknown, input: { readonly type: string }) => void)
-          | undefined;
+        // The mock types its calls from the last `on` overload, so read them untyped.
+        const onCalls = vi.mocked(webContents.on).mock.calls as unknown as ReadonlyArray<
+          readonly [string, (event: unknown, input: { readonly type: string }) => void]
+        >;
+        const onInput = onCalls.find(([eventName]) => eventName === "input-event")?.[1];
         if (!onInput) return yield* Effect.die("input-event listener was not registered");
         const sentChannels = () =>
           vi.mocked(webContents.send).mock.calls.map(([channel]) => channel);
