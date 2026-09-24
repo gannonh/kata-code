@@ -74,7 +74,7 @@ describe("ElectronProtocol", () => {
           );
           assert.include(
             response.headers.get("content-security-policy") ?? "",
-            "connect-src 'self' blob: http: https: ws: wss:",
+            "connect-src 'self' http: https: ws: wss:",
           );
           assert.include(
             response.headers.get("content-security-policy") ?? "",
@@ -302,14 +302,7 @@ describe("ElectronProtocol", () => {
       "https://clerk.t3.codes",
       "https://challenges.cloudflare.com",
     ]);
-    assert.deepEqual(directives["connect-src"], [
-      "'self'",
-      "blob:",
-      "http:",
-      "https:",
-      "ws:",
-      "wss:",
-    ]);
+    assert.deepEqual(directives["connect-src"], ["'self'", "http:", "https:", "ws:", "wss:"]);
     assert.deepEqual(directives["img-src"], [
       "'self'",
       "katacode:",

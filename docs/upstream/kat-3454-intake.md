@@ -25,6 +25,7 @@ KAT-3441 landed the previous pin through PR #256 as merge commit `ee596604f92ac0
 
 - Skip `.github/VOUCHED.td`. Kata deleted it; KAT-3411 recorded the same SKIP.
 - Skip the four Apple device models in `apps/web/src/components/device/models/`, their `sources.json`, and `scripts/convert-device-model.py`. Upstream's `sources.json` records `"author": "Apple Inc."` and `"assetLicense": "No open-source or redistribution license has been established."` The hosted web and desktop bundles would redistribute them. `deviceModels.ts` returns no model, so the workspace renders upstream's procedural device body (`createPhoneScene`) and offers no iPad keyboard accessory. KAT-3455 holds the decision on licensed models.
+- Skip upstream's `blob:` addition to the desktop Content Security Policy `connect-src`. Upstream added it only so GLTFLoader can fetch textures embedded in the skipped models. Without the models the directive has no consumer, so the policy stays as narrow as the Kata base. KAT-3455 restores it together with any licensed models.
 - Skip upstream `AGENTS.md`, user-visible T3 product names, package scope, CLI names, environment prefixes, state directories, protocols, bundle identifiers, hosted URLs, and release destinations.
 - Skip changes that remove Kata Docker and Sprite behavior, the disabled-by-default sandbox preview, process byte APIs, credential cleanup, provider isolation, mixed-fleet adapters, or GitHubCli discovery APIs. None in this range does.
 - Keep deliberate cleanup: deleted `.repos`, `.plans`, and parked workflows.
@@ -44,7 +45,11 @@ KAT-3441 landed the previous pin through PR #256 as merge commit `ee596604f92ac0
 
 Clean merges and new files received the same review as conflicts. Fifteen cleanly merged or new files arrived with `@t3tools` imports and were remapped. New user-visible copy was rebranded: the mobile environment detail screen (`Install ${APP_BASE_NAME}`, the section title, and the restart hint) and the showcase Live Activity title use `APP_BASE_NAME`. A SnapShot helper comment now says Kata Code. The Android native module's existing `t3code` scheme fallback predates this range and stays; JavaScript always passes the configured scheme.
 
-Upstream widens the desktop Content Security Policy `connect-src` with `blob:` for GLTF textures. It stays to match upstream's policy: blob URLs can only come from the page itself, and licensed models under KAT-3455 would need it. The optional `liveTabs` field on preview automation host focus is additive on the wire, so mixed-version clients keep working.
+The optional `liveTabs` field on preview automation host focus is additive on the wire, so mixed-version clients keep working.
+
+## Trusted assertions
+
+The preservation gate requires each check's trusted test files to match the Kata base byte for byte. Upstream edited two of them. PR CI run 35968423338 on the first candidate `c0742c00e9a3312189c60e87bc5bb484390ca47e` failed `desktop-protocol-bundle-identity` (`ElectronProtocol.test.ts`, the `blob:` source) and `desktop-window-behavior` (`DesktopWindow.test.ts`, a new trackpad test). The next candidate restores both files to the base. The CSP change is skipped, as described above. Upstream's `forwards native trackpad release to the renderer` test moves unchanged in substance to the Kata companion suite `DesktopWindow.upstream.test.ts`, which reads the `input-event` listener from the `webContents.on` mock. The test fails when `DesktopWindow.ts` stops forwarding `gestureScrollEnd`. No waiver was added to `ci.yml`.
 
 Retained owners changed against the Kata base: `FORK.md` (pin and intake links), `docs/upstream/kat-3307-runbook.md` (pin literals), and `.github/workflows/release.yml` (test sharding). Live pin consumers are `FORK.md`, both `ci.yml` literals, the runbook, and live-tree `currentUpstreamSha` in `scripts/check-upstream-preservation.test.ts`. Each now names `e67abcf79`. `withHistoricalBaselineWorktree` keeps its historical commit's own pin.
 
