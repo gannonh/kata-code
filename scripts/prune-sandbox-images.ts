@@ -1,19 +1,23 @@
 #!/usr/bin/env node
-// @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalDate:off - this is a release CLI boundary.
+// @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalDate:off globalTimers:off - this is a release CLI boundary.
 
 import * as NodeChildProcess from "node:child_process";
 import * as NodeUtil from "node:util";
 
 import { vcrReadinessUrl } from "./release-sandbox-image.ts";
 
-// VCR caps the number of images per repository, and every release adds an
-// index plus one manifest per platform. Images with a stable or moving tag stay
-// forever; prerelease indexes older than the newest few go, along with their
-// manifests.
+// VCR caps the number of images per repository (50 on the Hobby plan), and
+// every release adds an index plus one manifest per platform. Images with a
+// stable or moving tag stay forever; prerelease indexes older than the newest
+// few go, along with their manifests. Ten prereleases plus the stable and
+// nightly indexes leave about 37 images before a push.
 export const KEEP_PRERELEASE_INDEXES = 10;
 // Manifests land before the index that references them, so a push running in
 // another release job owns manifests no index points at yet.
 export const MANIFEST_GRACE_MS = 2 * 60 * 60_000;
+// The VCR API allows 100 requests per minute, and a large prune needs more.
+const MAX_RATE_LIMIT_WAIT_MS = 120_000;
+const MAX_ATTEMPTS = 10;
 
 const prereleaseTagPattern = /^\d+\.\d+\.\d+-/;
 
@@ -25,19 +29,34 @@ export interface VcrImage {
   readonly tags: ReadonlyArray<string>;
 }
 
+export interface PruneResponse {
+  readonly ok: boolean;
+  readonly status: number;
+  readonly headers: { readonly get: (name: string) => string | null };
+  readonly json: () => Promise<unknown>;
+}
+
 export type PruneFetch = (
   input: string,
   init: { readonly method?: "DELETE"; readonly headers: Readonly<Record<string, string>> },
-) => Promise<{
-  readonly ok: boolean;
-  readonly status: number;
-  readonly json: () => Promise<unknown>;
-}>;
+) => Promise<PruneResponse>;
 
 export type PruneCommandRunner = (
   command: string,
   args: ReadonlyArray<string>,
 ) => Promise<{ readonly stdout: string }>;
+
+export function rateLimitWaitMs(headers: PruneResponse["headers"], nowMs: number): number {
+  const retryAfterSeconds = Number(headers.get("retry-after"));
+  const resetSeconds = Number(headers.get("x-ratelimit-reset"));
+  const waitMs =
+    retryAfterSeconds > 0
+      ? retryAfterSeconds * 1000
+      : resetSeconds > 0
+        ? resetSeconds * 1000 - nowMs
+        : 60_000;
+  return Math.min(Math.max(waitMs, 1_000), MAX_RATE_LIMIT_WAIT_MS);
+}
 
 function hasOnlyPrereleaseTags(image: VcrImage): boolean {
   return image.tags.every((tag) => prereleaseTagPattern.test(tag));
@@ -129,9 +148,22 @@ export async function pruneSandboxImages(input: {
   readonly fetch: PruneFetch;
   readonly runCommand: PruneCommandRunner;
   readonly now: number;
+  readonly sleep: (milliseconds: number) => Promise<void>;
   readonly log: (line: string) => void;
 }): Promise<ReadonlyArray<VcrImage>> {
   const headers = { accept: "application/json", authorization: `Bearer ${input.token}` };
+  const request = async (url: string, method?: "DELETE"): Promise<PruneResponse> => {
+    for (let attempt = 1; ; attempt += 1) {
+      const response = await input.fetch(
+        url,
+        method === undefined ? { headers } : { method, headers },
+      );
+      if (response.status !== 429 || attempt === MAX_ATTEMPTS) return response;
+      const waitMs = rateLimitWaitMs(response.headers, Date.now());
+      input.log(`VCR rate limit reached; retrying in ${Math.ceil(waitMs / 1000)}s.`);
+      await input.sleep(waitMs);
+    }
+  };
   const listUrl = new URL(vcrReadinessUrl(input));
   listUrl.searchParams.set("limit", "100");
 
@@ -139,7 +171,7 @@ export async function pruneSandboxImages(input: {
   let cursor: string | undefined;
   do {
     if (cursor !== undefined) listUrl.searchParams.set("cursor", cursor);
-    const response = await input.fetch(listUrl.toString(), { headers });
+    const response = await request(listUrl.toString());
     if (!response.ok) throw new Error(`VCR image list returned HTTP ${response.status}.`);
     const page = decodeImagePage(await response.json());
     images.push(...page.images);
@@ -171,7 +203,7 @@ export async function pruneSandboxImages(input: {
   for (const image of doomed) {
     const url = new URL(vcrReadinessUrl(input));
     url.pathname += `/${encodeURIComponent(image.id)}`;
-    const response = await input.fetch(url.toString(), { method: "DELETE", headers });
+    const response = await request(url.toString(), "DELETE");
     if (!response.ok && response.status !== 404) {
       throw new Error(`Deleting VCR image ${image.id} returned HTTP ${response.status}.`);
     }
@@ -205,6 +237,7 @@ if (import.meta.main) {
         stdout: String((await execFile(command, [...args], { maxBuffer: 8 * 1024 * 1024 })).stdout),
       }),
       now: Date.now(),
+      sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
       log: (line) => process.stdout.write(`${line}\n`),
     });
   } catch (cause) {

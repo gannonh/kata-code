@@ -3,7 +3,9 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   planSandboxImagePrune,
   pruneSandboxImages,
+  rateLimitWaitMs,
   selectKeptIndexes,
+  type PruneResponse,
   type VcrImage,
 } from "./prune-sandbox-images.ts";
 
@@ -21,6 +23,27 @@ function index(id: string, createdAt: string, tags: ReadonlyArray<string>): VcrI
 function manifest(id: string, createdAt: string): VcrImage {
   return { id, manifestDigest: digest(id), kind: "manifest", createdAt, tags: [] };
 }
+
+function respond(
+  status: number,
+  body: unknown = {},
+  headers: Readonly<Record<string, string>> = {},
+): PruneResponse {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: (name) => headers[name] ?? null },
+    json: async () => body,
+  };
+}
+
+const untaggedManifest = {
+  id: "image_untagged",
+  manifestDigest: digest("untagged"),
+  kind: "manifest",
+  createdAt: "2026-09-01T00:00:00.000Z",
+  tags: [],
+};
 
 describe("sandbox image pruning", () => {
   it("keeps stable and moving tags plus the newest prereleases", () => {
@@ -118,16 +141,15 @@ describe("sandbox image pruning", () => {
       token: "token",
       keepPrereleases: 0,
       now,
+      sleep: async () => {},
       log: () => {},
       fetch: async (url, init) => {
         requests.push(`${init.method ?? "GET"} ${url}`);
         if (init.method === "DELETE") {
-          return url.includes("image_old_amd64")
-            ? { ok: false, status: 404, json: async () => ({}) }
-            : { ok: true, status: 200, json: async () => ({}) };
+          return respond(url.includes("image_old_amd64") ? 404 : 200);
         }
         const cursor = new URL(url).searchParams.get("cursor") ?? "first";
-        return { ok: true, status: 200, json: async () => pages[cursor] };
+        return respond(200, pages[cursor]);
       },
       runCommand: async (_command, args) => {
         inspected.push(args.at(-1)!);
@@ -157,24 +179,9 @@ describe("sandbox image pruning", () => {
       keepPrereleases: 0,
       now,
       log: () => {},
+      sleep: async () => {},
       fetch: async (_url, init) =>
-        init.method === "DELETE"
-          ? { ok: false, status: 403, json: async () => ({}) }
-          : {
-              ok: true,
-              status: 200,
-              json: async () => ({
-                images: [
-                  {
-                    id: "image_untagged",
-                    manifestDigest: digest("untagged"),
-                    kind: "manifest",
-                    createdAt: "2026-09-01T00:00:00.000Z",
-                    tags: [],
-                  },
-                ],
-              }),
-            },
+        init.method === "DELETE" ? respond(403) : respond(200, { images: [untaggedManifest] }),
       runCommand: async () => ({ stdout: "{}" }),
     });
 
@@ -183,5 +190,44 @@ describe("sandbox image pruning", () => {
       (error: Error) =>
         assert.equal(error.message, "Deleting VCR image image_untagged returned HTTP 403."),
     );
+  });
+
+  it("waits out the VCR rate limit and retries the request", async () => {
+    const sleeps: Array<number> = [];
+    let deletes = 0;
+
+    const doomed = await pruneSandboxImages({
+      repository,
+      projectId: "prj_registry",
+      token: "token",
+      keepPrereleases: 0,
+      now,
+      log: () => {},
+      sleep: async (milliseconds) => {
+        sleeps.push(milliseconds);
+      },
+      fetch: async (_url, init) => {
+        if (init.method !== "DELETE") return respond(200, { images: [untaggedManifest] });
+        deletes += 1;
+        return deletes === 1 ? respond(429, {}, { "retry-after": "3" }) : respond(200);
+      },
+      runCommand: async () => ({ stdout: "{}" }),
+    });
+
+    assert.deepStrictEqual(
+      doomed.map((image) => image.id),
+      ["image_untagged"],
+    );
+    assert.deepStrictEqual(sleeps, [3000]);
+    assert.equal(deletes, 2);
+  });
+
+  it("derives the rate limit wait from the reset time and bounds it", () => {
+    const headers = (values: Record<string, string>) => respond(429, {}, values).headers;
+
+    assert.equal(rateLimitWaitMs(headers({ "x-ratelimit-reset": "1000" }), 990_000), 10_000);
+    assert.equal(rateLimitWaitMs(headers({ "x-ratelimit-reset": "1000" }), 1_500_000), 1_000);
+    assert.equal(rateLimitWaitMs(headers({ "retry-after": "600" }), 0), 120_000);
+    assert.equal(rateLimitWaitMs(headers({}), 0), 60_000);
   });
 });
