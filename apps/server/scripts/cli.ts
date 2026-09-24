@@ -7,37 +7,22 @@ import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { Command, Flag } from "effect/unstable/cli";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess } from "effect/unstable/process";
 
 import { DEVELOPMENT_ICON_OVERRIDES } from "../../../scripts/lib/brand-assets.ts";
 import { findEsmImportsOfExternalPackages } from "../../../scripts/lib/cli-executable-imports.ts";
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import {
-  ServerCliBuildAssetMissingError,
-  ServerCliCommandExitError,
   ServerCliDevelopmentIconSourceMissingError,
   ServerCliDevelopmentIconTargetMissingError,
   ServerCliExecutableImportError,
 } from "./cliErrors.ts";
+import { publishNpmTarballs } from "./npmPublish.ts";
+import { runCommand } from "./runCommand.ts";
 
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
 );
-
-const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.StandardCommand) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const child = yield* spawner.spawn(command);
-  const exitCode = yield* child.exitCode;
-
-  if (exitCode !== 0) {
-    return yield* new ServerCliCommandExitError({
-      command: command.command,
-      args: command.args,
-      cwd: command.options.cwd,
-      exitCode,
-    });
-  }
-});
 
 const applyDevelopmentIconOverrides = Effect.fn("applyDevelopmentIconOverrides")(function* (
   repoRoot: string,
@@ -165,14 +150,6 @@ const buildExeCmd = Command.make(
 // publish subcommand
 // ---------------------------------------------------------------------------
 
-/**
- * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
- * every `@kata-sh/code-cli-<platform>.tgz` first, `@kata-sh/code-cli.tgz`
- * (the launcher) last, so
- * the launcher is never installable before the executables it depends on.
- * Tarballs rather than directories because `npm publish <dir>` strips the
- * `node_modules/` the executable loads its native addons from.
- */
 const publishCmd = Command.make(
   "publish",
   {
@@ -185,47 +162,7 @@ const publishCmd = Command.make(
     dryRun: Flag.Boolean("dry-run").pipe(Flag.withDefault(false)),
     verbose: Flag.Boolean("verbose").pipe(Flag.withDefault(false)),
   },
-  (config) =>
-    Effect.gen(function* () {
-      const path = yield* Path.Path;
-      const fs = yield* FileSystem.FileSystem;
-      // npm runs with cwd set to the packages dir below, so tarball paths are
-      // resolved once here rather than joined twice.
-      const packagesDir = path.resolve(config.packagesDir);
-      const scopeDir = path.join(packagesDir, "@kata-sh");
-      const launcherTarball = path.join(scopeDir, "code-cli.tgz");
-      const platformTarballs = (yield* fs
-        .readDirectory(scopeDir)
-        .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => [])))
-        .filter((entry) => entry.startsWith("code-cli-") && entry.endsWith(".tgz"))
-        .sort()
-        .map((entry) => path.join(scopeDir, entry));
-      if (platformTarballs.length === 0) {
-        return yield* new ServerCliBuildAssetMissingError({
-          assetPath: path.join(scopeDir, "code-cli-<platform>.tgz"),
-        });
-      }
-      if (!(yield* fs.exists(launcherTarball))) {
-        return yield* new ServerCliBuildAssetMissingError({ assetPath: launcherTarball });
-      }
-
-      const args = ["publish", "--access", config.access, "--tag", config.tag];
-      if (config.provenance) args.push("--provenance");
-      if (config.dryRun) args.push("--dry-run");
-
-      for (const tarball of [...platformTarballs, launcherTarball]) {
-        const spawnCommand = yield* resolveSpawnCommand("npm", [...args, tarball]);
-        yield* Effect.log(`[cli] npm ${args.join(" ")} ${path.basename(tarball)}`);
-        yield* runCommand(
-          ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-            cwd: packagesDir,
-            stdout: config.verbose ? "inherit" : "ignore",
-            stderr: "inherit",
-            shell: spawnCommand.shell,
-          }),
-        );
-      }
-    }),
+  (config) => publishNpmTarballs(config),
 ).pipe(
   Command.withDescription(
     "Publish the @kata-sh/code-cli-<platform> tarballs and then the @kata-sh/code-cli launcher to npm.",
