@@ -1496,6 +1496,7 @@ describe("storage cleanup", () => {
     "symlinked-files",
     "symlinked-shared-alias",
     "symlinked-terminal-alias",
+    "symlinked-project-alias",
   ] as const) {
     it.effect(
       `retains protected worktrees (${protection}) and expires only old artifacts and rotated logs`,
@@ -1685,6 +1686,7 @@ describe("storage cleanup", () => {
                           if (
                             protection === "project-root" ||
                             protection === "nested-project" ||
+                            protection === "symlinked-project-alias" ||
                             (protection === "new-nested-project" && snapshotReads > 1)
                           ) {
                             projects.push(
@@ -1692,7 +1694,12 @@ describe("storage cleanup", () => {
                                 LINKED_PROJECT_ID,
                                 protection === "project-root"
                                   ? worktreePath
-                                  : path.join(worktreePath, "nested"),
+                                  : path.join(
+                                      protection === "symlinked-project-alias"
+                                        ? realWorktreePath
+                                        : worktreePath,
+                                      "nested",
+                                    ),
                               ),
                             );
                             threads.push(
