@@ -7,6 +7,7 @@ import {
   managedEndpointHostname,
   isManagedEndpointHostname,
   managedEndpointTunnelName,
+  managedEndpointTunnelNamePrefix,
   relayOwnsManagedEndpointZone,
   RelayPublicDomainLabelTooLongError,
   relayPublicDomainForStage,
@@ -83,6 +84,9 @@ describe("managed endpoint names", () => {
     );
     expect(managedEndpointTunnelName("dev_julius", hash)).toBe(
       "katacoderelay-managedendpoint-dev-julius-abcdef0123456789",
+    );
+    expect(managedEndpointTunnelNamePrefix("dev_julius")).toBe(
+      "katacoderelay-managedendpoint-dev-julius-",
     );
   });
 

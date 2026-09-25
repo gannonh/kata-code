@@ -308,7 +308,7 @@ export function RoutineChat({
                   : "mr-8 rounded-lg bg-muted/40 px-3 py-2 text-sm"
               }
             >
-              <span className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="mb-1 block text-3xs font-medium uppercase tracking-wide text-muted-foreground">
                 {entry.role === "user" ? "You" : "Assistant"}
               </span>
               <p className="whitespace-pre-wrap">{entry.content}</p>
@@ -361,7 +361,7 @@ export function RoutineChat({
           disabled={pending}
         />
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[11px] text-muted-foreground">Ctrl/⌘ + Enter to send</p>
+          <p className="text-2xs text-muted-foreground">Ctrl/⌘ + Enter to send</p>
           {pending ? (
             <Button size="sm" variant="outline" onClick={cancel}>
               <SquareIcon className="size-3.5" /> Cancel

@@ -220,7 +220,7 @@ export function SandboxGitHubSourcePicker({
                 <ComboboxItem key={item.nameWithOwner} value={item.nameWithOwner}>
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate">{item.nameWithOwner}</span>
-                    <span className="truncate text-[11px] text-muted-foreground">
+                    <span className="truncate text-2xs text-muted-foreground">
                       {item.visibility} · default {item.defaultBranch}
                     </span>
                   </span>

@@ -159,7 +159,12 @@ function registerDesktopSchemePrivilegesSync(): void {
   Electron.protocol.registerSchemesAsPrivileged(
     [PROTOCOL_SCHEME, PROTOCOL_SCHEME_LEGACY, PROTOCOL_SCHEME_DEV].map((scheme) => ({
       scheme,
-      privileges: DESKTOP_SCHEME_PRIVILEGES,
+      // Custom schemes skip Chromium's V8 code cache unless they opt in.
+      // Dev stays off: Vite serves changing code at stable URLs.
+      privileges:
+        scheme === PROTOCOL_SCHEME
+          ? { ...DESKTOP_SCHEME_PRIVILEGES, codeCache: true }
+          : DESKTOP_SCHEME_PRIVILEGES,
     })),
   );
 }

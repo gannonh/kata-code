@@ -115,9 +115,17 @@
       "types": "./src/textPaste.ts",
       "default": "./src/textPaste.ts"
     },
+    "./delayed-status": {
+      "types": "./src/delayedStatus.ts",
+      "default": "./src/delayedStatus.ts"
+    },
     "./state/connections": {
       "types": "./src/state/connections.ts",
       "default": "./src/state/connections.ts"
+    },
+    "./state/entities": {
+      "types": "./src/state/entities.ts",
+      "default": "./src/state/entities.ts"
     },
     "./state/filesystem": {
       "types": "./src/state/filesystem.ts",
@@ -286,6 +294,14 @@
     "./device/model": {
       "types": "./src/device/model.ts",
       "default": "./src/device/model.ts"
+    },
+    "./device/duo-viewer": {
+      "types": "./src/device/duoViewer.ts",
+      "default": "./src/device/duoViewer.ts"
+    },
+    "./device/duo-control": {
+      "types": "./src/device/duoControl.ts",
+      "default": "./src/device/duoControl.ts"
     }
   },
   "scripts": {

@@ -8,6 +8,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { ServerConfig } from "../config.ts";
 import * as CliState from "./CliState.ts";
 import {
+  CLOUD_ENDPOINT_CONFIRMED_ORIGIN,
   CLOUD_ENDPOINT_RUNTIME_CONFIG,
   CLOUD_LINKED_USER_ID,
   CLOUD_MANAGED_ENDPOINT_URL,
@@ -26,6 +27,7 @@ const persistedCloudLinkSecrets = [
   CLOUD_MINT_PUBLIC_KEY,
   CLOUD_ENDPOINT_RUNTIME_CONFIG,
   CLOUD_MANAGED_ENDPOINT_URL,
+  CLOUD_ENDPOINT_CONFIRMED_ORIGIN,
   PUBLISH_AGENT_ACTIVITY_SECRET,
 ] as const;
 

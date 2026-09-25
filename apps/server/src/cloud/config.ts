@@ -1,4 +1,7 @@
-import { RelayManagedEndpointRuntimeConfig } from "@kata-sh/code-contracts/relay";
+import {
+  RelayManagedEndpointOrigin,
+  RelayManagedEndpointRuntimeConfig,
+} from "@kata-sh/code-contracts/relay";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -7,6 +10,7 @@ import type * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
 export const CLOUD_MINT_PUBLIC_KEY = "cloud-mint-ed25519-public-key";
 export const CLOUD_ENDPOINT_RUNTIME_CONFIG = "cloud-endpoint-runtime-config";
+export const CLOUD_ENDPOINT_CONFIRMED_ORIGIN = "cloud-endpoint-confirmed-origin";
 export const CLOUD_LINKED_USER_ID = "cloud-linked-user-id";
 /** Public HTTPS origin the relay advertises for this environment's managed tunnel. */
 export const CLOUD_MANAGED_ENDPOINT_URL = "cloud-managed-endpoint-url";
@@ -21,6 +25,19 @@ export const encodeEndpointRuntimeConfigJson = Schema.encodeEffect(
 
 export const decodeRuntimeConfig = Schema.decodeUnknownOption(
   Schema.fromJsonString(RelayManagedEndpointRuntimeConfig),
+);
+
+export const ManagedEndpointConfirmedOrigin = Schema.Struct({
+  config: RelayManagedEndpointRuntimeConfig,
+  origin: RelayManagedEndpointOrigin,
+});
+
+export const encodeConfirmedOriginJson = Schema.encodeEffect(
+  Schema.fromJsonString(ManagedEndpointConfirmedOrigin),
+);
+
+export const decodeConfirmedOrigin = Schema.decodeUnknownOption(
+  Schema.fromJsonString(ManagedEndpointConfirmedOrigin),
 );
 
 export function isAgentActivityPublishingEnabledValue(value: string | null): boolean {

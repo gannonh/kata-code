@@ -572,7 +572,7 @@ export function AddEnvironmentDialog({
           <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-muted/30 px-3 py-2">
             <div>
               <p className="text-xs font-medium text-foreground">Suggested hosts</p>
-              <p className="text-[11px] text-muted-foreground">From SSH config and known hosts</p>
+              <p className="text-2xs text-muted-foreground">From SSH config and known hosts</p>
             </div>
             <Button
               size="xs"
