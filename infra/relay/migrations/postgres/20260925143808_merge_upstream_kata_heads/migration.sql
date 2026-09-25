@@ -1,0 +1,1 @@
+-- Merges the upstream managed endpoint recovery and Kata Linear OAuth snapshot heads. No schema change.
