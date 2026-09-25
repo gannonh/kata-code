@@ -2,6 +2,7 @@ import type {
   RelayAgentActivityAggregateState,
   RelayAgentActivityState,
   RelayAgentAwarenessPreferences,
+  RelayManagedEndpointOrigin,
 } from "@kata-sh/code-contracts/relay";
 import {
   bigint,
@@ -96,6 +97,10 @@ export const relayManagedEndpointAllocations = pgTable(
     tunnelName: text("tunnel_name").notNull(),
     dnsRecordId: varchar("dns_record_id", { length: 191 }),
     readyAt: varchar("ready_at", { length: 64 }),
+    recoveryEnabledAt: varchar("recovery_enabled_at", { length: 64 }),
+    recoveryEnvironmentPublicKey: text("recovery_environment_public_key"),
+    origin: jsonb("origin").$type<RelayManagedEndpointOrigin>(),
+    generation: integer("generation").notNull().default(0),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
     updatedAt: varchar("updated_at", { length: 64 }).notNull(),
   },

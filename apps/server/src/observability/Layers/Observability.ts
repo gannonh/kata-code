@@ -4,6 +4,7 @@ import {
   makeTraceSink,
   otlpSerializationLayer,
 } from "@kata-sh/code-shared/observability";
+import * as OtelEnvironment from "@kata-sh/code-shared/otelEnvironment";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as References from "effect/References";
@@ -95,6 +96,9 @@ export const ObservabilityLive = Layer.unwrap(
     return otelWarningsLayer.pipe(
       Layer.provideMerge(
         Layer.mergeAll(ServerLoggerLive, traceReferencesLayer, tracerLayer, metricsLayer),
+      ),
+      Layer.provide(
+        OtelEnvironment.layerResourceAttributes(config.otelEnvironment.resourceAttributes),
       ),
     );
   }),

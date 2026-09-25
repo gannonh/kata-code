@@ -14,7 +14,7 @@ it.layer(NodeSqliteClient.layer({ filename: ":memory:" }))("Kata upstream upgrad
       const executed = yield* runMigrations();
       assert.deepEqual(
         executed.map(([id]) => id),
-        [43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57],
+        [43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58],
       );
 
       const authColumns = yield* sql<{ readonly name: string }>`PRAGMA table_info(auth_sessions)`;
@@ -33,6 +33,7 @@ it.layer(NodeSqliteClient.layer({ filename: ":memory:" }))("Kata upstream upgrad
         readonly name: string;
       }>`PRAGMA table_info(pull_request_files_viewed)`;
       assert.ok(viewedColumns.some(({ name }) => name === "viewer"));
+      assert.ok(threadColumns.some(({ name }) => name === "auto_settle_disabled_at"));
       assert.deepEqual(yield* runMigrations(), []);
     }),
   );

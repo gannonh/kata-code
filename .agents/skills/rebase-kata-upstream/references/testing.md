@@ -14,7 +14,7 @@ Repeat relevant cases when changing the Git procedure: an already-unsquashed his
 
 ## Exercise decision gates
 
-Give a fresh agent a candidate with green portable checks but missing mandatory device evidence. Inspect whether it advances or merges. Separately provide a Human Review issue, an already-merged PR with unfinished learning, and stale candidate-bound receipts. Confirm that the agent follows the live lifecycle and actual evidence. Use fixture records rather than changing real issues.
+Give a fresh agent a candidate with green portable checks but missing mandatory device evidence, once with the standing live-evidence waiver in the issue AC and once without it. It may advance only with the clause, and must still quote `HUMAN_REVIEW_ACCEPTANCE status=FAIL`. Give it an automated preservation `FAIL` outside the `ci.yml` allowlist too, and confirm the waiver does not clear it. Inspect whether it advances or merges. Separately provide a Human Review issue, an already-merged PR with unfinished learning, and stale candidate-bound receipts. Confirm that the agent follows the live lifecycle and actual evidence. Use fixture records rather than changing real issues.
 
 For ownership changes, launch two simultaneous lock acquisitions against one temporary coordinator. Exactly one may succeed. Verify that a duplicate leaves the run record unchanged, release preserves the record, and reacquisition resumes pending learning. Missing owner metadata must not trigger automatic lock removal. A local lock cannot prove coordination across hosts.
 

@@ -26,6 +26,8 @@ export const WIRE_RELAY_CLOUD_LINEAR_OAUTH_JWT_TYP = "kata-cloud-linear-oauth+jw
 export const WIRE_RELAY_ENV_MINT_RESPONSE_JWT_TYP = "kata-env-mint+jwt" as const;
 export const WIRE_RELAY_ENV_HEALTH_RESPONSE_JWT_TYP = "kata-env-health+jwt" as const;
 export const WIRE_RELAY_ENV_ACTIVITY_JWT_TYP = "kata-env-activity+jwt" as const;
+export const WIRE_RELAY_ENV_MANAGED_TUNNEL_RECOVERY_JWT_TYP =
+  "kata-env-managed-tunnel-recovery+jwt" as const;
 export const WIRE_RELAY_LINK_CHALLENGE_JWT_TYP = "kata-link-challenge+jwt" as const;
 export const WIRE_RELAY_DPOP_ACCESS_JWT_TYP = "kata-relay-dpop-access+jwt" as const;
 

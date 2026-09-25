@@ -15,6 +15,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -166,6 +167,9 @@ const endpointRuntimeLayer = Layer.succeed(
     applyConfig: () =>
       Effect.succeed({ status: "running", providerKind: "cloudflare_tunnel", pid: 1 }),
     getStatus: Effect.succeed({ status: "running", providerKind: "cloudflare_tunnel", pid: 1 }),
+    recoveryRequests: Stream.empty,
+    requestRecovery: () => Effect.void,
+    withLinkStateLock: (effect) => effect,
   }),
 );
 const linearMetadataFixture: RoutineLinearMetadata = {

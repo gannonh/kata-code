@@ -39,6 +39,11 @@ iOS, and power off. Close the tab to stop watching; the device keeps running
 unless you power it off. Closed tabs stay closed after a reload. To watch the
 device again, choose it from **+ → Device**.
 
+Choose **3D view** to inspect supported devices while the live screen stays
+interactive. **Restore 3D view** returns the device to a screen-facing position.
+On supported Android foldables, use **Fold device** and **Unfold device** beside
+the screen to change its posture in either view.
+
 ## Tools
 
 The toolbar's **Tools** button opens a drawer for the open device. It shows the
