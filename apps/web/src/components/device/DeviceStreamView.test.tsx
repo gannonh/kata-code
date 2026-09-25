@@ -1,4 +1,10 @@
-import { act, useSyncExternalStore } from "react";
+import {
+  act,
+  useSyncExternalStore,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { EnvironmentId } from "@kata-sh/code-contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
@@ -20,7 +26,12 @@ vi.mock("~/state/device", () => ({
   useDeviceHubAccess: () => useSyncExternalStore(accessStore.subscribe, () => accessStore.value),
   refreshDeviceHubAccess: () => accessStore.refresh(),
 }));
-import { DeviceStreamView } from "./DeviceStreamView";
+vi.mock("~/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => children,
+  TooltipTrigger: ({ render }: { render: ReactElement }) => render,
+  TooltipPopup: () => null,
+}));
+import { DeviceStreamView, type DeviceViewControls } from "./DeviceStreamView";
 
 class Image extends EventTarget {
   src = "";
@@ -42,22 +53,27 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-async function setup() {
+class Socket {
+  static OPEN = 1;
+  static instances: Socket[] = [];
+  readyState = 1;
+  onmessage?: (event: { data: ArrayBuffer }) => void;
+  constructor() {
+    Socket.instances.push(this);
+  }
+  send() {}
+  close() {}
+}
+
+async function setup(extra: Partial<ComponentProps<typeof DeviceStreamView>> = {}) {
+  Socket.instances = [];
   vi.useFakeTimers();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("fetch", () => {
     primes++;
     return Promise.resolve(new Response("prime"));
   });
-  vi.stubGlobal(
-    "WebSocket",
-    class {
-      static OPEN = 1;
-      readyState = 1;
-      send() {}
-      close() {}
-    },
-  );
+  vi.stubGlobal("WebSocket", Socket);
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -73,6 +89,7 @@ async function setup() {
       deviceId="test"
       platform="ios"
       visible={visible}
+      {...extra}
     />
   );
   await act(async () => {
@@ -134,4 +151,53 @@ it("starts exactly one new stream per Reconnect press", async () => {
   expect(primes).toBe(1);
   await act(async () => renderer!.root.findByType("button").props.onClick());
   expect(primes).toBe(2);
+});
+
+async function streamDuoCapableScreen(deviceName: string) {
+  let view: DeviceViewControls | undefined;
+  const { images } = await setup({
+    deviceName,
+    allowPhoneView: true,
+    renderControls: (next) => {
+      view = next;
+      return next.foldingControls;
+    },
+  });
+  await act(async () => {
+    images[0]!.naturalWidth = 400;
+    images[0]!.naturalHeight = 800;
+    images[0]!.dispatchEvent(new Event("load"));
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  const json = new TextEncoder().encode(
+    JSON.stringify({
+      width: 1398,
+      height: 2034,
+      orientation: "portrait",
+      screenId: 1,
+      supportsHingeAngle: true,
+      hingeAngle: 180,
+    }),
+  );
+  const packet = new Uint8Array(json.length + 1);
+  packet[0] = 0x82;
+  packet.set(json, 1);
+  await act(async () => Socket.instances[0]!.onmessage?.({ data: packet.buffer }));
+  const labelled = (label: string) =>
+    renderer!.root.findAll((node) => node.type === "div" && node.props["aria-label"] === label);
+  return { view: view!, labelled };
+}
+
+it("offers iPhone Duo fold and stand controls in the flat view without a hardware model", async () => {
+  const { view, labelled } = await streamDuoCapableScreen("iPhone Duo");
+  expect(view.phone).toBe(false);
+  expect(labelled("iPhone Duo stands")).toHaveLength(1);
+  expect(labelled("Fold shape")).toHaveLength(1);
+});
+
+it("offers no fold controls for a single-screen iPhone", async () => {
+  const { view, labelled } = await streamDuoCapableScreen("iPhone 18 Pro");
+  expect(view.phone).toBe(false);
+  expect(labelled("iPhone Duo stands")).toHaveLength(0);
+  expect(labelled("Fold shape")).toHaveLength(0);
 });

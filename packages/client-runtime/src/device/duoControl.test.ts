@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vite-plus/test";
-import { createDuoControl, createDuoPinch, type DuoCommand } from "./duoControl.ts";
+import { createDuoControl, type DuoCommand } from "./duoControl.ts";
 afterEach(() => vi.useRealTimers());
 
 it("keeps a failed send visible, including a disconnect while draining queued motion", () => {
@@ -9,7 +9,6 @@ it("keeps a failed send visible, including a disconnect while draining queued mo
   queue.enqueue({ control: "angle", value: 40 });
   expect(onChange).toHaveBeenLastCalledWith({
     pending: false,
-    requested: null,
     error: "Device is disconnected.",
   });
   send.mockReturnValueOnce(true);
@@ -18,7 +17,6 @@ it("keeps a failed send visible, including a disconnect while draining queued mo
   queue.receive({ requestId: 2, ok: true });
   expect(onChange).toHaveBeenLastCalledWith({
     pending: false,
-    requested: null,
     error: "Device is disconnected.",
   });
 });
@@ -44,7 +42,7 @@ it("coalesces hinge edits behind acknowledgements and lets a preset replace queu
     command: { control: "pose", value: "tent" },
   });
   queue.receive({ requestId: 3, ok: true });
-  expect(onChange).toHaveBeenLastCalledWith({ pending: false, requested: null, error: null });
+  expect(onChange).toHaveBeenLastCalledWith({ pending: false, error: null });
   queue.clear();
 });
 
@@ -64,7 +62,6 @@ it("drops queued commands on failure, timeout and disconnect; late replies canno
   queue.receive({ requestId: 2, ok: false, error: "native refused" });
   expect(onChange.mock.lastCall?.[0]).toEqual({
     pending: false,
-    requested: null,
     error: "native refused",
   });
   queue.enqueue({ control: "pose", value: "book" });
@@ -75,35 +72,4 @@ it("drops queued commands on failure, timeout and disconnect; late replies canno
   queue.enqueue({ control: "angle", value: Infinity });
   expect(send).toHaveBeenCalledTimes(3);
   queue.clear();
-});
-
-it("pinches only a hit device, accumulates independently of native readback, clamps and cancels", () => {
-  let confirmed = 90;
-  const change = vi.fn();
-  const pinch = createDuoPinch({
-    angle: () => confirmed,
-    contains: (x, y) => x > 0.2 && y > 0.2,
-    change,
-  });
-  expect(pinch.begin(0.1, 0.5)).toBe(false);
-  pinch.move(1);
-  expect(change).not.toHaveBeenCalled();
-  expect(pinch.begin(0.5, 0.5)).toBe(true);
-  pinch.move(0.25);
-  expect(change).toHaveBeenLastCalledWith(120);
-  confirmed = 100;
-  pinch.move(0.25);
-  expect(change).toHaveBeenLastCalledWith(150);
-  pinch.move(2);
-  expect(change).toHaveBeenLastCalledWith(180);
-  pinch.move(-3);
-  expect(change).toHaveBeenLastCalledWith(0);
-  pinch.move(NaN);
-  pinch.end();
-  expect(change).toHaveBeenLastCalledWith(null);
-  const count = change.mock.calls.length;
-  pinch.move(1);
-  pinch.end();
-  expect(change).toHaveBeenCalledTimes(count);
-  expect(pinch.active).toBe(false);
 });

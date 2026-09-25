@@ -75,17 +75,8 @@ const controlReplySchema = Schema.Struct({
 const decodeScreenConfig = Schema.decodeUnknownOption(screenConfigSchema);
 const decodeControlReply = Schema.decodeUnknownOption(controlReplySchema);
 
-export interface DuoPanelSinks {
-  readonly cover: DeviceFrameSink;
-  readonly inner: DeviceFrameSink;
-  /** Invalidate captured input synchronously, before React can commit the new layout. */
-  readonly onScreen?: (screen: DeviceScreenSize) => void;
-}
-
 export interface DeviceStreamEvents {
   readonly onDuoControl?: (state: DuoControlState) => void;
-  /** A fixed panel cannot be decoded; the owner should return to the active flat feed. */
-  readonly onDuoUnavailable?: (detail?: string) => void;
   readonly onStatus: (status: DeviceStreamStatus, detail?: string) => void;
   readonly onScreen: (screen: DeviceScreenSize) => void;
   /** The proxy rejected the credential; the owner should refresh access and reconnect. */
@@ -106,9 +97,6 @@ export interface DeviceStreamTarget {
   readonly access: DeviceHubAccess;
   /** Native iOS WebViews can use MJPEG without cross-origin fetch or secure-context support. */
   readonly preferMjpeg?: boolean;
-  /** Internal fixed-panel feeds share their parent's input session. */
-  readonly panelId?: 1 | 3;
-  readonly videoOnly?: boolean;
 }
 
 export type DeviceHardwareButton = "home" | "back" | "recents" | "power" | "appSwitcher";
@@ -277,10 +265,6 @@ export interface DeviceStreamClient {
   readonly rotate: () => void;
   readonly setOrientation: (orientation: DeviceScreenSize["orientation"]) => void;
   readonly controlDuo: (command: DuoCommand) => void;
-  /** Switch between one active feed and two fixed-panel feeds without replacing HID. */
-  readonly setDuoPanels: (panels: DuoPanelSinks | null) => void;
-  /** Model UVs already map to the hardware framebuffer. */
-  readonly sendRawTouch: (phase: "begin" | "move" | "end", x: number, y: number) => void;
 }
 
 const HID_USAGE_BY_CODE: Readonly<Record<string, number>> = {
@@ -377,8 +361,6 @@ export function createDeviceStreamClient(
   let mjpegImage: HTMLImageElement | null = null;
   let releaseImage: (() => void) | null = null;
   let videoGeneration = 0;
-  let panelClients: DeviceStreamClient[] = [];
-  let panelSinks: DuoPanelSinks | null = null;
   let rotationCursor: DeviceScreenSize["orientation"] | null = null;
   let pendingOrientation: { requestId: number } | null = null;
   const duoControl = createDuoControl({
@@ -406,7 +388,7 @@ export function createDeviceStreamClient(
       events.onDuoControl?.(state);
     },
   });
-  const videoPath = `/helper/${device}${target.panelId ? `/panel/${target.panelId}` : ""}/stream.avcc`;
+  const videoPath = `/helper/${device}/stream.avcc`;
 
   const mjpegUrl = () => httpUrl(`/helper/${device}/stream.mjpeg`);
 
@@ -649,11 +631,6 @@ export function createDeviceStreamClient(
         return;
       }
       if (response.status === 401 || response.status === 403) return handleUnauthorized();
-      if (target.panelId && [400, 404, 405, 410].includes(response.status)) {
-        await response.body?.cancel();
-        setStatus("error", "This Device Hub does not provide fixed Duo display feeds.");
-        return;
-      }
       if (!response.ok || !response.body) throw new Error(`stream ${response.status}`);
       const reader = response.body.getReader();
       for (;;) {
@@ -695,12 +672,7 @@ export function createDeviceStreamClient(
               if (!configured) {
                 await reader.cancel().catch(() => {});
                 if (!isCurrent()) return;
-                if (target.videoOnly)
-                  setStatus(
-                    "error",
-                    `This browser cannot decode the Duo panel's ${avcCodecString(chunk.payload)} stream.`,
-                  );
-                else fallBackToMjpeg();
+                fallBackToMjpeg();
                 return;
               }
               break;
@@ -751,42 +723,6 @@ export function createDeviceStreamClient(
     }
   };
 
-  const startDuoVideo = (panels: DuoPanelSinks) => {
-    for (const panel of panelClients) panel.stop();
-    // Physical handoff elects a native surface. Fixed-panel encoders can keep
-    // an inactive shutdown frame after election, so this build uses one active
-    // feed instead of decoding a third stream alongside the two fixed feeds.
-    const ids = screen?.supportsPhysicalOrientation ? ([null] as const) : ([1, 3] as const);
-    panelClients = ids.map((id) => {
-      const output = id === 1 ? panels.cover : panels.inner;
-      return createDeviceStreamClient(
-        { ...target, ...(id === null ? {} : { panelId: id }), videoOnly: true },
-        {
-          present(source, width, height) {
-            if (id === null) {
-              return sink.present(source, width, height);
-            }
-            // An inactive native LCD can emit its shutdown black frame. Retain its last useful image.
-            if (screen?.screenId !== id) return true;
-            const retained = output.present(source, width, height);
-            const primary = sink.present(source, width, height);
-            return retained && primary;
-          },
-        },
-        {
-          onStatus: (status, detail) => {
-            if (status === "error") events.onDuoUnavailable?.(detail);
-          },
-          onScreen: () => {},
-          onInputConnected: () => {},
-          onMjpegFallback: () => {},
-          onUnauthorized: handleUnauthorized,
-        },
-      );
-    });
-    for (const panel of panelClients) panel.start();
-  };
-
   // iOS input socket; also carries the screen config the helper pushes.
   const connectIosInput = async () => {
     if (stopped) return;
@@ -820,18 +756,24 @@ export function createDeviceStreamClient(
               rotationCursor = screen.hingePose === "laptop" ? "landscape_left" : "portrait";
             else if (screen.orientation !== previous?.orientation)
               rotationCursor = screen.orientation;
-            panelSinks?.onScreen?.(screen);
             events.onScreen(screen);
-            // A surface election can leave an existing decoder on the former
-            // encoder description. Reopen only video to acquire the elected
-            // surface's seed and codec configuration; HID and the viewer stay.
+            // An elected surface brings a new encoder description; reopen only video, keeping HID.
             if (
-              panelSinks &&
+              useWebCodecs &&
+              !mjpeg &&
               screen.supportsPhysicalOrientation &&
               previous &&
               screen.screenId !== previous.screenId
-            )
-              startDuoVideo(panelSinks);
+            ) {
+              videoGeneration++;
+              controller?.abort();
+              controller = null;
+              closeDecoder();
+              const retry = retryTimers.get("video");
+              if (retry) clearTimeout(retry);
+              retryTimers.delete("video");
+              void readIosVideo();
+            }
             if (pendingOrientation) {
               const receipt = pendingOrientation;
               pendingOrientation = null;
@@ -946,7 +888,7 @@ export function createDeviceStreamClient(
     configuring = false;
     connecting();
     if (platform === "ios") {
-      if (!target.videoOnly) void connectIosInput();
+      void connectIosInput();
       if (useWebCodecs) void readIosVideo();
       else fallBackToMjpeg();
     } else if (useWebCodecs) {
@@ -963,9 +905,6 @@ export function createDeviceStreamClient(
     videoGeneration++;
     duoControl.clear();
     rotationCursor = null;
-    for (const panel of panelClients) panel.stop();
-    panelClients = [];
-    panelSinks = null;
     mjpeg = false;
     clearFrameTimer();
     if (videoReadTimer !== null) clearTimeout(videoReadTimer);
@@ -1010,28 +949,6 @@ export function createDeviceStreamClient(
     stop,
     setMjpegImage,
     controlDuo: duoControl.enqueue,
-    sendRawTouch: (phase, x, y) => {
-      if (platform === "ios") send(taggedJson(IOS_MSG_TOUCH, { type: phase, x, y }));
-    },
-    setDuoPanels(panels) {
-      if (platform !== "ios" || target.videoOnly || stopped || panelSinks === panels) return;
-      if (panels && !screen?.supportsHingeAngle) return;
-      panelSinks = panels;
-      videoGeneration++;
-      controller?.abort();
-      controller = null;
-      closeDecoder();
-      const retry = retryTimers.get("video");
-      if (retry) clearTimeout(retry);
-      retryTimers.delete("video");
-      for (const panel of panelClients) panel.stop();
-      panelClients = [];
-      if (!panels) {
-        if (useWebCodecs) void readIosVideo();
-        return;
-      }
-      startDuoVideo(panels);
-    },
     sendTouch: (phase, x, y) => {
       if (platform === "ios") {
         send(taggedJson(IOS_MSG_TOUCH, { type: phase, ...rawPoint(x, y) }));
