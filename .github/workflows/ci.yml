@@ -98,9 +98,11 @@ jobs:
             # below names one such file. The behaviour each guarded is still asserted,
             # in the frozen file or its companion suite. Any failure line that is not
             # listed here still fails the job, so this cannot absorb a new one.
-            # Rationale and the per-file evidence: docs/upstream/kat-3411-intake.md
+            # Rationale and the per-file evidence: docs/upstream/kat-3411-intake.md and,
+            # for ProviderInstanceRegistryLive.test.ts, docs/upstream/kat-3471-intake.md
             unwaived="$(grep '^CHECK .* status=FAIL' "$report" | grep -vxF \
               -e 'CHECK id=sandbox-route-driver-registration status=FAIL detail=trusted assertion changed apps/server/src/server.test.ts' \
+              -e 'CHECK id=sandbox-route-driver-registration status=FAIL detail=trusted assertion changed apps/server/src/provider/Layers/ProviderInstanceRegistryLive.test.ts' \
               -e 'CHECK id=sandbox-preview-default status=FAIL detail=trusted assertion changed apps/server/src/serverSettings.test.ts' \
               -e 'CHECK id=desktop-protocol-bundle-identity status=FAIL detail=trusted assertion changed apps/desktop/src/app/DesktopAppIdentity.test.ts' \
               -e 'CHECK id=desktop-url-handler-backend-routes status=FAIL detail=trusted assertion changed apps/desktop/src/backend/DesktopBackendManager.test.ts' \
@@ -109,7 +111,7 @@ jobs:
               -e 'CHECK id=mobile-agent-awareness-teardown status=FAIL detail=trusted assertion changed apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts' \
               -e 'CHECK id=mobile-theme-native-identity status=FAIL detail=trusted assertion changed apps/mobile/src/lib/mobileTheme.test.ts' || true)"
             if [ -z "$unwaived" ]; then
-              echo "Only waived trusted-assertion failures remain; see docs/upstream/kat-3411-intake.md."
+              echo "Only waived trusted-assertion failures remain; see docs/upstream/kat-3411-intake.md and docs/upstream/kat-3471-intake.md."
               exit 0
             fi
             echo "Unwaived preservation failures:"

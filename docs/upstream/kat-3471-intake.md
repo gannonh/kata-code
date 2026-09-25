@@ -66,7 +66,7 @@ The preservation gate requires each check's trusted test files to match the Kata
 | `apps/desktop/src/updates/DesktopUpdates.test.ts`                      | New `.deb` and update-restart marker cases                                     | Restored to base; the four new cases live in `DesktopUpdates.upstream.test.ts` |
 | `apps/server/src/provider/Layers/ProviderInstanceRegistryLive.test.ts` | Imports `resetCreditCoordinator.ts`; new Claude and Codex reset cases          | Taken. See below.                                                              |
 
-`ProviderInstanceRegistryLive.test.ts` is irreducible in the KAT-3411 sense. The base file imports `./codexResetCredit.ts` and provides `CodexResetCredit.layerTest`; upstream deleted that module when it generalized reset credits to Claude. Keeping the base bytes makes the check's test command fail to load, and making the command pass changes the bytes. The retained behavior it guards (sandbox route and driver registration) is unchanged and still asserted in the file. `sandbox-route-driver-registration` therefore reports `trusted assertion changed apps/server/src/provider/Layers/ProviderInstanceRegistryLive.test.ts`. This run does not extend the `ci.yml` allowlist on its own authority; that is the decision requested on KAT-3471.
+`ProviderInstanceRegistryLive.test.ts` is irreducible in the KAT-3411 sense. The base file imports `./codexResetCredit.ts` and provides `CodexResetCredit.layerTest`; upstream deleted that module when it generalized reset credits to Claude. Keeping the base bytes makes the check's test command fail to load, and making the command pass changes the bytes. The retained behavior it guards (sandbox route and driver registration) is unchanged and still asserted in the file. `sandbox-route-driver-registration` therefore reports `trusted assertion changed apps/server/src/provider/Layers/ProviderInstanceRegistryLive.test.ts`. Gannon waived it on 2026-09-25 (KAT-3471), and `ci.yml` now allowlists that exact report line next to the KAT-3411 set. Any other failure line still fails the job.
 
 ## Relay and Connect
 
@@ -85,6 +85,10 @@ Upstream `8d7b5e998c` adds managed tunnel recovery and idle tunnel cleanup acros
 Upstream's range turns on `shadcn(no-arbitrary-values)` through its class cleanups, and it flags Kata-owned classes. They move to same-value scale tokens: `text-[11px]` to `text-2xs` and `text-[10px]` to `text-3xs` in `SandboxGitHubSourcePicker.tsx`, `RoutineChat.tsx`, and `AddEnvironmentDialog.tsx`, and `tracking-[-0.025em]` to `tracking-tight` in `SettingsPanels.tsx`. The Kata welcome title `text-[1.4rem]` becomes `text-2xl`, upstream's size at the same place. `compileCache.ts` uses the `kata-code/no-global-process-runtime` rule name.
 
 `packages/client-runtime` re-adds the `./state/entities` export that KAT-3326 removed as unused, because upstream's `apps/web/src/state/threads.ts` now imports `arrayElementsEqual` from it. `apps/web/src/state/projects.ts` annotates `projectEnvironment` with `ReturnType<typeof createProjectEnvironmentAtoms>`; without it `tsc` reports TS2883 (non-portable inferred type through the unexported `operations/workspaceProject` module).
+
+## Waivers
+
+On 2026-09-25 Gannon waived the `ProviderInstanceRegistryLive.test.ts` trusted assertion (now allowlisted in `ci.yml`) and the three mandatory live checks for this run: `human-device-provider-evidence`, `icon-composer-live-evidence`, and `mobile-android-asset-live-evidence`. No live evidence was produced. The checker has no waiver mode, so `--mode human-review` still prints `HUMAN_REVIEW_ACCEPTANCE status=FAIL`, with the live checks as its only open items.
 
 ## Host limits
 
