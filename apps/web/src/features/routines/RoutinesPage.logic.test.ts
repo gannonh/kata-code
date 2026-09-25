@@ -38,6 +38,7 @@ import {
   linearTriggerFiltersComplete,
   libraryRoutinesAfterChange,
   newRoutineDraftId,
+  newRoutineConnectionId,
   newRoutineRequestId,
   preferredWorktreeBaseBranch,
   ROUTINE_CANCEL_HINT,
@@ -813,5 +814,25 @@ describe("routine identity generation", () => {
     const secondInstance = await import("./RoutinesPage.logic");
     expect(firstInstance.newRoutineDraftId()).not.toBe(secondInstance.newRoutineDraftId());
     expect(firstInstance.newRoutineRequestId()).not.toBe(secondInstance.newRoutineRequestId());
+  });
+
+  it("gives two clients distinct valid connection ids in the same millisecond", async () => {
+    const frozenNow = 1_800_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(frozenNow);
+    vi.resetModules();
+    const firstClient = await import("./RoutinesPage.logic");
+    vi.resetModules();
+    const secondClient = await import("./RoutinesPage.logic");
+    const ids = [firstClient.newRoutineConnectionId(), secondClient.newRoutineConnectionId()];
+    expect(ids[0]).not.toBe(ids[1]);
+    for (const id of ids) {
+      expect(id).toMatch(
+        /^connection-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u,
+      );
+      expect(Schema.decodeSync(RoutineConnectionId)(id)).toBe(id);
+      expect(id.includes(frozenNow.toString(36))).toBe(false);
+    }
+    const batch = Array.from({ length: 100 }, () => newRoutineConnectionId());
+    expect(new Set(batch).size).toBe(batch.length);
   });
 });
