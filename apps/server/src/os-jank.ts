@@ -56,6 +56,10 @@ export const fixPath = Effect.fn("fixPath")(function* (): Effect.fn.Return<
   const platform = yield* HostProcessPlatform;
   const env = yield* HostProcessEnvironment;
 
+  // The desktop app sets this to launch the server as Node. Children that run
+  // this executable as Node set it themselves; everything else must not inherit it.
+  delete env.ELECTRON_RUN_AS_NODE;
+
   if (platform === "win32") {
     const repairedEnvironment = yield* resolveWindowsEnvironment(env).pipe(
       Effect.catchDefect((defect) =>

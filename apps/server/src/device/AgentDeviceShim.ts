@@ -45,13 +45,13 @@ child.on("exit", code => { process.exitCode = code ?? 1; });
 `,
   );
   if (platform === "win32") {
-    const script = `@echo off\r\n"${node}" "${launcherPath}" %*\r\n`;
+    const script = `@echo off\r\nsetlocal\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${node}" "${launcherPath}" %*\r\n`;
     yield* fs.writeFileString(path.join(shimDir, "agent-device.cmd"), script);
   } else {
     const command = [node, launcherPath]
       .map((value) => "'" + value.replaceAll("'", "'\"'\"'") + "'")
       .join(" ");
-    const script = `#!/bin/sh\nexec ${command} "$@"\n`;
+    const script = `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${command} "$@"\n`;
     const shimPath = path.join(shimDir, "agent-device");
     yield* fs.writeFileString(shimPath, script);
     yield* fs.chmod(shimPath, 0o755);

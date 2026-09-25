@@ -134,19 +134,24 @@ export const make = Effect.gen(function* () {
       !path.isAbsolute(relative)
     );
   };
-  const hasTerminal = (worktreePath: string) =>
-    [...liveTerminals.values()]
-      .flatMap((entries) => [...entries.values()])
-      .some((terminal) => {
-        if (terminal.status !== "starting" && terminal.status !== "running") return false;
-        const cwd = path.resolve(terminal.cwd);
-        return (
+  const canonicalPath = (target: string) =>
+    fs.realPath(target).pipe(Effect.orElseSucceed(() => path.resolve(target)));
+  const hasTerminal = Effect.fn("StorageCleanup.hasTerminal")(function* (worktreePath: string) {
+    for (const entries of liveTerminals.values()) {
+      for (const terminal of entries.values()) {
+        if (terminal.status !== "starting" && terminal.status !== "running") continue;
+        const cwd = yield* canonicalPath(terminal.cwd);
+        if (
           (terminal.worktreePath !== null &&
-            path.resolve(terminal.worktreePath) === worktreePath) ||
+            (yield* canonicalPath(terminal.worktreePath)) === worktreePath) ||
           cwd === worktreePath ||
           inside(worktreePath, cwd)
-        );
-      });
+        )
+          return true;
+      }
+    }
+    return false;
+  });
 
   const readThreads = Effect.fn("StorageCleanup.readThreads")(function* () {
     const active = yield* snapshots.getShellSnapshot();
@@ -191,13 +196,16 @@ export const make = Effect.gen(function* () {
     const snapshot = yield* readThreads();
     const root = yield* fs.realPath(config.worktreesDir);
     const refreshedDefaultRefs = new Map<string, Set<string>>();
-    const groups = Map.groupBy(
-      snapshot.threads.filter((thread) => thread.worktreePath !== null),
-      (thread) => path.resolve(thread.worktreePath!),
+    const worktreeThreads = snapshot.threads.filter((thread) => thread.worktreePath !== null);
+    const worktreeKeys = yield* Effect.forEach(worktreeThreads, (thread) =>
+      canonicalPath(thread.worktreePath!),
     );
+    const groups = Map.groupBy(worktreeThreads, (_, index) => worktreeKeys[index]!);
     const candidates = [
       ...[...groups.values()].flatMap((group) => (group.length === 1 ? [group[0]!] : [])),
-      ...deletedThreads.filter((thread) => !groups.has(path.resolve(thread.worktreePath))),
+      ...(yield* Effect.filter(deletedThreads, (thread) =>
+        canonicalPath(thread.worktreePath).pipe(Effect.map((key) => !groups.has(key))),
+      )),
     ];
     for (const thread of candidates) {
       const settings = resolveWorktreeCleanup(serverSettings, thread.projectId);
@@ -207,16 +215,16 @@ export const make = Effect.gen(function* () {
       const project = deleted
         ? { workspaceRoot: thread.workspaceRoot }
         : snapshot.projects.find((entry) => entry.id === thread.projectId);
-      if (
-        project === undefined ||
-        (!deleted && !storageCleanupThreadIdle(thread, now)) ||
-        hasTerminal(worktreePath)
-      )
-        continue;
+      if (project === undefined || (!deleted && !storageCleanupThreadIdle(thread, now))) continue;
       yield* Effect.gen(function* () {
-        if (!inside(root, worktreePath) || !(yield* fs.exists(worktreePath))) return;
-        if ((yield* fs.realPath(worktreePath)) !== worktreePath) return;
-        if (yield* containsProjectRoot(worktreePath, [project, ...snapshot.projects])) return;
+        const lexicalRoot = [path.resolve(config.worktreesDir), root].find((candidate) =>
+          inside(candidate, worktreePath),
+        );
+        if (lexicalRoot === undefined || !(yield* fs.exists(worktreePath))) return;
+        const realWorktreePath = yield* fs.realPath(worktreePath);
+        if (realWorktreePath !== path.join(root, path.relative(lexicalRoot, worktreePath))) return;
+        if (yield* hasTerminal(realWorktreePath)) return;
+        if (yield* containsProjectRoot(realWorktreePath, [project, ...snapshot.projects])) return;
         // A linked worktree has a .git file. Never remove a main checkout.
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File") return;
         const status = yield* git.statusDetailsLocal(worktreePath);
@@ -283,12 +291,14 @@ export const make = Effect.gen(function* () {
         // Re-read after Git/host calls so a queued turn, resumed session or new
         // thread sharing this path cancels the removal.
         const latestSnapshot = yield* readThreads();
-        if (yield* containsProjectRoot(worktreePath, [project, ...latestSnapshot.projects])) return;
-        const latest = latestSnapshot.threads.filter(
-          (entry) =>
-            entry.worktreePath !== null && path.resolve(entry.worktreePath) === worktreePath,
+        if (yield* containsProjectRoot(realWorktreePath, [project, ...latestSnapshot.projects]))
+          return;
+        const latest = yield* Effect.filter(latestSnapshot.threads, (entry) =>
+          entry.worktreePath === null
+            ? Effect.succeed(false)
+            : canonicalPath(entry.worktreePath).pipe(Effect.map((key) => key === realWorktreePath)),
         );
-        if (hasTerminal(worktreePath)) return;
+        if (yield* hasTerminal(realWorktreePath)) return;
         if (deleted) {
           if (
             latest.length > 0 ||
@@ -298,17 +308,13 @@ export const make = Effect.gen(function* () {
             return;
           // A failed session stop is logged by the deletion reactor. Its drain
           // alone is not proof that a provider released this checkout.
-          if (
-            (yield* providers.listSessions()).some(
-              (session) =>
-                session.status !== "closed" &&
-                (session.threadId === thread.id ||
-                  (session.cwd !== undefined &&
-                    (path.resolve(session.cwd) === worktreePath ||
-                      inside(worktreePath, path.resolve(session.cwd))))),
-            )
-          )
-            return;
+          for (const session of yield* providers.listSessions()) {
+            if (session.status === "closed") continue;
+            if (session.threadId === thread.id) return;
+            if (session.cwd === undefined) continue;
+            const cwd = yield* canonicalPath(session.cwd);
+            if (cwd === realWorktreePath || inside(realWorktreePath, cwd)) return;
+          }
         } else if (
           latest.length !== 1 ||
           latest[0]!.id !== thread.id ||
@@ -374,7 +380,6 @@ export const make = Effect.gen(function* () {
   ) {
     if (days === null || !(yield* fs.exists(root))) return;
     const realRoot = yield* fs.realPath(root);
-    if (realRoot !== path.resolve(root)) return;
     const visit = Effect.fn("StorageCleanup.visitFiles")(function* (
       directory: string,
     ): Effect.fn.Return<void, PlatformError | ServerSettingsError> {
