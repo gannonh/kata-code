@@ -5,10 +5,10 @@ import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { refreshDeviceHubAccess, useDeviceHubAccess } from "~/state/device";
 import { createCanvasFrameSink } from "@kata-sh/code-client-runtime/device/frame";
+import { resolveDeviceModelId } from "@kata-sh/code-client-runtime/device/model";
 import { resolveDeviceShape } from "@kata-sh/code-client-runtime/device/shape-profile";
 import { deviceKeyboard, deviceModel } from "./deviceModels";
 import { fitDeviceFrame } from "./deviceFrameLayout";
-import { DeviceDuoViewport } from "./DeviceDuoViewport";
 import { DeviceDuoControls } from "./DeviceDuoControls";
 import { DeviceAndroidFoldControls } from "./DeviceAndroidFoldControls";
 import type { DuoControlState } from "@kata-sh/code-client-runtime/device/duo-control";
@@ -72,7 +72,7 @@ export function DeviceStreamView(props: {
     error: null,
   });
   const model = deviceModel(props.platform, props.deviceName ?? "");
-  const isDuo = model?.id === "iphone-duo";
+  const isDuo = resolveDeviceModelId(props.platform, props.deviceName ?? "") === "iphone-duo";
   const [presentation, setPresentation] = useState<"phone" | "flat">("phone");
   const [keyboardAttached, setKeyboardAttached] = useState(false);
   const [phoneUnavailable, setPhoneUnavailable] = useState(false);
@@ -120,7 +120,6 @@ export function DeviceStreamView(props: {
       createCanvasFrameSink(canvas, () => frameListenerRef.current?.()),
       {
         onDuoControl: setDuoControl,
-        onDuoUnavailable: onPhoneUnavailable,
         onStatus: (next, nextDetail) => {
           setStatus(next);
           setDetail(nextDetail);
@@ -166,7 +165,6 @@ export function DeviceStreamView(props: {
     access,
     cancelPhoneInput,
     onHandle,
-    onPhoneUnavailable,
     onScreen,
     props.deviceId,
     props.environmentId,
@@ -202,8 +200,7 @@ export function DeviceStreamView(props: {
     presentation === "phone" &&
     !phoneUnavailable &&
     !mjpegUrl &&
-    !props.axOverlay &&
-    (!isDuo || screen?.supportsHingeAngle === true);
+    !props.axOverlay;
   useEffect(() => {
     if (!retainingAndroidFrame || !showPhone) return;
     const timeout = window.setTimeout(() => setShowRestartNotice(true), 2_000);
@@ -307,16 +304,13 @@ export function DeviceStreamView(props: {
     return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
   };
 
-  const phoneUnavailableReason =
-    isDuo && !screen?.supportsHingeAngle
-      ? "iPhone Duo 3D requires Device Hub 0.11.0 or newer"
-      : phoneUnavailable
-        ? "3D is unavailable on this browser"
-        : mjpegUrl
-          ? "3D requires the H.264 stream"
-          : props.axOverlay
-            ? "Turn off accessibility frames to use 3D"
-            : null;
+  const phoneUnavailableReason = phoneUnavailable
+    ? "3D is unavailable on this browser"
+    : mjpegUrl
+      ? "3D requires the H.264 stream"
+      : props.axOverlay
+        ? "Turn off accessibility frames to use 3D"
+        : null;
 
   const keyboardSource = deviceKeyboard(props.platform, props.deviceName ?? "");
   const resetView = useCallback(() => {
@@ -358,7 +352,7 @@ export function DeviceStreamView(props: {
                   screenHeight={screen?.height}
                   onFoldAngle={setFoldAngle}
                 />
-              ) : showPhone && isDuo && screen?.supportsHingeAngle ? (
+              ) : isDuo && status === "streaming" && screen?.supportsHingeAngle ? (
                 <DeviceDuoControls
                   screen={screen}
                   state={duoControl}
@@ -473,25 +467,10 @@ export function DeviceStreamView(props: {
             </div>
           ) : null}
         </div>
-        {showPhone && isDuo && model ? (
-          <DeviceDuoViewport
-            onFrameListener={onFrameListener}
-            model={model}
-            controlError={duoControl.error}
-            hingePreview={
-              duoControl.requested?.control === "angle" ? duoControl.requested.value : null
-            }
-            source={canvasRef}
-            client={clientRef}
-            onInputCancel={onInputCancel}
-            onResetReady={onResetReady}
-            screen={screen}
-            onUnavailable={onPhoneUnavailable}
-          />
-        ) : showPhone ? (
+        {showPhone ? (
           <DevicePhoneViewport
             profile={profile}
-            model={deviceModel(props.platform, props.deviceName ?? "")}
+            model={model}
             accessory={keyboardAttached ? keyboardSource : null}
             source={canvasRef}
             onFrameListener={onFrameListener}
