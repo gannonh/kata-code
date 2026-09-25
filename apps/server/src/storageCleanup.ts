@@ -224,7 +224,7 @@ export const make = Effect.gen(function* () {
         const realWorktreePath = yield* fs.realPath(worktreePath);
         if (realWorktreePath !== path.join(root, path.relative(lexicalRoot, worktreePath))) return;
         if (yield* hasTerminal(realWorktreePath)) return;
-        if (yield* containsProjectRoot(worktreePath, [project, ...snapshot.projects])) return;
+        if (yield* containsProjectRoot(realWorktreePath, [project, ...snapshot.projects])) return;
         // A linked worktree has a .git file. Never remove a main checkout.
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File") return;
         const status = yield* git.statusDetailsLocal(worktreePath);
@@ -291,7 +291,8 @@ export const make = Effect.gen(function* () {
         // Re-read after Git/host calls so a queued turn, resumed session or new
         // thread sharing this path cancels the removal.
         const latestSnapshot = yield* readThreads();
-        if (yield* containsProjectRoot(worktreePath, [project, ...latestSnapshot.projects])) return;
+        if (yield* containsProjectRoot(realWorktreePath, [project, ...latestSnapshot.projects]))
+          return;
         const latest = yield* Effect.filter(latestSnapshot.threads, (entry) =>
           entry.worktreePath === null
             ? Effect.succeed(false)
