@@ -338,8 +338,11 @@ export const relayEnvironmentAuthLayer = Layer.effect(
               relayInternalErrorResponse("persistence_failed"),
           }),
         );
+        // invalid_bearer tells the environment its credential itself is dead
+        // and worth replacing; not_authorized stays for authenticated requests
+        // the relay refuses.
         if (principal._tag === "None") {
-          return yield* relayAuthInvalidError("not_authorized");
+          return yield* relayAuthInvalidError("invalid_bearer");
         }
         yield* Effect.annotateCurrentSpan({
           "relay.auth.mode": "environment_credential",

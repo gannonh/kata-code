@@ -798,15 +798,15 @@ describe("releaseManagedTunnelOnShutdown", () => {
   const recoveryUrl = "https://relay.example.test/v1/environments/env_123/tunnel/recovery";
   const credentialRefreshUrl =
     "https://relay.example.test/v1/client/environment-links/env_123/credential";
-  const relayRejection = (status: number) =>
+  const relayRejection = (reason: "invalid_bearer" | "not_authorized") =>
     Response.json(
       {
         _tag: "RelayAuthInvalidError",
         code: "auth_invalid",
-        reason: "not_authorized",
+        reason,
         traceId: "trace-123",
       },
-      { status },
+      { status: 401 },
     );
   const requestLine = (request: HttpClientRequest.HttpClientRequest) => [
     request.method,
@@ -861,7 +861,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
           }
           return request.headers.authorization === "Bearer fresh-credential"
             ? Response.json({ status: "ready" })
-            : relayRejection(401);
+            : relayRejection("invalid_bearer");
         },
       }),
     );
@@ -895,7 +895,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
         respond: (request) =>
           request.url === credentialRefreshUrl
             ? Response.json({ environmentCredential: "fresh-credential" })
-            : relayRejection(401),
+            : relayRejection("invalid_bearer"),
       }),
     );
   });
@@ -930,6 +930,32 @@ describe("releaseManagedTunnelOnShutdown", () => {
     );
   });
 
+  it.effect.each([
+    { name: "a refused authenticated request", response: () => relayRejection("not_authorized") },
+    {
+      name: "an unrecognized body",
+      response: () => Response.json({ message: "unauthorized" }, { status: 401 }),
+    },
+  ])("does not refresh the credential for a 401 with $name", ({ response }) => {
+    const { store, values } = makeMemorySecretStore(registrationSecrets);
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        registerManagedCloudTunnelRecoveryWithCredentialRefresh("http://127.0.0.1:3773", {
+          refreshRejectedCredential: true,
+        }),
+      );
+
+      expect(error._tag).toBe("EnvironmentHttpUnauthorizedError");
+      expect(requests.map(requestLine)).toEqual([
+        ["POST", recoveryUrl, "Bearer environment-credential"],
+      ]);
+      expect(storedCredential(values)).toBe("environment-credential");
+    }).pipe(provideReleaseHarness({ store, applyConfigCalls, requests, respond: response }));
+  });
+
   it.effect("does not refresh a rejected credential without a desired CLI link", () => {
     const { store, values } = makeMemorySecretStore(registrationSecrets);
     const applyConfigCalls: Array<unknown> = [];
@@ -952,7 +978,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
         store,
         applyConfigCalls,
         requests,
-        respond: () => relayRejection(401),
+        respond: () => relayRejection("invalid_bearer"),
       }),
     );
   });
