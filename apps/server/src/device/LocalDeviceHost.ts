@@ -186,9 +186,12 @@ const deviceHostEnvironment = (
   hostPlatform: NodeJS.Platform,
   path: Path.Path,
 ): NodeJS.ProcessEnv => {
+  // The device tools run on the Node runtime, which inside the desktop app is
+  // the Electron executable.
+  const nodeEnvironment = { ...environment, ELECTRON_RUN_AS_NODE: "1" };
   return sdkRoot
     ? {
-        ...environment,
+        ...nodeEnvironment,
         ANDROID_HOME: sdkRoot,
         PATH: [
           path.join(sdkRoot, "platform-tools"),
@@ -196,7 +199,7 @@ const deviceHostEnvironment = (
           environment.PATH ?? environment.Path ?? "",
         ].join(hostPlatform === "win32" ? ";" : ":"),
       }
-    : environment;
+    : nodeEnvironment;
 };
 
 export const make = Effect.fn("LocalDeviceHost.make")(function* () {

@@ -126,6 +126,7 @@ const runMaintenance = Effect.fn("DeviceToolchain.maintenance")(function* (
         script +
         ".catch(error => { console.error(error.message); process.exitCode = 1; });",
     ],
+    env: { ELECTRON_RUN_AS_NODE: "1" },
   });
   if (result.code !== 0)
     return yield* new DeviceToolMaintenanceError({
