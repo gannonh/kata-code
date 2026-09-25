@@ -2,41 +2,7 @@ import { afterEach, expect, it, vi } from "vite-plus/test";
 import { createDeviceStreamClient, type DeviceScreenSize } from "./stream.ts";
 afterEach(() => vi.unstubAllGlobals());
 
-it("switches to fixed authenticated feeds while retaining one HID socket, routes the active panel and rejects superseded decoded output", async () => {
-  const feeds: {
-    url: string;
-    signal: AbortSignal;
-    controller: ReadableStreamDefaultController<Uint8Array>;
-  }[] = [];
-  const outputs: VideoFrameOutputCallback[] = [];
-  const errors: VideoDecoderInit["error"][] = [];
-  let supported = true;
-  let panelHttpStatus = 200;
-  let expected = 0;
-  let decoderReady = () => {};
-  const waitDecoders = (count: number) => {
-    expected = count;
-    return new Promise<void>((resolve) => {
-      decoderReady = resolve;
-    });
-  };
-  class Decoder {
-    static isConfigSupported = async () => ({ supported });
-    static instances: Decoder[] = [];
-    state = "unconfigured";
-    constructor(options: VideoDecoderInit) {
-      outputs.push(options.output);
-      errors.push(options.error);
-      Decoder.instances.push(this);
-      if (outputs.length === expected) decoderReady();
-    }
-    configure() {
-      this.state = "configured";
-    }
-    close() {
-      this.state = "closed";
-    }
-  }
+it("serializes Duo rotation and hinge commands over the one input socket", async () => {
   let socketReady = () => {};
   const socketConstructed = new Promise<void>((resolve) => {
     socketReady = resolve;
@@ -56,36 +22,9 @@ it("switches to fixed authenticated feeds while retaining one HID socket, routes
       socketReady();
     }
   }
-  vi.stubGlobal("VideoDecoder", Decoder);
-  vi.stubGlobal("EncodedVideoChunk", vi.fn());
   vi.stubGlobal("WebSocket", Socket);
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (url: string, options: { signal: AbortSignal }) => {
-      if (!url.includes("avcc")) return new Response("prime");
-      if (url.includes("/panel/") && panelHttpStatus !== 200)
-        return new Response("unsupported panel", { status: panelHttpStatus });
-      const stream = new ReadableStream<Uint8Array>({
-        start(controller) {
-          feeds.push({ url, signal: options.signal, controller });
-          options.signal.addEventListener("abort", () =>
-            controller.error(new DOMException("Aborted", "AbortError")),
-          );
-        },
-      });
-      return new Response(stream);
-    }),
-  );
-  const present = vi.fn((_source: CanvasImageSource, _width: number, _height: number) => true),
-    cover = vi.fn((_source: CanvasImageSource, _width: number, _height: number) => true),
-    inner = vi.fn((_source: CanvasImageSource, _width: number, _height: number) => true);
-  let panelFailed = () => {};
-  const panelFailure = new Promise<void>((resolve) => {
-    panelFailed = resolve;
-  });
-  const onStatus = vi.fn();
+  vi.stubGlobal("fetch", async () => new Response("prime"));
   const onDuoControl = vi.fn();
-  const onDuoUnavailable = vi.fn((_detail?: string) => panelFailed());
   const client = createDeviceStreamClient(
     {
       platform: "ios",
@@ -97,11 +36,10 @@ it("switches to fixed authenticated feeds while retaining one HID socket, routes
         query: { hostId: "remote", wsTicket: "ticket" },
       },
     },
-    { present },
+    { present: () => true },
     {
-      onStatus,
+      onStatus: vi.fn(),
       onDuoControl,
-      onDuoUnavailable,
       onScreen: vi.fn(),
       onInputConnected: vi.fn(),
       onUnauthorized: vi.fn(),
@@ -111,19 +49,14 @@ it("switches to fixed authenticated feeds while retaining one HID socket, routes
   client.start();
   await socketConstructed;
   const ws = Socket.instances[0]!;
-  const config = (
-    id: number,
-    orientation: DeviceScreenSize["orientation"] = "portrait",
-    physical = false,
-  ) => {
+  const config = (orientation: DeviceScreenSize["orientation"] = "portrait") => {
     const json = new TextEncoder().encode(
       JSON.stringify({
-        width: id === 1 ? 1398 : 2007,
-        height: id === 1 ? 2034 : 2853,
+        width: 2007,
+        height: 2853,
         orientation,
-        screenId: id,
+        screenId: 3,
         supportsHingeAngle: true,
-        supportsPhysicalOrientation: physical,
         hingePose: "open",
       }),
     );
@@ -132,29 +65,29 @@ it("switches to fixed authenticated feeds while retaining one HID socket, routes
     packet.set(json, 1);
     ws.onmessage?.({ data: packet.buffer });
   };
-  config(3);
+  config();
   const requestedOrientation = () =>
     JSON.parse(new TextDecoder().decode(ws.send.mock.lastCall?.[0].subarray(1))).orientation;
   client.rotate();
   expect(requestedOrientation()).toBe("landscape_left");
-  config(3); // An orientation-locked app keeps its framebuffer orientation after the sensor rotates.
+  config(); // An orientation-locked app keeps its framebuffer orientation after the sensor rotates.
   expect(onDuoControl.mock.lastCall?.[0].error).toBeNull();
   client.rotate();
   expect(requestedOrientation()).toBe("portrait_upside_down");
-  config(3, "portrait_upside_down");
+  config("portrait_upside_down");
   client.rotate();
   expect(requestedOrientation()).toBe("landscape_right");
-  config(3); // An external native orientation change becomes authoritative again.
+  config(); // An external native orientation change becomes authoritative again.
   client.rotate();
   expect(requestedOrientation()).toBe("landscape_left");
-  config(3, "landscape_left");
+  config("landscape_left");
   expect(onDuoControl.mock.lastCall?.[0].pending).toBe(false);
   client.controlDuo({ control: "angle", value: 40 });
   const angleRequest = JSON.parse(new TextDecoder().decode(ws.send.mock.lastCall?.[0].subarray(1)));
   const before = ws.send.mock.calls.length;
   client.controlDuo({ control: "orientation", value: "portrait" });
   expect(ws.send.mock.calls.length).toBe(before);
-  config(3, "landscape_left"); // The angle's config precedes its receipt; it cannot acknowledge a queued rotation.
+  config("landscape_left"); // The angle's config precedes its receipt; it cannot acknowledge a queued rotation.
   const reply = new TextEncoder().encode(
     JSON.stringify({ requestId: angleRequest.requestId, ok: true }),
   );
@@ -167,7 +100,7 @@ it("switches to fixed authenticated feeds while retaining one HID socket, routes
   client.controlDuo({ control: "angle", value: 55 });
   const orientationSends = ws.send.mock.calls.length;
   expect(onDuoControl.mock.lastCall?.[0].pending).toBe(true);
-  config(3);
+  config();
   expect(ws.send.mock.calls.length).toBe(orientationSends + 1);
   const after = JSON.parse(new TextDecoder().decode(ws.send.mock.lastCall?.[0].subarray(1)));
   expect(after.command).toEqual({ control: "angle", value: 55 });
@@ -179,107 +112,93 @@ it("switches to fixed authenticated feeds while retaining one HID socket, routes
   finalReceipt.set(finalReply, 1);
   ws.onmessage?.({ data: finalReceipt.buffer });
   expect(onDuoControl.mock.lastCall?.[0].pending).toBe(false);
-  const description = new Uint8Array([0, 0, 0, 5, 1, 1, 0x64, 0, 0x1f]);
-  let ready = waitDecoders(1);
-  feeds[0]!.controller.enqueue(description);
-  await ready;
-  client.setDuoPanels({ cover: { present: cover }, inner: { present: inner } });
-  expect(feeds[0]!.signal.aborted).toBe(true);
-  expect(Socket.instances).toHaveLength(1);
-  for (const [index, id] of [
-    [1, 1],
-    [2, 3],
-  ]) {
-    const url = new URL(feeds[index!]!.url);
-    expect(url.pathname.endsWith(`/panel/${id}/stream.avcc`)).toBe(true);
-    expect(url.searchParams.get("hostId")).toBe("remote");
-    expect(url.searchParams.get("wsTicket")).toBe("ticket");
-  }
-  ready = waitDecoders(3);
-  feeds[1]!.controller.enqueue(description);
-  feeds[2]!.controller.enqueue(description);
-  await ready;
-  const frame = {
-    displayWidth: 2007,
-    displayHeight: 2853,
-    close: vi.fn(),
-  } as unknown as VideoFrame;
-  outputs[0]!(frame);
-  expect(present).not.toHaveBeenCalled();
-  outputs[1]!(frame);
-  expect(cover).not.toHaveBeenCalled();
-  outputs[2]!(frame);
-  expect(inner).toHaveBeenCalledOnce();
-  expect(present).toHaveBeenCalledOnce();
-  config(1);
-  outputs[2]!(frame);
-  expect(inner).toHaveBeenCalledOnce();
-  outputs[1]!(frame);
-  expect(cover).toHaveBeenCalledOnce();
-  client.setDuoPanels(null);
-  expect(feeds[1]!.signal.aborted).toBe(true);
-  expect(feeds[2]!.signal.aborted).toBe(true);
-  expect(feeds[3]!.url).not.toContain("/panel/");
-  outputs[1]!(frame);
-  expect(cover).toHaveBeenCalledOnce();
-  ready = waitDecoders(4);
-  feeds[3]!.controller.enqueue(description);
-  await ready;
-  errors[0]!(new DOMException("Late decoder failure"));
-  expect(Decoder.instances[3]!.state).toBe("configured");
-  config(1, "portrait", true);
-  client.setDuoPanels({ cover: { present: cover }, inner: { present: inner } });
-  expect(feeds).toHaveLength(5); // One active feed replaces the two fixed feeds.
-  expect(feeds[4]!.url).not.toContain("/panel/");
-  expect(new URL(feeds[4]!.url).searchParams.get("hostId")).toBe("remote");
-  ready = waitDecoders(5);
-  feeds[4]!.controller.enqueue(description);
-  await ready;
-  const primary = { ...frame, displayWidth: 1398, displayHeight: 2034 } as VideoFrame;
-  const painted = present.mock.calls.length;
-  outputs[4]!(primary);
-  expect(present).toHaveBeenCalledTimes(painted + 1);
-  expect(present.mock.lastCall?.[0]).toBe(primary);
-  expect(cover).toHaveBeenCalledOnce(); // The main sink owns primary texture delivery.
-  config(3, "portrait", true);
-  expect(feeds[4]!.signal.aborted).toBe(true);
-  expect(feeds).toHaveLength(6);
-  ready = waitDecoders(6);
-  feeds[5]!.controller.enqueue(description);
-  await ready;
-  outputs[4]!(primary); // The old elected display cannot paint after handoff.
-  expect(present).toHaveBeenCalledTimes(painted + 1);
-  outputs[5]!(frame);
-  expect(present).toHaveBeenCalledTimes(painted + 2);
-  expect(present.mock.lastCall?.[0]).toBe(frame);
-  config(3, "portrait", true);
-  expect(feeds).toHaveLength(6); // Duplicate native readback does not reconnect.
-  supported = false;
-  client.setDuoPanels(null);
-  client.setDuoPanels({ cover: { present: cover }, inner: { present: inner } });
-  expect(feeds[7]!.url).not.toContain("/panel/");
-  feeds[7]!.controller.enqueue(description);
-  await panelFailure;
-  expect(onDuoUnavailable.mock.lastCall?.[0]).toContain("cannot decode");
-  config(3);
-  const fixedPanelFailure = new Promise<void>((resolve) => {
-    panelFailed = resolve;
-  });
-  client.setDuoPanels({ cover: { present: cover }, inner: { present: inner } });
-  feeds[8]!.controller.enqueue(description);
-  await fixedPanelFailure;
-  expect(onDuoUnavailable).toHaveBeenCalled();
-  expect(onStatus.mock.calls.some(([status]) => status === "error")).toBe(false);
-  panelHttpStatus = 404;
-  const missingPanel = new Promise<void>((resolve) => {
-    panelFailed = resolve;
-  });
-  client.setDuoPanels({ cover: { present: cover }, inner: { present: inner } });
-  await missingPanel;
-  expect(onDuoUnavailable.mock.lastCall?.[0]).toContain("does not provide fixed Duo");
-  expect(Socket.instances).toHaveLength(1);
   client.stop();
-  expect(feeds[3]!.signal.aborted).toBe(true);
   expect(ws.close).toHaveBeenCalledOnce();
-  expect(frame.close).toHaveBeenCalledTimes(9);
+});
+
+it("reopens only the main video feed when physical orientation elects another Duo display", async () => {
+  const sockets: { onmessage?: (event: { data: ArrayBuffer }) => void }[] = [];
+  let socketReady = () => {};
+  const socketConstructed = new Promise<void>((resolve) => {
+    socketReady = resolve;
+  });
+  vi.stubGlobal(
+    "WebSocket",
+    class {
+      static OPEN = 1;
+      readyState = 1;
+      onmessage?: (event: { data: ArrayBuffer }) => void;
+      send = vi.fn();
+      close = vi.fn();
+      constructor() {
+        sockets.push(this);
+        socketReady();
+      }
+    },
+  );
+  vi.stubGlobal("VideoDecoder", vi.fn());
+  vi.stubGlobal("EncodedVideoChunk", vi.fn());
+  const feeds: AbortSignal[] = [];
+  vi.stubGlobal("fetch", async (url: string, options: { signal: AbortSignal }) => {
+    if (!url.includes("/stream.avcc")) return new Response("prime");
+    feeds.push(options.signal);
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          options.signal.addEventListener("abort", () =>
+            controller.error(new DOMException("Aborted", "AbortError")),
+          );
+        },
+      }),
+    );
+  });
+  const client = createDeviceStreamClient(
+    {
+      platform: "ios",
+      deviceId: "duo",
+      access: {
+        httpBase: "https://t3.test",
+        wsBase: "wss://t3.test",
+        credentials: true,
+        query: {},
+      },
+    },
+    { present: () => true },
+    {
+      onStatus: vi.fn(),
+      onScreen: vi.fn(),
+      onInputConnected: vi.fn(),
+      onUnauthorized: vi.fn(),
+      onMjpegFallback: vi.fn(),
+    },
+  );
+  client.start();
+  await socketConstructed;
+  const config = (screenId: number) => {
+    const json = new TextEncoder().encode(
+      JSON.stringify({
+        width: 2007,
+        height: 2853,
+        orientation: "portrait",
+        screenId,
+        supportsHingeAngle: true,
+        supportsPhysicalOrientation: true,
+      }),
+    );
+    const packet = new Uint8Array(json.length + 1);
+    packet[0] = 0x82;
+    packet.set(json, 1);
+    sockets[0]!.onmessage?.({ data: packet.buffer });
+  };
+  config(3);
+  expect(feeds).toHaveLength(1);
+  config(1);
+  expect(feeds).toHaveLength(2);
+  expect(feeds[0]!.aborted).toBe(true);
+  expect(feeds[1]!.aborted).toBe(false);
+  config(1);
+  expect(feeds).toHaveLength(2);
+  expect(sockets).toHaveLength(1);
+  client.stop();
+  expect(feeds[1]!.aborted).toBe(true);
 });

@@ -20,7 +20,6 @@ export type DuoCommand =
   | { control: "orientation"; value: DuoOrientation };
 export type DuoControlState = {
   pending: boolean;
-  requested: DuoCommand | null;
   error: string | null;
 };
 
@@ -34,8 +33,7 @@ export function createDuoControl(options: {
   let active: { requestId: number; command: DuoCommand } | null = null;
   let queued: DuoCommand | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
-  const publish = (error: string | null = null) =>
-    options.onChange({ pending: !!active, requested: queued ?? active?.command ?? null, error });
+  const publish = (error: string | null = null) => options.onChange({ pending: !!active, error });
   const clear = (error: string | null = null) => {
     if (timer) clearTimeout(timer);
     timer = null;
@@ -78,36 +76,5 @@ export function createDuoControl(options: {
       else publish();
     },
     clear,
-  };
-}
-
-/** A pinch keeps its own accumulator across asynchronous native acknowledgements. */
-export function createDuoPinch(options: {
-  angle: () => number;
-  contains: (x: number, y: number) => boolean;
-  change: (angle: number | null) => void;
-}) {
-  let angle: number | null = null;
-  return {
-    begin(x: number, y: number) {
-      if (!options.contains(x, y)) return false;
-      angle = Math.max(0, Math.min(180, options.angle()));
-      return true;
-    },
-    move(logScale: number) {
-      if (angle === null || !Number.isFinite(logScale)) return;
-      const next = Math.max(0, Math.min(180, angle + logScale * 120));
-      if (next === angle) return;
-      angle = next;
-      options.change(next);
-    },
-    end() {
-      if (angle === null) return;
-      angle = null;
-      options.change(null);
-    },
-    get active() {
-      return angle !== null;
-    },
   };
 }

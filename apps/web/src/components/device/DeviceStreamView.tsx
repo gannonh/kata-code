@@ -68,7 +68,6 @@ export function DeviceStreamView(props: {
 }) {
   const [duoControl, setDuoControl] = useState<DuoControlState>({
     pending: false,
-    requested: null,
     error: null,
   });
   const model = deviceModel(props.platform, props.deviceName ?? "");
