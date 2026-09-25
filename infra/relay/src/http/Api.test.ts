@@ -14,6 +14,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import * as Tracer from "effect/Tracer";
 import * as Etag from "effect/unstable/http/Etag";
@@ -29,11 +30,17 @@ import {
   RelayClientAuth,
   RelayClientPrincipal,
   RelayEnvironmentAuth,
+  RelayEnvironmentCredentialRefreshRequest,
   RelayEnvironmentPrincipal,
+  RelayManagedEndpointRecoveryRegistrationRequest,
   type RelayClientDeviceRecord,
 } from "@kata-sh/code-contracts/relay";
 import { wireEnvironmentIssuer } from "@kata-sh/code-contracts/wireIdentity";
-import { RELAY_MANAGED_TUNNEL_RECOVERY_TYP, signRelayJwt } from "@kata-sh/code-shared/relayJwt";
+import {
+  RELAY_ENVIRONMENT_CREDENTIAL_REFRESH_TYP,
+  RELAY_MANAGED_TUNNEL_RECOVERY_TYP,
+  signRelayJwt,
+} from "@kata-sh/code-shared/relayJwt";
 
 import {
   RELAY_HTTP_ROUTER_CONFIG,
@@ -64,6 +71,7 @@ import * as EnvironmentPublishSignatures from "../environments/EnvironmentPublis
 import * as ManagedEndpointProvider from "../environments/ManagedEndpointProvider.ts";
 import * as LinearOAuthBroker from "../linear/LinearOAuthBroker.ts";
 import * as EnvironmentLinker from "../environments/EnvironmentLinker.ts";
+import * as DpopProofs from "../auth/DpopProofs.ts";
 import * as RelayTokens from "../auth/RelayTokens.ts";
 import * as Devices from "../agentActivity/Devices.ts";
 
@@ -136,6 +144,7 @@ describe("device listing compatibility", () => {
           Layer.mock(EnvironmentLinker.EnvironmentLinker, {}),
           Layer.mock(EnvironmentLinks.EnvironmentLinks, {}),
           Layer.mock(ManagedEndpointProvider.ManagedEndpointProvider, {}),
+          Layer.mock(DpopProofs.DpopProofReplay, {}),
           Layer.mock(Devices.Devices, {
             listForUser: ({ userId }) => {
               expect(userId).toBe("user-1");
@@ -1096,6 +1105,374 @@ describe("relay environment unlink", () => {
       ),
     );
   });
+});
+
+describe("relay environment credential refresh", () => {
+  const encodeRefreshRequest = Schema.encodeSync(
+    Schema.fromJsonString(RelayEnvironmentCredentialRefreshRequest),
+  );
+  const generateEnvironmentKeyPair = () =>
+    NodeCrypto.generateKeyPairSync("ed25519", {
+      privateKeyEncoding: { format: "pem", type: "pkcs8" },
+      publicKeyEncoding: { format: "pem", type: "spki" },
+    });
+
+  const signRefreshProof = (input: {
+    readonly privateKey: string;
+    readonly jti: string;
+    readonly cloudUserId?: string;
+  }) =>
+    Effect.gen(function* () {
+      const now = yield* DateTime.now;
+      const issuedAt = Math.floor(now.epochMilliseconds / 1_000);
+      return yield* signRelayJwt({
+        privateKey: input.privateKey,
+        typ: RELAY_ENVIRONMENT_CREDENTIAL_REFRESH_TYP,
+        payload: {
+          iss: wireEnvironmentIssuer("environment-1"),
+          aud: "https://relay.example.test",
+          sub: "environment-1",
+          jti: input.jti,
+          iat: issuedAt,
+          exp: issuedAt + 60,
+          environmentId: "environment-1",
+          cloudUserId: input.cloudUserId ?? "user-1",
+        },
+      });
+    });
+
+  // Serves the client group for a relay where user-1 has linked environment-1
+  // with the given key. The bearer token doubles as the signed-in user id.
+  const makeRefreshRelay = (environmentPublicKey: string) =>
+    Effect.gen(function* () {
+      const createCalls: Array<{
+        readonly environmentId: string;
+        readonly environmentPublicKey: string;
+      }> = [];
+      const providerCalls: Array<string> = [];
+      const consumedProofs = new Set<string>();
+      const unexpectedProviderCall = (name: string) => () =>
+        Effect.sync(() => providerCalls.push(name)).pipe(
+          Effect.andThen(Effect.die(`unexpected ${name}`)),
+        );
+      const managedEndpointProvider = ManagedEndpointProvider.ManagedEndpointProvider.of({
+        provision: unexpectedProviderCall("provision"),
+        reconcileOrigin: unexpectedProviderCall("reconcileOrigin"),
+        prepareDeprovision: unexpectedProviderCall("prepareDeprovision"),
+        deprovision: unexpectedProviderCall("deprovision"),
+        release: unexpectedProviderCall("release"),
+      });
+      const links = EnvironmentLinks.EnvironmentLinks.of({
+        upsert: () => Effect.die("unused upsert"),
+        listUsersForEnvironmentPublicKey: () =>
+          Effect.die("unused listUsersForEnvironmentPublicKey"),
+        listDeliveryUsersForEnvironment: () => Effect.die("unused listDeliveryUsersForEnvironment"),
+        listForUser: () => Effect.die("unused listForUser"),
+        getForUser: ({ userId, environmentId }) =>
+          Effect.succeed(
+            userId === "user-1" && environmentId === "environment-1"
+              ? { ...linkedEnvironmentRecord, environmentPublicKey }
+              : null,
+          ),
+        revokeForUser: () => Effect.die("unused revokeForUser"),
+      });
+      const credentials = Layer.succeed(
+        EnvironmentCredentials.EnvironmentCredentials,
+        EnvironmentCredentials.EnvironmentCredentials.of({
+          create: (input) =>
+            Effect.sync(() => {
+              createCalls.push(input);
+              return `fresh-credential-${createCalls.length}`;
+            }),
+          authenticate: () => Effect.die("unused authenticate"),
+          revokeForEnvironmentPublicKey: () => Effect.die("unused revoke"),
+        }),
+      );
+      const handlers = clientApi.pipe(
+        HttpRouter.provideRequest(
+          Layer.mergeAll(
+            credentials,
+            Layer.succeed(EnvironmentLinks.EnvironmentLinks, links),
+            Layer.succeed(ManagedEndpointProvider.ManagedEndpointProvider, managedEndpointProvider),
+            Layer.mock(RelayDb.RelayTransactions, {}),
+            Layer.mock(LinearOAuthBroker.LinearOAuthBroker, {}),
+          ),
+        ),
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(RelayConfiguration.RelayConfiguration, relaySettings),
+            NodeCryptoLayer.layer,
+            Layer.mock(RelayTokens.RelayTokens, { resolveDpopAccessTokenScopes: () => null }),
+            Layer.mock(EnvironmentLinker.EnvironmentLinker, {}),
+            credentials,
+            Layer.succeed(EnvironmentLinks.EnvironmentLinks, links),
+            Layer.succeed(ManagedEndpointProvider.ManagedEndpointProvider, managedEndpointProvider),
+            Layer.mock(Devices.Devices, {}),
+            Layer.mock(DpopProofs.DpopProofReplay, {
+              consume: ({ thumbprint, jti }) =>
+                Effect.sync(() => {
+                  const key = `${thumbprint}:${jti}`;
+                  if (consumedProofs.has(key)) return false;
+                  consumedProofs.add(key);
+                  return true;
+                }),
+            }),
+          ),
+        ),
+        Layer.provideMerge(
+          Layer.succeed(RelayClientAuth, {
+            clientBearer: (effect, { credential }) =>
+              Effect.provideService(effect, RelayClientPrincipal, {
+                userId: Redacted.value(credential).trim(),
+                token: Redacted.value(credential).trim(),
+              }),
+          }),
+        ),
+      );
+      const app = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          HttpRouter.toWebHandler(
+            HttpApiBuilder.layer(HttpApi.make("RelayApi").add(RelayApi.groups.client)).pipe(
+              Layer.provide(handlers),
+              Layer.provide(HttpServer.layerServices),
+            ),
+            { disableLogger: true },
+          ),
+        ),
+        (app) => Effect.promise(() => app.dispose()),
+      );
+      const refresh = (input: {
+        readonly userId: string;
+        readonly environmentId: string;
+        readonly proof: string;
+      }) =>
+        Effect.promise(async () => {
+          const response = await app.handler(
+            new Request(
+              `https://relay.example.test/v1/client/environment-links/${input.environmentId}/credential`,
+              {
+                method: "POST",
+                headers: {
+                  authorization: `Bearer ${input.userId}`,
+                  "content-type": "application/json",
+                },
+                body: encodeRefreshRequest({ proof: input.proof }),
+              },
+            ),
+          );
+          const body: unknown = await response.json();
+          return { status: response.status, body };
+        });
+      return { refresh, createCalls, providerCalls };
+    });
+
+  it.live("issues a credential for the linked key without touching the managed endpoint", () =>
+    Effect.gen(function* () {
+      const keyPair = generateEnvironmentKeyPair();
+      const relay = yield* makeRefreshRelay(keyPair.publicKey);
+      const proof = yield* signRefreshProof({ privateKey: keyPair.privateKey, jti: "refresh-1" });
+
+      expect(
+        yield* relay.refresh({ userId: "user-1", environmentId: "environment-1", proof }),
+      ).toEqual({ status: 200, body: { environmentCredential: "fresh-credential-1" } });
+      expect(relay.createCalls).toEqual([
+        { environmentId: "environment-1", environmentPublicKey: keyPair.publicKey },
+      ]);
+      expect(relay.providerCalls).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("rejects a replayed refresh proof", () =>
+    Effect.gen(function* () {
+      const keyPair = generateEnvironmentKeyPair();
+      const relay = yield* makeRefreshRelay(keyPair.publicKey);
+      const proof = yield* signRefreshProof({ privateKey: keyPair.privateKey, jti: "refresh-1" });
+      const request = { userId: "user-1", environmentId: "environment-1", proof };
+
+      expect((yield* relay.refresh(request)).status).toBe(200);
+      expect(yield* relay.refresh(request)).toMatchObject({
+        status: 401,
+        body: { _tag: "RelayAuthInvalidError", reason: "not_authorized" },
+      });
+      expect(relay.createCalls).toHaveLength(1);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("rejects a proof signed by a key other than the linked one", () =>
+    Effect.gen(function* () {
+      const linkedKeyPair = generateEnvironmentKeyPair();
+      const otherKeyPair = generateEnvironmentKeyPair();
+      const relay = yield* makeRefreshRelay(linkedKeyPair.publicKey);
+      const proof = yield* signRefreshProof({
+        privateKey: otherKeyPair.privateKey,
+        jti: "refresh-1",
+      });
+
+      expect(
+        yield* relay.refresh({ userId: "user-1", environmentId: "environment-1", proof }),
+      ).toMatchObject({
+        status: 401,
+        body: { _tag: "RelayAuthInvalidError", reason: "not_authorized" },
+      });
+      expect(relay.createCalls).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("rejects callers without an active link to the environment", () =>
+    Effect.gen(function* () {
+      const keyPair = generateEnvironmentKeyPair();
+      const relay = yield* makeRefreshRelay(keyPair.publicKey);
+      const attempts = [
+        {
+          userId: "user-2",
+          environmentId: "environment-1",
+          proof: yield* signRefreshProof({
+            privateKey: keyPair.privateKey,
+            jti: "other-user",
+            cloudUserId: "user-2",
+          }),
+        },
+        {
+          userId: "user-1",
+          environmentId: "environment-2",
+          proof: yield* signRefreshProof({ privateKey: keyPair.privateKey, jti: "unlinked" }),
+        },
+        {
+          userId: "user-1",
+          environmentId: "environment-1",
+          proof: yield* signRefreshProof({
+            privateKey: keyPair.privateKey,
+            jti: "claims-other-user",
+            cloudUserId: "user-2",
+          }),
+        },
+      ];
+
+      for (const attempt of attempts) {
+        expect(yield* relay.refresh(attempt)).toMatchObject({
+          status: 401,
+          body: { _tag: "RelayAuthInvalidError", reason: "not_authorized" },
+        });
+      }
+      expect(relay.createCalls).toEqual([]);
+      expect(relay.providerCalls).toEqual([]);
+    }).pipe(Effect.scoped),
+  );
+});
+
+describe("relay environment credential rejection", () => {
+  const encodeRegistrationRequest = Schema.encodeSync(
+    Schema.fromJsonString(RelayManagedEndpointRecoveryRegistrationRequest),
+  );
+
+  it.live(
+    "reports a revoked credential as invalid_bearer and a refused registration as not_authorized",
+    () =>
+      Effect.gen(function* () {
+        const keyPair = NodeCrypto.generateKeyPairSync("ed25519", {
+          privateKeyEncoding: { format: "pem", type: "pkcs8" },
+          publicKeyEncoding: { format: "pem", type: "spki" },
+        });
+        const services = Layer.mergeAll(
+          Layer.succeed(RelayConfiguration.RelayConfiguration, relaySettings),
+          relayUnlinkTestLayer({
+            getForUser: () =>
+              Effect.succeed({
+                ...linkedEnvironmentRecord,
+                environmentPublicKey: keyPair.publicKey,
+                endpoint: { ...linkedEnvironmentRecord.endpoint, providerKind: "manual" },
+              }),
+          }),
+          Layer.mock(ManagedEndpointAllocations.ManagedEndpointAllocations, {}),
+          Layer.mock(AgentActivityPublisher.AgentActivityPublisher, {}),
+          Layer.mock(EnvironmentPublishSignatures.EnvironmentPublishSignatures, {}),
+        );
+        const credentials = Layer.succeed(
+          EnvironmentCredentials.EnvironmentCredentials,
+          EnvironmentCredentials.EnvironmentCredentials.of({
+            create: () => Effect.die("unused create"),
+            authenticate: (token) =>
+              Effect.succeed(
+                token === "live-credential"
+                  ? Option.some({
+                      credentialId: "credential-1",
+                      environmentId: "environment-1",
+                      environmentPublicKey: keyPair.publicKey,
+                    })
+                  : Option.none(),
+              ),
+            revokeForEnvironmentPublicKey: () => Effect.die("unused revoke"),
+          }),
+        );
+        const app = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            HttpRouter.toWebHandler(
+              HttpApiBuilder.layer(HttpApi.make("RelayApi").add(RelayApi.groups.server)).pipe(
+                Layer.provide(
+                  serverApi.pipe(HttpRouter.provideRequest(services), Layer.provide(services)),
+                ),
+                Layer.provide(relayEnvironmentAuthLayer.pipe(Layer.provide(credentials))),
+                Layer.provide(HttpServer.layerServices),
+              ),
+              { disableLogger: true },
+            ),
+          ),
+          (app) => Effect.promise(() => app.dispose()),
+        );
+        const now = yield* DateTime.now;
+        const issuedAt = Math.floor(now.epochMilliseconds / 1_000);
+        const origin = { localHttpHost: "127.0.0.1", localHttpPort: 3773 };
+        const proof = yield* signRelayJwt({
+          privateKey: keyPair.privateKey,
+          typ: RELAY_MANAGED_TUNNEL_RECOVERY_TYP,
+          payload: {
+            iss: wireEnvironmentIssuer("environment-1"),
+            aud: "https://relay.example.test",
+            sub: "environment-1",
+            jti: "registration-proof",
+            iat: issuedAt,
+            exp: issuedAt + 60,
+            action: "register",
+            environmentId: "environment-1",
+            cloudUserId: "user-1",
+            tunnelId: "existing-tunnel",
+            origin,
+          },
+        });
+        const register = (credential: string) =>
+          Effect.promise(async () => {
+            const response = await app.handler(
+              new Request(
+                "https://relay.example.test/v1/environments/environment-1/tunnel/recovery",
+                {
+                  method: "POST",
+                  headers: {
+                    authorization: `Bearer ${credential}`,
+                    "content-type": "application/json",
+                  },
+                  body: encodeRegistrationRequest({
+                    cloudUserId: "user-1",
+                    tunnelId: "existing-tunnel",
+                    origin,
+                    proof,
+                  }),
+                },
+              ),
+            );
+            const body: unknown = await response.json();
+            return { status: response.status, body };
+          });
+
+        expect(yield* register("revoked-credential")).toMatchObject({
+          status: 401,
+          body: { _tag: "RelayAuthInvalidError", reason: "invalid_bearer" },
+        });
+        expect(yield* register("live-credential")).toMatchObject({
+          status: 401,
+          body: { _tag: "RelayAuthInvalidError", reason: "not_authorized" },
+        });
+      }).pipe(Effect.scoped),
+  );
 });
 
 describe("relay request tracing", () => {

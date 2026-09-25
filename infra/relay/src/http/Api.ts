@@ -47,6 +47,7 @@ import {
   RelayEnvironmentLinkLimitExceededError,
   RelayEnvironmentPrincipal,
   type RelayEnvironmentConnectRequest,
+  RelayEnvironmentCredentialRefreshProofPayload,
   type RelayManagedEndpointOrigin,
   RelayManagedEndpointRecoveryProofPayload,
   type RelayDpopAccessTokenScope,
@@ -55,6 +56,7 @@ import {
 import { wireEnvironmentIssuer } from "@kata-sh/code-contracts/wireIdentity";
 import {
   normalizeRelayIssuer,
+  RELAY_ENVIRONMENT_CREDENTIAL_REFRESH_TYP,
   RELAY_MANAGED_TUNNEL_RECOVERY_TYP,
   verifyRelayJwt,
 } from "@kata-sh/code-shared/relayJwt";
@@ -112,6 +114,9 @@ const relayCorsPreflightHeaders = {
 
 const decodeManagedTunnelRecoveryProof = Schema.decodeUnknownEffect(
   RelayManagedEndpointRecoveryProofPayload,
+);
+const decodeEnvironmentCredentialRefreshProof = Schema.decodeUnknownEffect(
+  RelayEnvironmentCredentialRefreshProofPayload,
 );
 
 const appendRelayCredentialResponseHeaders = HttpEffect.appendPreResponseHandler(
@@ -333,8 +338,11 @@ export const relayEnvironmentAuthLayer = Layer.effect(
               relayInternalErrorResponse("persistence_failed"),
           }),
         );
+        // invalid_bearer tells the environment its credential itself is dead
+        // and worth replacing; not_authorized stays for authenticated requests
+        // the relay refuses.
         if (principal._tag === "None") {
-          return yield* relayAuthInvalidError("not_authorized");
+          return yield* relayAuthInvalidError("invalid_bearer");
         }
         yield* Effect.annotateCurrentSpan({
           "relay.auth.mode": "environment_credential",
@@ -518,6 +526,65 @@ export const unlinkEnvironmentRecord = Effect.fn("relay.api.client.unlinkEnviron
     return unlinked;
   },
 );
+
+// Replaces a revoked or stale environment credential for an active link. The
+// proof is checked against the key recorded on the link, never one from the
+// request, and this path leaves the managed endpoint untouched.
+export const refreshEnvironmentCredentialRecord = Effect.fn(
+  "relay.api.client.refreshEnvironmentCredentialRecord",
+)(function* (input: {
+  readonly userId: string;
+  readonly environmentId: string;
+  readonly proof: string;
+}) {
+  const config = yield* RelayConfiguration.RelayConfiguration;
+  const links = yield* EnvironmentLinks.EnvironmentLinks;
+  const credentials = yield* EnvironmentCredentials.EnvironmentCredentials;
+  const proofReplay = yield* DpopProofs.DpopProofReplay;
+  const link = yield* links.getForUser({
+    userId: input.userId,
+    environmentId: input.environmentId,
+  });
+  if (link === null) {
+    return yield* new HttpApiError.Unauthorized({});
+  }
+  const now = yield* DateTime.now;
+  const verified = yield* verifyRelayJwt({
+    publicKey: link.environmentPublicKey,
+    token: input.proof,
+    typ: RELAY_ENVIRONMENT_CREDENTIAL_REFRESH_TYP,
+    issuer: wireEnvironmentIssuer(input.environmentId),
+    audience: normalizeRelayIssuer(config.relayIssuer),
+    nowEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
+  }).pipe(
+    Effect.flatMap(decodeEnvironmentCredentialRefreshProof),
+    Effect.mapError(() => new HttpApiError.Unauthorized({})),
+  );
+  if (
+    verified.sub !== input.environmentId ||
+    verified.environmentId !== input.environmentId ||
+    verified.cloudUserId !== input.userId
+  ) {
+    return yield* new HttpApiError.Unauthorized({});
+  }
+  const expiresAt = DateTime.make(verified.exp * 1_000);
+  if (expiresAt._tag === "None") {
+    return yield* new HttpApiError.Unauthorized({});
+  }
+  const consumed = yield* proofReplay.consume({
+    thumbprint: link.environmentPublicKey,
+    jti: verified.jti,
+    iat: verified.iat,
+    expiresAt: expiresAt.value,
+  });
+  if (!consumed) {
+    return yield* new HttpApiError.Unauthorized({});
+  }
+  return yield* credentials.create({
+    environmentId: link.environmentId,
+    environmentPublicKey: link.environmentPublicKey,
+  });
+});
 
 type EnvironmentTunnelRecoveryProofInput = {
   readonly proof: string;
@@ -773,6 +840,7 @@ export const clientApi = HttpApiBuilder.group(
     const links = yield* EnvironmentLinks.EnvironmentLinks;
     const managedEndpointProvider = yield* ManagedEndpointProvider.ManagedEndpointProvider;
     const devices = yield* Devices.Devices;
+    const proofReplay = yield* DpopProofs.DpopProofReplay;
     return handlers
       .handle(
         "listEnvironments",
@@ -921,6 +989,28 @@ export const clientApi = HttpApiBuilder.group(
           );
           return { ok: unlinked };
         }, mapRelayCommonApiErrors("not_authorized")),
+      )
+      .handle(
+        "refreshEnvironmentCredential",
+        Effect.fn("relay.api.client.refreshEnvironmentCredential")(
+          function* ({ params, payload }) {
+            yield* appendRelayCredentialResponseHeaders;
+            const { userId } = yield* RelayClientPrincipal;
+            const environmentCredential = yield* refreshEnvironmentCredentialRecord({
+              userId,
+              environmentId: params.environmentId,
+              proof: payload.proof,
+            }).pipe(
+              Effect.provideService(RelayConfiguration.RelayConfiguration, config),
+              Effect.provideService(DpopProofs.DpopProofReplay, proofReplay),
+            );
+            return { environmentCredential };
+          },
+          Effect.catchTag("EnvironmentCredentialCreatePersistenceError", () =>
+            relayInternalErrorResponse("persistence_failed"),
+          ),
+          mapRelayCommonApiErrors("not_authorized"),
+        ),
       )
       .handle(
         "releaseEnvironmentTunnel",

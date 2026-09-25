@@ -23,6 +23,8 @@ import {
   RelayEnvironmentHealthResponseProofPayload,
   type RelayEnvironmentHealthResponse as RelayEnvironmentHealthResponseShape,
   RelayEnvironmentConfigRequest,
+  type RelayEnvironmentCredentialRefreshProofPayload,
+  RelayEnvironmentCredentialRefreshResponse,
   RelayEnvironmentLinkChallengeResponse,
   RelayEnvironmentLinkResponse,
   RelayEnvironmentMintResponseProofPayload,
@@ -41,6 +43,7 @@ import { wireEnvironmentIssuer } from "@kata-sh/code-contracts/wireIdentity";
 import { withRelayClientTracing } from "@kata-sh/code-shared/relayTracing";
 import {
   normalizeRelayIssuer,
+  RELAY_ENVIRONMENT_CREDENTIAL_REFRESH_TYP,
   RELAY_HEALTH_REQUEST_TYP,
   RELAY_HEALTH_RESPONSE_TYP,
   RELAY_LINEAR_OAUTH_DELIVERY_TYP,
@@ -104,7 +107,14 @@ import {
 import * as CliTokenManager from "./CliTokenManager.ts";
 import { getOrCreateEnvironmentKeyPairFromSecretStore } from "./environmentKeys.ts";
 import { traceRelayRequest } from "./traceRelayRequest.ts";
-import { filterRelayResponse, relayRequestError, shouldRetryCloudLink } from "./relayResponse.ts";
+import {
+  filterRelayResponse,
+  filterRelayResponseReportingRejectedBearer,
+  isRelayBearerRejectedError,
+  rejectedBearerAsUnauthorized,
+  relayRequestError,
+  shouldRetryCloudLink,
+} from "./relayResponse.ts";
 
 const CLOUD_PROOF_MAX_LIFETIME_SECONDS = 5 * 60;
 const CLOUD_PROOF_CLOCK_SKEW_SECONDS = 60;
@@ -812,25 +822,37 @@ const cloudRelayConfigHandler = Effect.fn("environment.cloud.relayConfig")(
   }),
 );
 
-const relayClientRequest = <A>(
+interface RelayClientRequestInput<A> {
+  readonly url: string;
+  readonly token: string;
+  readonly payload: unknown;
+  readonly schema: Schema.Decoder<A>;
+  readonly timeout?: Duration.Input;
+}
+
+const relayClientRequestReportingRejectedBearer = <A>(
   dependencies: CloudHttpDependencies,
-  input: {
-    readonly url: string;
-    readonly token: string;
-    readonly payload: unknown;
-    readonly schema: Schema.Decoder<A>;
-    readonly timeout?: Duration.Input;
-  },
+  input: RelayClientRequestInput<A>,
 ) =>
   HttpClientRequest.post(input.url).pipe(
     HttpClientRequest.bearerToken(input.token),
     HttpClientRequest.bodyJson(input.payload),
     Effect.flatMap(dependencies.httpClient.execute),
-    Effect.flatMap(filterRelayResponse),
+    Effect.flatMap(filterRelayResponseReportingRejectedBearer),
     Effect.flatMap(HttpClientResponse.schemaBodyJson(input.schema)),
     Effect.timeout(input.timeout ?? "10 seconds"),
-    Effect.mapError(relayRequestError),
+    Effect.mapError((cause) =>
+      isRelayBearerRejectedError(cause) ? cause : relayRequestError(cause),
+    ),
     withRelayClientTracing,
+  );
+
+const relayClientRequest = <A>(
+  dependencies: CloudHttpDependencies,
+  input: RelayClientRequestInput<A>,
+) =>
+  relayClientRequestReportingRejectedBearer(dependencies, input).pipe(
+    Effect.catchTag("RelayBearerRejectedError", rejectedBearerAsUnauthorized),
   );
 
 const reconcileDesiredCloudLinkWith = Effect.fn("environment.cloud.reconcileDesiredLinkWith")(
@@ -964,25 +986,38 @@ type ManagedTunnelRecoveryProofInput = {
   | { readonly action: "recover"; readonly origin: RelayManagedEndpointOrigin }
 );
 
+const environmentRelayProofClaims = Effect.fn("environment.cloud.environmentRelayProofClaims")(
+  function* (
+    dependencies: CloudHttpDependencies,
+    input: {
+      readonly environmentId: RelayEnvironmentCredentialRefreshProofPayload["environmentId"];
+      readonly cloudUserId: string;
+      readonly relayUrl: string;
+    },
+  ) {
+    const configuredIssuer = yield* dependencies.secrets.get(RELAY_ISSUER_SECRET);
+    const now = yield* DateTime.now;
+    const issuedAt = Math.floor(now.epochMilliseconds / 1_000);
+    return {
+      iss: wireEnvironmentIssuer(input.environmentId),
+      aud: normalizeRelayIssuer(
+        Option.isSome(configuredIssuer) ? bytesToString(configuredIssuer.value) : input.relayUrl,
+      ),
+      sub: input.environmentId,
+      jti: yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4)),
+      iat: issuedAt,
+      exp: issuedAt + 60,
+      environmentId: input.environmentId,
+      cloudUserId: input.cloudUserId,
+    } satisfies RelayEnvironmentCredentialRefreshProofPayload;
+  },
+);
+
 const makeManagedTunnelRecoveryProof = Effect.fn(
   "environment.cloud.makeManagedTunnelRecoveryProof",
 )(function* (dependencies: CloudHttpDependencies, input: ManagedTunnelRecoveryProofInput) {
   const keyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(dependencies.secrets);
-  const configuredIssuer = yield* dependencies.secrets.get(RELAY_ISSUER_SECRET);
-  const now = yield* DateTime.now;
-  const issuedAt = Math.floor(now.epochMilliseconds / 1_000);
-  const claims = {
-    iss: wireEnvironmentIssuer(input.environmentId),
-    aud: normalizeRelayIssuer(
-      Option.isSome(configuredIssuer) ? bytesToString(configuredIssuer.value) : input.relayUrl,
-    ),
-    sub: input.environmentId,
-    jti: yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4)),
-    iat: issuedAt,
-    exp: issuedAt + 60,
-    environmentId: input.environmentId,
-    cloudUserId: input.cloudUserId,
-  };
+  const claims = yield* environmentRelayProofClaims(dependencies, input);
   const payload =
     input.action === "register"
       ? {
@@ -1007,7 +1042,7 @@ const makeManagedTunnelRecoveryProof = Effect.fn(
   );
 });
 
-export const registerManagedCloudTunnelRecovery = Effect.fn(
+const registerManagedTunnelReportingRejectedCredential = Effect.fn(
   "environment.cloud.registerManagedCloudTunnelRecovery",
 )(function* (localOrigin: string, options?: { readonly retryRuntimeFailures?: boolean }) {
   const dependencies = yield* cloudHttpDependencies;
@@ -1053,7 +1088,7 @@ export const registerManagedCloudTunnelRecovery = Effect.fn(
     tunnelId: config.tunnelId,
     origin,
   });
-  const registered = yield* relayClientRequest(dependencies, {
+  const registered = yield* relayClientRequestReportingRejectedBearer(dependencies, {
     url: `${relayUrlValue}/v1/environments/${encodeURIComponent(environmentId)}/tunnel/recovery`,
     token: bytesToString(environmentCredential.value),
     payload: {
@@ -1079,6 +1114,123 @@ export const registerManagedCloudTunnelRecovery = Effect.fn(
   return endpointRuntimeStatus === null
     ? { status: "superseded" as const }
     : { status: "ready" as const, endpointRuntimeStatus };
+});
+
+export const registerManagedCloudTunnelRecovery = (
+  localOrigin: string,
+  options?: { readonly retryRuntimeFailures?: boolean },
+) =>
+  registerManagedTunnelReportingRejectedCredential(localOrigin, options).pipe(
+    Effect.catchTag("RelayBearerRejectedError", rejectedBearerAsUnauthorized),
+  );
+
+// Replaces an environment credential the relay no longer accepts, using the
+// CLI authorization. Relinking would do the same but provisions a new tunnel.
+const refreshCloudEnvironmentCredential = Effect.fn(
+  "environment.cloud.refreshEnvironmentCredential",
+)(
+  function* (dependencies: CloudHttpDependencies) {
+    const token = yield* dependencies.cliTokenManager.getExisting.pipe(
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.fail(
+              new EnvironmentHttpUnauthorizedError({
+                message: "Run `katacode connect link` to authorize this environment.",
+              }),
+            ),
+          onSome: Effect.succeed,
+        }),
+      ),
+    );
+    yield* dependencies.endpointRuntime.withLinkStateLock(
+      Effect.gen(function* () {
+        const [relayUrl, cloudUserId] = yield* Effect.all([
+          dependencies.secrets.get(RELAY_URL_SECRET),
+          dependencies.secrets.get(CLOUD_LINKED_USER_ID),
+        ]);
+        // Unlinked since registration failed; the retried registration
+        // reports not_linked and startup reconciles from there.
+        if (Option.isNone(relayUrl) || Option.isNone(cloudUserId)) {
+          return;
+        }
+        const environmentId = yield* dependencies.environment.getEnvironmentId;
+        const relayUrlValue = bytesToString(relayUrl.value);
+        const keyPair = yield* getOrCreateEnvironmentKeyPairFromSecretStore(dependencies.secrets);
+        const claims = yield* environmentRelayProofClaims(dependencies, {
+          environmentId,
+          cloudUserId: bytesToString(cloudUserId.value),
+          relayUrl: relayUrlValue,
+        });
+        const proof = yield* signRelayJwt({
+          privateKey: keyPair.privateKey,
+          typ: RELAY_ENVIRONMENT_CREDENTIAL_REFRESH_TYP,
+          payload: claims,
+        }).pipe(
+          Effect.mapError(
+            () =>
+              new EnvironmentHttpInternalServerError({
+                message: "Could not sign the environment credential refresh request.",
+              }),
+          ),
+        );
+        const refreshed = yield* relayClientRequest(dependencies, {
+          url: `${relayUrlValue}/v1/client/environment-links/${encodeURIComponent(environmentId)}/credential`,
+          token: token.accessToken,
+          payload: { proof },
+          schema: RelayEnvironmentCredentialRefreshResponse,
+        });
+        yield* dependencies.secrets.set(
+          RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
+          stringToBytes(refreshed.environmentCredential),
+        );
+      }),
+    );
+  },
+  Effect.catchIf(
+    ServerSecretStore.isSecretStoreError,
+    failEnvironmentCloudInternalError("Could not persist the refreshed environment credential."),
+  ),
+  Effect.catchTags({
+    CloudCliCredentialRemovalError: failCloudCliTokenManagerError,
+    CloudCliCredentialRefreshError: failCloudCliTokenManagerError,
+    CloudCliCredentialReadError: failCloudCliTokenManagerError,
+    CloudCliAuthorizationError: failCloudCliTokenManagerError,
+    CloudCliAuthorizationTimeoutError: failCloudCliTokenManagerError,
+  }),
+);
+
+// Startup registration policy. When the relay rejects the stored environment
+// credential itself (invalid_bearer) and a CLI link is desired, the host
+// replaces the credential and registers once more. Every other failure,
+// including a 401 for a request the credential authenticated, propagates.
+export const registerManagedCloudTunnelRecoveryWithCredentialRefresh = Effect.fn(
+  "environment.cloud.registerManagedCloudTunnelRecoveryWithCredentialRefresh",
+)(function* (
+  localOrigin: string,
+  options: {
+    readonly retryRuntimeFailures?: boolean;
+    readonly refreshRejectedCredential: boolean;
+  },
+) {
+  const register = registerManagedTunnelReportingRejectedCredential(localOrigin, options);
+  const dependencies = yield* cloudHttpDependencies;
+  const registration = options.refreshRejectedCredential
+    ? register.pipe(
+        Effect.catchTag("RelayBearerRejectedError", (rejection) =>
+          Effect.logWarning(
+            "Kata Code Connect rejected the environment credential; refreshing it",
+            { cause: rejection },
+          ).pipe(
+            Effect.andThen(refreshCloudEnvironmentCredential(dependencies)),
+            Effect.andThen(register),
+          ),
+        ),
+      )
+    : register;
+  return yield* registration.pipe(
+    Effect.catchTag("RelayBearerRejectedError", rejectedBearerAsUnauthorized),
+  );
 });
 
 export const recoverManagedCloudTunnel = Effect.fn("environment.cloud.recoverManagedCloudTunnel")(

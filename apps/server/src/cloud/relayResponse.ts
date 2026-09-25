@@ -29,8 +29,24 @@ export function relayRequestError(cause: unknown) {
       });
 }
 
+/**
+ * The relay refused the bearer credential itself (`invalid_bearer`), as opposed
+ * to refusing a request the credential authenticated. Server-local: callers
+ * that do not act on the difference see it as EnvironmentHttpUnauthorizedError.
+ */
+export class RelayBearerRejectedError extends Schema.TaggedError<RelayBearerRejectedError>()(
+  "RelayBearerRejectedError",
+  { message: Schema.String },
+) {}
+
+export const isRelayBearerRejectedError = Schema.is(RelayBearerRejectedError);
+
+export const rejectedBearerAsUnauthorized = (error: RelayBearerRejectedError) =>
+  Effect.fail(new EnvironmentHttpUnauthorizedError({ message: error.message }));
+
 const isPermanentCloudLinkError = Schema.is(
   Schema.Union([
+    RelayBearerRejectedError,
     EnvironmentHttpBadRequestError,
     EnvironmentHttpForbiddenError,
     EnvironmentHttpUnauthorizedError,
@@ -54,29 +70,41 @@ function recoveryHint(error: RelayProtectedError): string {
   }
 }
 
-/** Preserve relay diagnostics before converting permanent rejections into non-retryable errors. */
-export const filterRelayResponse = Effect.fn("cloud.filter_relay_response")(function* (
-  response: HttpClientResponse.HttpClientResponse,
-) {
-  if (response.status >= 200 && response.status < 300) return response;
-  const decoded = yield* HttpClientResponse.schemaBodyJson(RelayProtectedError)(response).pipe(
-    Effect.option,
-  );
-  const ray = response.headers["cf-ray"];
-  const requestId = ray && /^[a-zA-Z0-9-]{1,128}$/.test(ray) ? ` Cloudflare Ray ID: ${ray}.` : "";
-  const message = Option.isSome(decoded)
-    ? `Kata Code Connect: ${decoded.value.message}. ${recoveryHint(decoded.value)} Trace ID: ${decoded.value.traceId}.`
-    : `Kata Code Connect relay returned HTTP ${response.status} without a recognized error response. Check relay access and any proxy or firewall restrictions, then restart Kata Code.${requestId}`;
+/** Like filterRelayResponse, but reports a rejected bearer credential as RelayBearerRejectedError. */
+export const filterRelayResponseReportingRejectedBearer = Effect.fn("cloud.filter_relay_response")(
+  function* (response: HttpClientResponse.HttpClientResponse) {
+    if (response.status >= 200 && response.status < 300) return response;
+    const decoded = yield* HttpClientResponse.schemaBodyJson(RelayProtectedError)(response).pipe(
+      Effect.option,
+    );
+    const ray = response.headers["cf-ray"];
+    const requestId = ray && /^[a-zA-Z0-9-]{1,128}$/.test(ray) ? ` Cloudflare Ray ID: ${ray}.` : "";
+    const message = Option.isSome(decoded)
+      ? `Kata Code Connect: ${decoded.value.message}. ${recoveryHint(decoded.value)} Trace ID: ${decoded.value.traceId}.`
+      : `Kata Code Connect relay returned HTTP ${response.status} without a recognized error response. Check relay access and any proxy or firewall restrictions, then restart Kata Code.${requestId}`;
 
-  if (response.status === 401) return yield* new EnvironmentHttpUnauthorizedError({ message });
-  if (response.status === 403) return yield* new EnvironmentHttpForbiddenError({ message });
-  if (
-    response.status >= 400 &&
-    response.status < 500 &&
-    response.status !== 408 &&
-    response.status !== 429
-  ) {
-    return yield* new EnvironmentHttpBadRequestError({ message });
-  }
-  return yield* new EnvironmentHttpInternalServerError({ message });
-});
+    if (response.status === 401) {
+      return Option.isSome(decoded) &&
+        decoded.value._tag === "RelayAuthInvalidError" &&
+        decoded.value.reason === "invalid_bearer"
+        ? yield* new RelayBearerRejectedError({ message })
+        : yield* new EnvironmentHttpUnauthorizedError({ message });
+    }
+    if (response.status === 403) return yield* new EnvironmentHttpForbiddenError({ message });
+    if (
+      response.status >= 400 &&
+      response.status < 500 &&
+      response.status !== 408 &&
+      response.status !== 429
+    ) {
+      return yield* new EnvironmentHttpBadRequestError({ message });
+    }
+    return yield* new EnvironmentHttpInternalServerError({ message });
+  },
+);
+
+/** Preserve relay diagnostics before converting permanent rejections into non-retryable errors. */
+export const filterRelayResponse = (response: HttpClientResponse.HttpClientResponse) =>
+  filterRelayResponseReportingRejectedBearer(response).pipe(
+    Effect.catchTag("RelayBearerRejectedError", rejectedBearerAsUnauthorized),
+  );
