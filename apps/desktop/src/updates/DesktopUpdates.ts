@@ -264,7 +264,7 @@ function getAutoUpdateDisabledReason(args: {
     return "Automatic updates are disabled by the KATACODE_DISABLE_AUTO_UPDATE setting.";
   }
   if (args.platform === "linux" && !args.appImage && !args.isDebPackage) {
-    return "Automatic updates on Linux require the AppImage or the .deb package.";
+    return "Automatic updates on Linux require running the AppImage build.";
   }
   return null;
 }

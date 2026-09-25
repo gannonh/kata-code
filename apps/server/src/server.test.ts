@@ -3540,28 +3540,28 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           prefix: "t3-callback-origin-",
         });
         let failRuntime = false;
+        let runtimeStatus: CloudManagedEndpointRuntime.CloudManagedEndpointRuntimeStatus = {
+          status: "disabled",
+        };
         yield* buildAppUnderTest({
           config: { baseDir },
           layers: {
             cloudManagedEndpointRuntime: {
-              applyConfig: (config) => {
-                if (!config) {
-                  return Effect.succeed({ status: "disabled" });
-                }
-                if (failRuntime) {
-                  return Effect.succeed({
-                    status: "failed",
-                    providerKind: "cloudflare_tunnel",
-                    failure: "not-installed",
-                    reason: "cloudflared missing",
-                  });
-                }
-                return Effect.succeed({
-                  status: "running",
-                  providerKind: "cloudflare_tunnel",
-                  pid: 123,
-                });
-              },
+              applyConfig: (config) =>
+                Effect.sync(() => {
+                  runtimeStatus = !config
+                    ? { status: "disabled" }
+                    : failRuntime
+                      ? {
+                          status: "failed",
+                          providerKind: "cloudflare_tunnel",
+                          failure: "not-installed",
+                          reason: "cloudflared missing",
+                        }
+                      : { status: "running", providerKind: "cloudflare_tunnel", pid: 123 };
+                  return runtimeStatus;
+                }),
+              getStatus: Effect.sync(() => runtimeStatus),
             },
             httpClient: HttpClient.make((request) =>
               Effect.succeed(

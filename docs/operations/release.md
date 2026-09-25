@@ -143,10 +143,9 @@ Required `production` environment secrets:
 - `CLERK_SECRET_KEY`
 - `APNS_PRIVATE_KEY`
 
-The relay Worker reads these variables and secrets when it is deployed. Alchemy does not redeploy the
-Worker when only one of these values changes ([alchemy-run/alchemy#1831](https://github.com/alchemy-run/alchemy/issues/1831)),
-so a push to `main` without relay code changes leaves the old value in place. After changing one, run
-the **Deploy Kata Code Connect relay** workflow manually from `main` with **force** checked.
+The relay Worker reads these variables and secrets when it is deployed. After changing one, run the
+**Deploy Kata Code Connect relay** workflow from `main` with **dry_run** unchecked. Every run sets a new
+`RELAY_DEPLOYMENT_REVISION`, so the Worker picks up the current values even without relay code changes.
 
 The account-scoped repository credentials are consumed by Alchemy while provisioning relay stages; they
 are not bound into the relay Worker. The production deployment uses an Axiom personal access token,
@@ -173,7 +172,7 @@ because those builds register recovery and replace a deleted tunnel after wake.
 1. Deploy the relay and migration with cleanup `off`.
 2. Release the server build and confirm current hosts register recovery. Older hosts stay marked
    legacy and are never candidates.
-3. Set `dry-run`, run a forced relay deploy, and read the sweep counters (`scanned`, `wouldDelete`,
+3. Set `dry-run`, run the relay deploy workflow, and read the sweep counters (`scanned`, `wouldDelete`,
    `skippedLegacy`, `skippedOrphan`, `failed`, `truncated`) across several sweeps. Each sweep records
    them, and the active `mode`, as `relay.managed_endpoint_reaper.*` attributes on its
    `relay.managed_endpoint_reaper.sweep` span in Axiom.
@@ -183,10 +182,10 @@ because those builds register recovery and replace a deleted tunnel after wake.
 The job runs every five minutes with a five-minute grace period for tunnels that lost their
 connector, so a candidate is usually removed five to ten minutes after it goes down. Tunnels that
 never connected wait an hour. One sweep attempts at most 100 deletions, so a backlog takes longer.
-Changing `RELAY_TUNNEL_CLEANUP_MODE`, including turning cleanup off during an incident, needs a forced
-relay deploy. Confirm the new `mode` on the next sweep span.
+Changing `RELAY_TUNNEL_CLEANUP_MODE`, including turning cleanup off during an incident, needs a relay
+deploy workflow run. Confirm the new `mode` on the next sweep span.
 
-To roll back, set cleanup to `off` and run a forced relay deploy before downgrading any host. Keep the
+To roll back, set cleanup to `off` and run the relay deploy workflow before downgrading any host. Keep the
 recovery endpoints deployed while current server builds are in use. The nullable columns can stay.
 
 ### Disposable-host canary

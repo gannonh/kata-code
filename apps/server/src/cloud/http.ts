@@ -1344,7 +1344,6 @@ const readCloudLinkState = Effect.fn("environment.cloud.readLinkState")(function
     relayIssuer,
     endpointRuntimeConfig,
     managedEndpointUrl,
-    confirmedOrigin,
     publishAgentActivity,
   ] = yield* Effect.all(
     [
@@ -1353,12 +1352,12 @@ const readCloudLinkState = Effect.fn("environment.cloud.readLinkState")(function
       dependencies.secrets.get(RELAY_ISSUER_SECRET),
       dependencies.secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG),
       dependencies.secrets.get(CLOUD_MANAGED_ENDPOINT_URL),
-      dependencies.secrets.get(CLOUD_ENDPOINT_CONFIRMED_ORIGIN),
       dependencies.secrets.get(PUBLISH_AGENT_ACTIVITY_SECRET),
     ],
-    { concurrency: 7 },
+    { concurrency: 6 },
   );
   const managedTunnelActive = Option.isSome(endpointRuntimeConfig);
+  const runtimeStatus = yield* dependencies.endpointRuntime.getStatus;
   return {
     linked: Option.isSome(cloudUserId),
     cloudUserId: Option.isSome(cloudUserId) ? bytesToString(cloudUserId.value) : null,
@@ -1368,10 +1367,12 @@ const readCloudLinkState = Effect.fn("environment.cloud.readLinkState")(function
     // publish-only link leaves it absent.
     managedTunnelActive,
     // The stored config survives a failed connector start so startup can retry
-    // it. The confirmed-origin marker is written only once the connector runs,
-    // so the callback reads as ready only for a tunnel that actually started.
+    // it, so the callback reads as ready only while the connector is running.
+    // RoutineConnections applies the same rule before registering webhooks.
     managedCallbackReady:
-      managedTunnelActive && Option.isSome(managedEndpointUrl) && Option.isSome(confirmedOrigin),
+      managedTunnelActive &&
+      Option.isSome(managedEndpointUrl) &&
+      runtimeStatus.status === "running",
     publishAgentActivity: Option.isSome(publishAgentActivity)
       ? bytesToString(publishAgentActivity.value) === "true"
       : false,
