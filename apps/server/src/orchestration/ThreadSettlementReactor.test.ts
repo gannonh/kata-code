@@ -1494,6 +1494,8 @@ describe("storage cleanup", () => {
     "symlinked-base",
     "symlinked-worktree",
     "symlinked-files",
+    "symlinked-shared-alias",
+    "symlinked-terminal-alias",
   ] as const) {
     it.effect(
       `retains protected worktrees (${protection}) and expires only old artifacts and rotated logs`,
@@ -1512,6 +1514,7 @@ describe("storage cleanup", () => {
             yield* fs.makeDirectory(worktreePath, { recursive: true });
             yield* fs.writeFileString(path.join(worktreePath, ".git"), "gitdir: /test/admin");
           }
+          const realWorktreePath = yield* fs.realPath(worktreePath);
           const secondWorktreePath = path.join(config.worktreesDir, "feature-two");
           if (protection === "unchanged-two-worktrees") {
             yield* fs.makeDirectory(secondWorktreePath);
@@ -1711,11 +1714,13 @@ describe("storage cleanup", () => {
                   getArchivedShellSnapshot: () =>
                     Effect.succeed(
                       makeSnapshot(
-                        protection === "shared"
+                        protection === "shared" || protection === "symlinked-shared-alias"
                           ? [
                               {
                                 ...thread,
                                 id: ThreadId.make("archived-sharing-thread"),
+                                worktreePath:
+                                  protection === "shared" ? worktreePath : realWorktreePath,
                                 archivedAt: NOW,
                               },
                             ]
@@ -1858,7 +1863,9 @@ describe("storage cleanup", () => {
                     listener({
                       type: "snapshot",
                       terminals:
-                        protection === "terminal-cwd" || protection === "terminal-worktree"
+                        protection === "terminal-cwd" ||
+                        protection === "terminal-worktree" ||
+                        protection === "symlinked-terminal-alias"
                           ? [
                               {
                                 threadId: "terminal-thread",
@@ -1866,7 +1873,9 @@ describe("storage cleanup", () => {
                                 cwd:
                                   protection === "terminal-cwd"
                                     ? `${worktreePath}${path.sep}`
-                                    : config.baseDir,
+                                    : protection === "symlinked-terminal-alias"
+                                      ? path.join(realWorktreePath, "src")
+                                      : config.baseDir,
                                 worktreePath:
                                   protection === "terminal-worktree"
                                     ? `${worktreePath}${path.sep}`
