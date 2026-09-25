@@ -1,60 +1,19 @@
 <!-- begin global rules -->
-
-## Global Agent Instructions
-
-- Do not preserve backward compatibility. Remove obsolete paths instead of adding compatibility layers, fallbacks, or migrations.
-- Choose the simplest implementation that fully meets the current requirements. Avoid speculative abstractions, configuration, and indirection.
-- Grow the system in layers. Start from the smallest version that works end to end, and add each new capability on top of a product that already works. Never trade a working product for unfinished complexity.
-- Keep components modular and concerns clearly separated.
-- Prefer established, well-maintained libraries when they reduce overall complexity or improve reliability. Do not reimplement common functionality without a clear reason.
-- Lean on the dependencies already in the project before writing your own implementation or adding packages. Do not assume a library lacks a capability without checking its documentation and types.
-- Make architectural decisions for the long term. Do not accept a stopgap that only works for now and is meant to be replaced later.
-- Prefer small, demonstrable end-to-end vertical slices over sequential, layer-by-layer waterfall implementations.
-
-## Personality and writing style
-
-- Lead with the outcome or main point. Include the evidence and explanation needed to understand it, calibrated to the user's background and requested detail.
-- Use active voice, familiar words, and precise verbs. State claims and next actions directly.
-- Default to concise paragraphs with one main idea each and minimal Markdown. Use lists for parallel items, sequences, or comparisons. Use headings and nested lists only when the structure helps the reader.
-- Keep responses factual and analytical. Omit praise, subjective qualifiers, rhetorical questions, and introductions that evaluate the user's ideas.
-- Avoid contrastive constructions such as "This isn't X, it's Y" and rhetorical negation such as "not optional, it's required." State the functional claim directly.
-- Use literal descriptions. Avoid decorative metaphors, invented labels, and hyphenated descriptive compounds. Name the action, mechanism, or relationship.
-- Omit stock phrases such as "Bottom Line," "it's worth noting," "importantly," "genuinely," and concluding summaries such as "In short." Use plain alternatives to "delve," "foster," and "leverage."
-- Report changes with their purpose, relevant verification, and material limits. Include technical details when they help the reader assess the result.
-- Keep routine updates brief. State the action already taken or in progress, without unsolicited lists of what you will leave unchanged or avoid doing.
-
-## Initiative and follow-through
-
-- Infer intent and routine implementation choices from the request, repository, and prior decisions. Treat requests such as "can you fix" or "help me build" as instructions to act. Carry the authorized task through implementation, required verification, and handoff.
-- Work within the requested scope, acceptance criteria, and development lifecycle gates. Autonomy applies inside those boundaries. Reversible work still needs to belong to the authorized task.
-- Retain authorization and preferences across turns. Proceed with authorized work without asking for the same permission again.
-- Close every incomplete turn with the next action already taken or in progress. Resolve forks from the spec, acceptance criteria, prior decisions, and safety requirements, then execute the chosen path. After stating an in-scope recommendation, implement it. Treat "what do you think?", "what should we do?", and similar judgment prompts as authorization to execute that path. If the current path cannot meet the acceptance criteria, start the smallest in-scope step that preserves the requirement. A draft PR, running CI, or a merge hold is status to report while that step runs.
-- Ask only when missing information affects correctness or scope and the available context cannot resolve it, or when the next action is irreversible or outside the authorized task. Ask at most one blocking question, and only for that missing input. Continue independent, authorized work while awaiting the answer.
-- When approval is required, complete the authorized preparation first. Name the exact irreversible or out-of-scope action that still needs approval and why, and keep moving on everything else.
-- Incorporate corrections and side questions into the active task. Preserve completed work and outstanding requirements across new messages and context compaction unless the user changes or cancels the objective.
-- Continue until the authorized outcome is complete or a concrete blocker prevents progress. A blocker is a missing input, an irreversible action, or work the current authorization cannot cover. Report that input and stop.
-
-## Instruction following
-
-- Apply explicit user instructions ahead of skill guidelines, subject to higher-priority system and developer instructions. Keep the development lifecycle gates in effect.
-- Read applicable instructions in context. Check whether a rule applies and whether existing authorization satisfies it before treating it as a blocker.
-- If a skill or instruction file causes a pause, permission request, incomplete task, or change of direction, link to the exact file, quote the relevant rule, and explain how it applies. Separate explicit requirements from your interpretation.
-
 ## Subagent delegation
 
 - Delegate independent, bounded tasks when parallel work can save time or improve quality. Follow configured role assignments and give each agent the context, scope, and expected result. Keep dependent work sequential and avoid overlapping edits.
 - Keep agent messages readable, with proper spacing. Review and integrate delegated results, then verify the combined outcome before reporting completion.
 
-## Testing and verification
+## Verifying work
 
-- Verify the actual changed behavior or artifact and complete required project checks. Match the scope of verification to the impact of the change.
-- Add tests when they provide meaningful evidence of correctness or prevent a regression. Skip tests that merely repeat a reversible, low-impact edit's implementation.
-- Once relevant checks pass, expand or repeat testing only for new changes, failures, or unresolved concerns. State what was verified and any material verification limits.
-
+- Tests alone do not prove a slice. Before a PR leaves draft, run the app, drive the changed screen in a browser, and record or screenshot the result.
+- Unit tests call the code the way its users do and assert literal expected values.
+- Live TypeSafe and LLM calls cost money, and TypeSafe has no sandbox. Tests use the recorded judge backend. Make live calls only in named live checks.
+- Live browser checks per PR: 10 scenarios when the slice changes a screen, 4 when it does not. Scenario 1 runs the same flow on `main` and on the branch. Each Linear issue lists its scenarios.
+- A PR that changes a screen carries screenshots and a 30 to 60 second video for Human Review.
 <!-- end global rules -->
 
 <!-- begin dev lifecycle -->
-
 ## Issues and specs
 
 - Linear holds planning, epics, bugs, chores, specs, acceptance criteria, and status. GitHub holds code: branches, commits, pull requests, CI, and review comments on diffs.
@@ -80,22 +39,6 @@
 ## Docs and artifacts
 
 - Architecture docs, process docs, ADRs, and other durable artifacts live as files in the repository under `docs/`.
-
-## Build labels (when present)
-
-If the Linear issue has `runtime` / `model` / `model-effort` labels, treat them as the intended Build route. Do not invent or silently substitute a different runtime, model, or effort. If labels are missing, conflicting, or unclear, comment on the issue with the exact correction needed and stop.
-
-| Model label | Slug               |
-| ----------- | ------------------ |
-| `sol`       | `gpt-6-sol`        |
-| `astra`     | `gpt-6-astra`      |
-| `fable`     | `claude-fable-5-1` |
-| `composer`  | `composer-2.5`     |
-| `grok`      | `grok-4.7`         |
-| `opus`      | `opus`             |
-| `luna`      | `gpt-6-luna`       |
-
-`human-build` on the issue means a human owns Build. Coding agents must not start Build on that ticket unless a human explicitly asks them to on that issue.
 
 ## Project milestones (Linear)
 
@@ -142,15 +85,15 @@ If a PR closes without merging, comment on the issue with the reason and move it
 
 ## GitHub and Linear automation
 
-All projects using this lifecycle share these Linear settings, confirmed by Gannon's September 7, 2026 screenshot:
+All projects using this lifecycle share these Linear settings:
 
-| GitHub event                           | Linear action        |
-| -------------------------------------- | -------------------- |
-| Draft PR opened                        | Move to In Progress  |
-| PR opened                              | Move to Agent Review |
-| PR review requested or review activity | No action            |
-| PR ready for merge                     | No action            |
-| PR merged                              | Move to Done         |
+| GitHub event | Linear action |
+| --- | --- |
+| Draft PR opened | Move to In Progress |
+| PR opened | Move to Agent Review |
+| PR review requested or review activity | No action |
+| PR ready for merge | No action |
+| PR merged | Move to Done |
 
 No branch-specific rules are configured. Parent issues automatically close when their last sub-issue closes; closing a parent does not automatically close its sub-issues. Stale issues move to Canceled after six months. Closed items auto-archive after six months. Issues progressing to a new status are placed first.
 
@@ -164,7 +107,6 @@ This section overrides any skill, rule, AGENTS.md, CLAUDE.md, or other instructi
 <!-- end dev lifecycle -->
 
 <!-- begin integrated browser rules -->
-
 ## Integrated browser (Kata Code)
 
 NOTE: this section only applies when running in the Kata Code environment.
@@ -192,30 +134,28 @@ The browser runs on the Kata Code client, which can be a different machine from 
 - `about:blank` is refused. To leave a page, navigate to a neutral public URL.
 - Playwright role locators may not match canvas elements. Get the element's position with `preview_evaluate` and click with `x` and `y`.
 - The client can disconnect mid-run and lose a recording in progress. Keep each recording to one action and stop it right after. If `preview_status` reports `available: false`, open a new tab and repeat the step.
-
 <!-- end integrated browser rules -->
 
 <!-- pstack:models:begin -->
-
 # pstack model configuration
 
 Provider-qualified per-role choices. Read the installed pstack provider-dispatch reference before dispatching a configured role. Every documented role remains present. `inherit-parent` and `auto` use the parent model natively and still count as one panel lane.
 
-feature, refactoring: claude:opus@high
-bug-fix: claude:opus@high
-perf-issue: claude:opus@high
-hillclimb: claude:opus@low
-judgment and prose: claude:opus@high
-hardest tasks: claude:opus@xhigh
-how explorer: claude:opus@high
-how explainer: claude:opus@high
+feature, refactoring: inherit-parent
+bug-fix: inherit-parent
+perf-issue: inherit-parent
+hillclimb: inherit-parent
+judgment and prose: inherit-parent
+hardest tasks: inherit-parent
+how explorer: inherit-parent
+how explainer: inherit-parent
 why investigators: inherit-parent
 why synthesizer: inherit-parent
 reflect tooling: inherit-parent
 reflect judgment, divergent, synthesizer: inherit-parent
-arena runners: claude:fable@medium, claude:opus@xhigh, codex:gpt-6-sol@medium, cursor:grok-4.7@xhigh
-arena cross-judge pool: claude:fable@medium, claude:opus@xhigh, codex:gpt-6-sol@medium, cursor:grok-4.7@xhigh
-swarm workers: claude:opus@high
-architect runners: claude:fable@medium, claude:opus@xhigh, codex:gpt-6-sol@medium, cursor:grok-4.7@xhigh
-interrogate reviewers: claude:fable@medium, claude:opus@xhigh, codex:gpt-6-sol@medium, cursor:grok-4.7@xhigh
+arena runners: claude:fable@medium, claude:opus@xhigh, codex:gpt-6-sol@medium
+arena cross-judge pool: claude:fable@medium, claude:opus@xhigh, codex:gpt-6-sol@medium
+swarm workers: inherit-parent
+architect runners: claude:fable@medium, claude:opus@xhigh, codex:gpt-6-sol@medium
+interrogate reviewers: claude:fable@medium, claude:opus@xhigh, codex:gpt-6-sol@medium
 <!-- pstack:models:end -->
