@@ -22,6 +22,7 @@ import {
 
 import { DESKTOP_UPDATE_RESTART_MARKER_FILE, EnvironmentId } from "@kata-sh/code-contracts";
 import { WIRE_RELAY_PROVIDER_KIND } from "@kata-sh/code-contracts/wireIdentity";
+import { decodeRelayJwt } from "@kata-sh/code-shared/relayJwt";
 import { RelayClientTracer } from "@kata-sh/code-shared/relayTracing";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -37,6 +38,7 @@ import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import { CLOUD_CLI_DESIRED_LINK_SECRET } from "./CliState.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import {
+  RelayEnvironmentCredentialRefreshRequest,
   RelayManagedEndpointRecoveryRegistrationRequest,
   type RelayLinkProofRequest,
 } from "@kata-sh/code-contracts/relay";
@@ -60,6 +62,7 @@ import {
   reconcileDesiredCloudLinkIfStillDesired,
   recoverManagedCloudTunnel,
   registerManagedCloudTunnelRecovery,
+  registerManagedCloudTunnelRecoveryWithCredentialRefresh,
   releaseManagedTunnelOnShutdown,
   startManagedCloudTunnelIfOriginConfirmed,
 } from "./http.ts";
@@ -85,6 +88,9 @@ const storeFailure = (tag: "AlreadyExists" | "PermissionDenied") =>
 const unusedSecretStoreOperation = () => Effect.die("unused secret-store operation");
 const decodeManagedTunnelRecoveryRegistration = Schema.decodeUnknownEffect(
   Schema.fromJsonString(RelayManagedEndpointRecoveryRegistrationRequest),
+);
+const decodeEnvironmentCredentialRefreshRequest = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(RelayEnvironmentCredentialRefreshRequest),
 );
 
 function makeSecretStore(
@@ -338,7 +344,7 @@ describe("releaseManagedTunnelOnShutdown", () => {
     readonly applyConfigCalls: Array<unknown>;
     readonly requests: Array<HttpClientRequest.HttpClientRequest>;
     readonly onRequest?: (request: HttpClientRequest.HttpClientRequest) => Effect.Effect<void>;
-    readonly respond?: () => Response;
+    readonly respond?: (request: HttpClientRequest.HttpClientRequest) => Response;
     readonly respondEffect?: Effect.Effect<Response>;
   }
 
@@ -432,7 +438,9 @@ describe("releaseManagedTunnelOnShutdown", () => {
               Effect.andThen(harness.onRequest?.(request) ?? Effect.void),
               Effect.andThen(
                 harness.respondEffect ??
-                  Effect.sync(() => (harness.respond ?? (() => Response.json({ ok: true })))()),
+                  Effect.sync(() =>
+                    (harness.respond ?? (() => Response.json({ ok: true })))(request),
+                  ),
               ),
               Effect.map((response) => HttpClientResponse.fromWeb(request, response)),
             ),
@@ -774,6 +782,177 @@ describe("releaseManagedTunnelOnShutdown", () => {
         applyConfigCalls,
         requests,
         respond: () => Response.json({ status: "ready" }),
+      }),
+    );
+  });
+
+  const registrationSecrets = [
+    [
+      CLOUD_ENDPOINT_RUNTIME_CONFIG,
+      '{"providerKind":"cloudflare_tunnel","connectorToken":"existing-token","tunnelId":"existing-tunnel"}',
+    ],
+    [RELAY_URL_SECRET, "https://relay.example.test"],
+    [CLOUD_LINKED_USER_ID, "user-123"],
+    [RELAY_ENVIRONMENT_CREDENTIAL_SECRET, "environment-credential"],
+  ] as const;
+  const recoveryUrl = "https://relay.example.test/v1/environments/env_123/tunnel/recovery";
+  const credentialRefreshUrl =
+    "https://relay.example.test/v1/client/environment-links/env_123/credential";
+  const relayRejection = (status: number) =>
+    Response.json(
+      {
+        _tag: "RelayAuthInvalidError",
+        code: "auth_invalid",
+        reason: "not_authorized",
+        traceId: "trace-123",
+      },
+      { status },
+    );
+  const requestLine = (request: HttpClientRequest.HttpClientRequest) => [
+    request.method,
+    request.url,
+    request.headers.authorization,
+  ];
+  const storedCredential = (values: Map<string, Uint8Array>) =>
+    new TextDecoder().decode(values.get(RELAY_ENVIRONMENT_CREDENTIAL_SECRET));
+
+  it.effect("refreshes a rejected environment credential and registers with the new one", () => {
+    const { store, values } = makeMemorySecretStore(registrationSecrets);
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      expect(
+        yield* registerManagedCloudTunnelRecoveryWithCredentialRefresh("http://127.0.0.1:3773", {
+          refreshRejectedCredential: true,
+        }),
+      ).toEqual({
+        status: "ready",
+        endpointRuntimeStatus: { status: "running", providerKind: "cloudflare_tunnel", pid: 123 },
+      });
+      expect(requests.map(requestLine)).toEqual([
+        ["POST", recoveryUrl, "Bearer environment-credential"],
+        ["POST", credentialRefreshUrl, "Bearer cli-access-token"],
+        ["POST", recoveryUrl, "Bearer fresh-credential"],
+      ]);
+      expect(storedCredential(values)).toBe("fresh-credential");
+      const refreshBody = requests[1]?.body;
+      expect(refreshBody?._tag).toBe("Uint8Array");
+      if (refreshBody?._tag === "Uint8Array") {
+        const { proof } = yield* decodeEnvironmentCredentialRefreshRequest(
+          new TextDecoder().decode(refreshBody.body),
+        );
+        expect(decodeRelayJwt(proof)).toMatchObject({
+          iss: "kata-env:env_123",
+          aud: "https://relay.example.test",
+          sub: "env_123",
+          environmentId: "env_123",
+          cloudUserId: "user-123",
+        });
+      }
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls,
+        requests,
+        respond: (request) => {
+          if (request.url === credentialRefreshUrl) {
+            return Response.json({ environmentCredential: "fresh-credential" });
+          }
+          return request.headers.authorization === "Bearer fresh-credential"
+            ? Response.json({ status: "ready" })
+            : relayRejection(401);
+        },
+      }),
+    );
+  });
+
+  it.effect("registers only once more when the refreshed credential is also rejected", () => {
+    const { store, values } = makeMemorySecretStore(registrationSecrets);
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        registerManagedCloudTunnelRecoveryWithCredentialRefresh("http://127.0.0.1:3773", {
+          refreshRejectedCredential: true,
+        }),
+      );
+
+      expect(error._tag).toBe("EnvironmentHttpUnauthorizedError");
+      expect(requests.map(requestLine)).toEqual([
+        ["POST", recoveryUrl, "Bearer environment-credential"],
+        ["POST", credentialRefreshUrl, "Bearer cli-access-token"],
+        ["POST", recoveryUrl, "Bearer fresh-credential"],
+      ]);
+      expect(storedCredential(values)).toBe("fresh-credential");
+      expect(applyConfigCalls).toEqual([]);
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls,
+        requests,
+        respond: (request) =>
+          request.url === credentialRefreshUrl
+            ? Response.json({ environmentCredential: "fresh-credential" })
+            : relayRejection(401),
+      }),
+    );
+  });
+
+  it.effect.each([
+    { status: 403, tag: "EnvironmentHttpForbiddenError" },
+    { status: 503, tag: "EnvironmentHttpInternalServerError" },
+  ])("does not refresh the credential when registration fails with $status", ({ status, tag }) => {
+    const { store, values } = makeMemorySecretStore(registrationSecrets);
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        registerManagedCloudTunnelRecoveryWithCredentialRefresh("http://127.0.0.1:3773", {
+          refreshRejectedCredential: true,
+        }),
+      );
+
+      expect(error._tag).toBe(tag);
+      expect(requests.map(requestLine)).toEqual([
+        ["POST", recoveryUrl, "Bearer environment-credential"],
+      ]);
+      expect(storedCredential(values)).toBe("environment-credential");
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls,
+        requests,
+        respond: () => Response.json({ message: "relay rejected the request" }, { status }),
+      }),
+    );
+  });
+
+  it.effect("does not refresh a rejected credential without a desired CLI link", () => {
+    const { store, values } = makeMemorySecretStore(registrationSecrets);
+    const applyConfigCalls: Array<unknown> = [];
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+
+    return Effect.gen(function* () {
+      const error = yield* Effect.flip(
+        registerManagedCloudTunnelRecoveryWithCredentialRefresh("http://127.0.0.1:3773", {
+          refreshRejectedCredential: false,
+        }),
+      );
+
+      expect(error._tag).toBe("EnvironmentHttpUnauthorizedError");
+      expect(requests.map(requestLine)).toEqual([
+        ["POST", recoveryUrl, "Bearer environment-credential"],
+      ]);
+      expect(storedCredential(values)).toBe("environment-credential");
+    }).pipe(
+      provideReleaseHarness({
+        store,
+        applyConfigCalls,
+        requests,
+        respond: () => relayRejection(401),
       }),
     );
   });

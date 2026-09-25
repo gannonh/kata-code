@@ -142,7 +142,7 @@ import {
   pendingServiceUpdateExists,
   reconcileDesiredCloudLinkIfStillDesired,
   recoverManagedCloudTunnel,
-  registerManagedCloudTunnelRecovery,
+  registerManagedCloudTunnelRecoveryWithCredentialRefresh,
   startManagedCloudTunnelIfOriginConfirmed,
   releaseManagedTunnelOnShutdown,
 } from "./cloud/http.ts";
@@ -910,8 +910,9 @@ const makeServerLayer = Layer.unwrap(
               Effect.asVoid,
             );
             const registerManagedTunnel = retryManagedTunnelRegistration(
-              registerManagedCloudTunnelRecovery(localOrigin, {
+              registerManagedCloudTunnelRecoveryWithCredentialRefresh(localOrigin, {
                 retryRuntimeFailures: true,
+                refreshRejectedCredential: wantsCliLink,
               }),
               (error) =>
                 shouldRetryCloudLink(error) &&
