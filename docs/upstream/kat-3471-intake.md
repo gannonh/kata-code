@@ -90,6 +90,10 @@ Upstream's range turns on `shadcn(no-arbitrary-values)` through its class cleanu
 
 On 2026-09-25 Gannon waived the `ProviderInstanceRegistryLive.test.ts` trusted assertion (now allowlisted in `ci.yml`) and the three mandatory live checks for this run: `human-device-provider-evidence`, `icon-composer-live-evidence`, and `mobile-android-asset-live-evidence`. No live evidence was produced. The checker has no waiver mode, so `--mode human-review` still prints `HUMAN_REVIEW_ACCEPTANCE status=FAIL`, with the live checks as its only open items.
 
+## Skill change
+
+At Gannon's request, this PR also carries a standing live-evidence waiver into `.agents/skills/rebase-kata-upstream/` (`SKILL.md`, `references/verification.md`, `references/testing.md`). The three live checks may stay `NOT RUN` without blocking Human Review when the owning issue's AC states the standing waiver, which the routine prompt now does. The checker is unchanged and still prints `HUMAN_REVIEW_ACCEPTANCE status=FAIL`. The waiver does not cover automated FAILs, new `ci.yml` allowlist lines, or changed retained outcomes. Skill manifest digest (sha256 over sorted `shasum -a 256` lines of every file in the skill directory): `7c328bd67ad1c63ba86c0a6d9b8edc9bf95de506f5b98b13ceffe97d1b80960a` before, `4900b947596388daad310f73106b7fee9b51b1683243334c7d19499e1cc6f82b` after. skill-creator `quick_validate.py` reports the skill valid.
+
 ## Host limits
 
 Local verification runs on a macOS arm64 Mac mini inside a Kata Code agent shell with `ELECTRON_RUN_AS_NODE` unset (KAT-3452). The 37 `storage cleanup` cases in `ThreadSettlementReactor.test.ts` fail on this host because the temporary base directory path contains a symlink (KAT-3453). They fail identically on landed main `96e7d288e`, and CI runs them on Linux.

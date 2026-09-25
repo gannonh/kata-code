@@ -30,6 +30,17 @@ The September 10 baseline records 29 portable passes and three manual checks as 
 
 `ci` accepts automated checks. `baseline` is observational. `human-review` also requires mandatory live evidence and dispositions. Missing mandatory evidence blocks advancement despite green GitHub checks. Keep redacted artifacts available after local cleanup through an approved durable evidence destination.
 
+## Standing live-evidence waiver
+
+Gannon Hall waives three live checks on every integration run (KAT-3471, 2026-09-25, after the same per-run waiver on KAT-3454): `human-device-provider-evidence`, `icon-composer-live-evidence`, and `mobile-android-asset-live-evidence`. The waiver takes effect only when the owning Linear issue's AC states it; the routine prompt carries that clause. Without it in the AC, missing live evidence blocks advancement as above.
+
+With the clause present:
+
+- Record the three checks as `NOT RUN` in `manual-evidence.json` and in the issue comment. Do not produce or claim live evidence that was not observed.
+- Advance to Human Review when every other gate passes and the only open `HUMAN_REVIEW_ACCEPTANCE` items are those three checks. The checker has no waiver mode and still prints `HUMAN_REVIEW_ACCEPTANCE status=FAIL`. Quote that output; never report it as `PASS`.
+- The waiver does not cover an automated `FAIL`, a new line in the `ci.yml` trusted-assertion allowlist, or a changed retained outcome. Each still needs a per-run human decision recorded on the issue.
+- Run the agent-observable web check anyway (`verify-katacode`) and attach its evidence; it is not a substitute for the waived checks.
+
 After extracting the trusted checker as CI specifies, run this from the clean candidate checkout. All variables must resolve to the frozen full SHAs and actual records for this candidate:
 
 ```bash
@@ -51,6 +62,6 @@ In Merging, re-read remote main and the PR head. Verify they match the accepted 
 
 Fetch and inspect the landed commit. A merge commit differs from the reviewed candidate SHA; compare its tree and parents. If its tree differs, run acceptance against that landed tree. Record post-merge results and pin read-back in Linear. Preserve failures and open or reopen the appropriate repair issue when an AC did not land.
 
-On a push to `main`, GitHub Check sets `BASE_SHA` to `github.sha`, so the checker compares the merge commit to itself. That receipt does not prove freeze preservation. Archive the checker from the pre-merge parent (the last PR base) and run `--mode ci` and `--mode human-review` against the landed SHA. `human-review` has no waiver. Preserve the printed `HUMAN_REVIEW_ACCEPTANCE` status. Missing mandatory live evidence yields `NOT RUN` and still blocks. An automated FAIL yields `FAIL`. Do not invent `PASS`.
+On a push to `main`, GitHub Check sets `BASE_SHA` to `github.sha`, so the checker compares the merge commit to itself. That receipt does not prove freeze preservation. Archive the checker from the pre-merge parent (the last PR base) and run `--mode ci` and `--mode human-review` against the landed SHA. The checker has no waiver mode. Preserve the printed `HUMAN_REVIEW_ACCEPTANCE` status. Missing live evidence yields `NOT RUN`; it blocks unless the standing waiver above is in the issue's AC. An automated FAIL yields `FAIL`. Do not invent `PASS`.
 
 Finish SKILL.md's learning step before declaring completion. If the integration ticket is already Done, put a repository skill change on a linked maintenance issue.
