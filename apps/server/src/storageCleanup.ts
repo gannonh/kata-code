@@ -214,8 +214,15 @@ export const make = Effect.gen(function* () {
       )
         continue;
       yield* Effect.gen(function* () {
-        if (!inside(root, worktreePath) || !(yield* fs.exists(worktreePath))) return;
-        if ((yield* fs.realPath(worktreePath)) !== worktreePath) return;
+        const lexicalRoot = [path.resolve(config.worktreesDir), root].find((candidate) =>
+          inside(candidate, worktreePath),
+        );
+        if (lexicalRoot === undefined || !(yield* fs.exists(worktreePath))) return;
+        if (
+          (yield* fs.realPath(worktreePath)) !==
+          path.join(root, path.relative(lexicalRoot, worktreePath))
+        )
+          return;
         if (yield* containsProjectRoot(worktreePath, [project, ...snapshot.projects])) return;
         // A linked worktree has a .git file. Never remove a main checkout.
         if ((yield* fs.stat(path.join(worktreePath, ".git"))).type !== "File") return;
@@ -374,7 +381,6 @@ export const make = Effect.gen(function* () {
   ) {
     if (days === null || !(yield* fs.exists(root))) return;
     const realRoot = yield* fs.realPath(root);
-    if (realRoot !== path.resolve(root)) return;
     const visit = Effect.fn("StorageCleanup.visitFiles")(function* (
       directory: string,
     ): Effect.fn.Return<void, PlatformError | ServerSettingsError> {
