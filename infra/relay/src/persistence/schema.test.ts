@@ -2,7 +2,9 @@
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import { describe, expect, it } from "@effect/vitest";
+import { generateDrizzleJson, generateMigration } from "drizzle-kit/api-postgres";
 
+import * as relaySchema from "./schema.ts";
 import {
   relayLinearOAuthStates,
   relayLinearOAuthTokens,
@@ -130,5 +132,50 @@ describe("relay persisted schema reconciliation", () => {
       expect(NodeCrypto.createHash("sha256").update(sql).digest("hex")).toBe(migration.sha256);
       expect(sql).toContain(migration.fragment);
     }
+  });
+});
+
+describe("relay migration snapshot chain", () => {
+  type Snapshot = Parameters<typeof generateMigration>[0];
+
+  const snapshots = NodeFS.readdirSync(postgresMigrationsDir)
+    .filter((name) => /^\d{14}_/.test(name))
+    .map((dir) => ({ dir, path: new URL(`${dir}/snapshot.json`, postgresMigrationsDir) }))
+    .filter(({ path }) => NodeFS.existsSync(path))
+    .map(({ dir, path }) => ({
+      dir,
+      snapshot: JSON.parse(NodeFS.readFileSync(path, "utf8")) as Snapshot,
+    }));
+  const referenced = new Set(snapshots.flatMap(({ snapshot }) => snapshot.prevIds));
+  const heads = snapshots.filter(({ snapshot }) => !referenced.has(snapshot.id));
+
+  it("has exactly one snapshot head", () => {
+    expect(heads.map(({ dir }) => dir)).toEqual(["20260925143808_merge_upstream_kata_heads"]);
+  });
+
+  it("includes both the Linear OAuth tables and managed endpoint recovery in the head", () => {
+    const ddl = heads[0]?.snapshot.ddl ?? [];
+    const tables = ddl.filter((entity) => entity.entityType === "tables").map(({ name }) => name);
+    expect(tables).toContain("relay_linear_oauth_states");
+    expect(tables).toContain("relay_linear_oauth_tokens");
+    expect(
+      ddl.some(
+        (entity) =>
+          entity.entityType === "columns" &&
+          entity.table === "relay_managed_endpoint_allocations" &&
+          entity.name === "recovery_enabled_at",
+      ),
+    ).toBe(true);
+  });
+
+  it("matches the schema source with no drift, as Alchemy's deploy check computes it", async () => {
+    const head = heads[0]?.snapshot;
+    expect(head).toBeDefined();
+    if (head === undefined) return;
+    const statements = await generateMigration(
+      head,
+      await generateDrizzleJson(relaySchema, head.id),
+    );
+    expect(statements).toEqual([]);
   });
 });
