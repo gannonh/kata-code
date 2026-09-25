@@ -1420,6 +1420,17 @@ describe("ThreadSettlementReactor", () => {
   );
 });
 
+const symlinkedBaseDirConfig = Layer.unwrap(
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-storage-cleanup-" });
+    yield* fs.makeDirectory(path.join(tempDir, "volume"));
+    yield* fs.symlink(path.join(tempDir, "volume"), path.join(tempDir, "home"));
+    return ServerConfig.layerTest(process.cwd(), path.join(tempDir, "home", ".katacode"));
+  }),
+);
+
 describe("storage cleanup", () => {
   it.effect("serializes users of one workspace while other workspaces can start", () =>
     Effect.gen(function* () {
@@ -1480,6 +1491,9 @@ describe("storage cleanup", () => {
     "policy-extended",
     "files-disabled",
     "files-extended",
+    "symlinked-base",
+    "symlinked-worktree",
+    "symlinked-files",
   ] as const) {
     it.effect(
       `retains protected worktrees (${protection}) and expires only old artifacts and rotated logs`,
@@ -1490,8 +1504,14 @@ describe("storage cleanup", () => {
           const path = yield* Path.Path;
           const config = yield* ServerConfig;
           const worktreePath = path.join(config.worktreesDir, "feature");
-          yield* fs.makeDirectory(worktreePath, { recursive: true });
-          yield* fs.writeFileString(path.join(worktreePath, ".git"), "gitdir: /test/admin");
+          const outside = yield* fs.makeTempDirectoryScoped({ prefix: "t3-storage-outside-" });
+          if (protection === "symlinked-worktree") {
+            yield* fs.writeFileString(path.join(outside, ".git"), "gitdir: /test/admin");
+            yield* fs.symlink(outside, worktreePath);
+          } else {
+            yield* fs.makeDirectory(worktreePath, { recursive: true });
+            yield* fs.writeFileString(path.join(worktreePath, ".git"), "gitdir: /test/admin");
+          }
           const secondWorktreePath = path.join(config.worktreesDir, "feature-two");
           if (protection === "unchanged-two-worktrees") {
             yield* fs.makeDirectory(secondWorktreePath);
@@ -1513,8 +1533,13 @@ describe("storage cleanup", () => {
           const activeLog = path.join(config.logsDir, "server.log");
           const old = DateTime.toDateUtc(DateTime.makeUnsafe("2026-08-01T00:00:00.000Z"));
           for (const file of [oldImage, oldLog, activeLog]) {
-            yield* fs.writeFileString(file, "keep or remove");
-            yield* fs.utimes(file, old, old);
+            const target =
+              protection === "symlinked-files" && file !== activeLog
+                ? path.join(outside, path.basename(file))
+                : file;
+            yield* fs.writeFileString(target, "keep or remove");
+            yield* fs.utimes(target, old, old);
+            if (target !== file) yield* fs.symlink(target, file);
           }
           yield* fs.writeFileString(recentImage, "recent");
           const recent = DateTime.toDateUtc(DateTime.makeUnsafe(NOW));
@@ -1896,7 +1921,9 @@ describe("storage cleanup", () => {
             protection === "files-extended" ||
             protection === "merged" ||
             protection === "unchanged" ||
-            protection === "unchanged-two-worktrees";
+            protection === "unchanged-two-worktrees" ||
+            protection === "symlinked-base" ||
+            protection === "symlinked-files";
           assert.strictEqual(yield* fs.exists(worktreePath), !removed);
           assert.deepStrictEqual(
             removals,
@@ -1909,15 +1936,17 @@ describe("storage cleanup", () => {
           assert.strictEqual(fetches, mergeRule || unchangedRule ? 1 : 0);
           assert.strictEqual(thread.worktreePath, worktreePath);
           assert.strictEqual(thread.branch, "feature");
-          assert.strictEqual(yield* fs.exists(oldImage), protection.startsWith("files-"));
+          const filesKept = protection.startsWith("files-") || protection === "symlinked-files";
+          assert.strictEqual(yield* fs.exists(oldImage), filesKept);
           assert.strictEqual(yield* fs.exists(recentImage), true);
-          assert.strictEqual(yield* fs.exists(oldLog), protection.startsWith("files-"));
+          assert.strictEqual(yield* fs.exists(oldLog), filesKept);
           assert.strictEqual(yield* fs.exists(activeLog), true);
         }).pipe(
           Effect.provide(
-            ServerConfig.layerTest(process.cwd(), { prefix: "t3-storage-cleanup-" }).pipe(
-              Layer.provideMerge(NodeServices.layer),
-            ),
+            (protection.startsWith("symlinked-")
+              ? symlinkedBaseDirConfig
+              : ServerConfig.layerTest(process.cwd(), { prefix: "t3-storage-cleanup-" })
+            ).pipe(Layer.provideMerge(NodeServices.layer)),
           ),
           Effect.scoped,
         ),
