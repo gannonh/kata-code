@@ -268,6 +268,28 @@ export const RelayManagedEndpointRecoveryProofPayload = Schema.Union([
 export type RelayManagedEndpointRecoveryProofPayload =
   typeof RelayManagedEndpointRecoveryProofPayload.Type;
 
+export const RelayEnvironmentCredentialRefreshProofPayload = Schema.Struct({
+  ...RelaySignedJwtRegisteredClaims,
+  environmentId: EnvironmentId,
+  cloudUserId: TrimmedNonEmptyString,
+});
+export type RelayEnvironmentCredentialRefreshProofPayload =
+  typeof RelayEnvironmentCredentialRefreshProofPayload.Type;
+
+export const RelayEnvironmentCredentialRefreshRequest = Schema.Struct({
+  proof: TrimmedNonEmptyString.annotate({
+    description: "Environment-signed JWT binding this refresh to the environment and cloud user.",
+  }),
+});
+export type RelayEnvironmentCredentialRefreshRequest =
+  typeof RelayEnvironmentCredentialRefreshRequest.Type;
+
+export const RelayEnvironmentCredentialRefreshResponse = Schema.Struct({
+  environmentCredential: TrimmedNonEmptyString,
+});
+export type RelayEnvironmentCredentialRefreshResponse =
+  typeof RelayEnvironmentCredentialRefreshResponse.Type;
+
 export const RelayAgentActivityPublishProofPayload = Schema.Struct({
   ...RelaySignedJwtRegisteredClaims,
   environmentId: EnvironmentId,
@@ -849,10 +871,10 @@ export const RelayProtectedResourceMetadata = Schema.Struct({
   dpop_signing_alg_values_supported: Schema.Array(Schema.Literal("ES256")),
 });
 
-export const RelayEnvironmentUnlinkParams = Schema.Struct({
+export const RelayEnvironmentLinkParams = Schema.Struct({
   environmentId: EnvironmentId,
 });
-export type RelayEnvironmentUnlinkParams = typeof RelayEnvironmentUnlinkParams.Type;
+export type RelayEnvironmentLinkParams = typeof RelayEnvironmentLinkParams.Type;
 
 export const RelayEnvironmentConnectResponse = Schema.Struct({
   environmentId: EnvironmentId,
@@ -1103,16 +1125,32 @@ const RelayClientGroup = HttpApiGroup.make("client")
     ).annotate(OpenApi.Summary, "Create an environment-link challenge"),
     HttpApiEndpoint.delete("unlinkEnvironment", "/v1/client/environment-links/:environmentId", {
       headers: RelayBearerRequestHeaders,
-      params: RelayEnvironmentUnlinkParams,
+      params: RelayEnvironmentLinkParams,
       success: RelayOkResponse,
       error: RelayAuthAndInternalErrors,
     }).annotate(OpenApi.Summary, "Unlink an environment"),
+    HttpApiEndpoint.post(
+      "refreshEnvironmentCredential",
+      "/v1/client/environment-links/:environmentId/credential",
+      {
+        headers: RelayBearerRequestHeaders,
+        params: RelayEnvironmentLinkParams,
+        payload: RelayEnvironmentCredentialRefreshRequest,
+        success: RelayEnvironmentCredentialRefreshResponse,
+        error: RelayAuthAndInternalErrors,
+      },
+    )
+      .annotate(OpenApi.Summary, "Replace a linked environment's credential")
+      .annotate(
+        OpenApi.Description,
+        "Issues a new environment credential for an active link and revokes the previous one, without provisioning or changing the managed endpoint. The proof must be signed by the environment key recorded on the link.",
+      ),
     HttpApiEndpoint.delete(
       "releaseEnvironmentTunnel",
       "/v1/client/environment-links/:environmentId/tunnel",
       {
         headers: RelayBearerRequestHeaders,
-        params: RelayEnvironmentUnlinkParams,
+        params: RelayEnvironmentLinkParams,
         success: RelayOkResponse,
         error: RelayAuthAndInternalErrors,
       },
