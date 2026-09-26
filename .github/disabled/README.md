@@ -4,6 +4,6 @@ GitHub only runs YAML under [`.github/workflows/`](../workflows/). Nothing here 
 
 Phase 2 release publishing is active at [`workflows/release.yml`](../workflows/release.yml).
 
-Active: `workflows/ci.yml`, `workflows/release.yml`, and its called `workflows/release-desktop.yml` (`ubuntu-24.04`, `macos-15`, `windows-2025`).
+Active: `workflows/ci.yml`, `workflows/mobile-testflight.yml`, `workflows/release.yml`, and its called `workflows/release-desktop.yml` (`ubuntu-24.04`, `macos-15`, `windows-2025`).
 
 Parked files are mobile EAS, AUR, PR size, issue labels, and web preview.
