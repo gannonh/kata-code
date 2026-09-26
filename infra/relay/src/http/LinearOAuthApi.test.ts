@@ -47,6 +47,7 @@ const relaySettings: RelayConfiguration.RelayConfiguration["Service"] = {
   linearOAuth: {
     clientId: "linear-client-id",
     clientSecret: Redacted.make("linear-client-secret"),
+    tokenEncryptionKey: Redacted.make("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="),
   },
 };
 
@@ -791,6 +792,37 @@ describe("relay Linear OAuth revoked grants", () => {
       const body = yield* Effect.promise(() => response.text());
       expect(body).toContain("linear_oauth_reauthorization_required");
       expect(body).not.toContain(LINEAR_BUNDLE.refreshToken);
+    }).pipe(Effect.scoped);
+  });
+});
+
+describe("relay Linear OAuth missing grants", () => {
+  it.effect("tells the environment to reauthorize when the relay holds no grant", () => {
+    const services = makeLinearTestServices();
+    return Effect.gen(function* () {
+      const app = yield* Effect.acquireRelease(
+        Effect.sync(() => toWebHandler(makeApiApp(services))),
+        (app) => Effect.promise(() => app.dispose()),
+      );
+
+      const response = yield* Effect.promise(() =>
+        app.handler(
+          new Request(
+            "https://relay.example.test/v1/environments/environment-1/linear/oauth/refresh",
+            {
+              method: "POST",
+              headers: { authorization: "Bearer test-token", "content-type": "application/json" },
+              body: `{"connectionId":"connection-1"}`,
+            },
+          ),
+        ),
+      );
+
+      expect(response.status).toBe(409);
+      expect(yield* Effect.promise(() => response.text())).toContain(
+        "linear_oauth_reauthorization_required",
+      );
+      expect(services.refreshCalls).toEqual([]);
     }).pipe(Effect.scoped);
   });
 });
