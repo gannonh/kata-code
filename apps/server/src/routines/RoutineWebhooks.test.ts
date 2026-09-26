@@ -23,7 +23,11 @@ import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { RoutineScheduler } from "./RoutineScheduler.ts";
-import { RoutineStore, RoutineStoreLive } from "./RoutineStore.ts";
+import {
+  REJECTED_DELIVERY_CHANGE_INTERVAL_MS,
+  RoutineStore,
+  RoutineStoreLive,
+} from "./RoutineStore.ts";
 import { linearWebhookSignature } from "./LinearRoutineEvents.ts";
 import {
   ROUTINE_WEBHOOK_MAX_BODY_BYTES,
@@ -368,6 +372,70 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
           });
           assert.equal(routineHistory.runs.length, 1);
         }),
+    );
+
+    it.effect("coalesces change rows for a burst of unsigned requests", () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const sql = yield* SqlClient.SqlClient;
+        const changeCount = sql<{
+          count: number;
+        }>`SELECT COUNT(*) AS count FROM routine_changes`.pipe(
+          Effect.map((rows) => rows[0]!.count),
+        );
+        yield* TestClock.adjust(REJECTED_DELIVERY_CHANGE_INTERVAL_MS);
+        const changesBefore = yield* changeCount;
+        const before = yield* store.getConnection(environmentId, connectionId);
+        for (let i = 0; i < 1_000; i++) {
+          const response = yield* post({
+            body: prOpened(8),
+            signature: null,
+            deliveryId: `burst-${i}`,
+          });
+          assert.equal(response.status, 400);
+        }
+        const after = yield* store.getConnection(environmentId, connectionId);
+        assert.equal(after.rejectedCount - before.rejectedCount, 1_000);
+        assert.equal(after.lastDelivery?.deliveryId, "burst-999");
+        assert.equal(after.lastDelivery?.status, "rejected");
+        assert.equal((yield* changeCount) - changesBefore, 1);
+
+        yield* TestClock.adjust(REJECTED_DELIVERY_CHANGE_INTERVAL_MS);
+        const late = yield* post({ body: prOpened(8), signature: null, deliveryId: "burst-late" });
+        assert.equal(late.status, 400);
+        assert.equal((yield* changeCount) - changesBefore, 2);
+        assert.equal(
+          (yield* store.getConnection(environmentId, connectionId)).lastDelivery?.deliveryId,
+          "burst-late",
+        );
+      }),
+    );
+
+    it.effect("refreshes subscribers once per interval during a sustained unsigned stream", () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const sql = yield* SqlClient.SqlClient;
+        const changeCount = sql<{
+          count: number;
+        }>`SELECT COUNT(*) AS count FROM routine_changes`.pipe(
+          Effect.map((rows) => rows[0]!.count),
+        );
+        yield* TestClock.adjust(REJECTED_DELIVERY_CHANGE_INTERVAL_MS);
+        const changesBefore = yield* changeCount;
+        const before = yield* store.getConnection(environmentId, connectionId);
+        for (let i = 0; i < 7; i++) {
+          if (i > 0) yield* TestClock.adjust(REJECTED_DELIVERY_CHANGE_INTERVAL_MS / 2);
+          const response = yield* post({
+            body: prOpened(8),
+            signature: null,
+            deliveryId: `stream-${i}`,
+          });
+          assert.equal(response.status, 400);
+        }
+        const after = yield* store.getConnection(environmentId, connectionId);
+        assert.equal(after.rejectedCount - before.rejectedCount, 7);
+        assert.equal((yield* changeCount) - changesBefore, 4);
+      }),
     );
 
     it.effect("returns 503 instead of acknowledging a ping whose durable receipt fails", () =>
