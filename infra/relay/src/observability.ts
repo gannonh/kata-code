@@ -222,8 +222,9 @@ export const makeRelayTraceLayer = (input: {
     OtlpTracer.make({
       url: input.tracesEndpoint,
       resource: {
-        serviceName: "kata-code-relay-worker",
+        serviceName: "katacode-relay",
         attributes: {
+          "service.namespace": "katacode",
           "service.runtime": "cloudflare-worker",
           "service.component": "relay",
         },
