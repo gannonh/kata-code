@@ -60,4 +60,6 @@ export OP_SERVICE_ACCOUNT_TOKEN=...   # the Expo config loads Clerk and relay se
 node scripts/mobile-testflight.ts               # add --no-upload to stop after export
 ```
 
+If export stalls with an idle `codesign` child of `xcodebuild -exportArchive`, macOS is waiting on a keychain prompt for the local Apple Distribution key. Ask the user to enter their login password and choose Always Allow. CI uses a fresh keychain and never sees this prompt.
+
 Without Clerk and relay config the script refuses to upload and names the missing variables. `--no-upload` still builds, for checking that the app compiles and signs.
