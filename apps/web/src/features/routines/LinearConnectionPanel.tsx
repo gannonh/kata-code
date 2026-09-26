@@ -16,6 +16,7 @@ import {
   errorMessage,
   LINEAR_PROVIDER_REMOVAL_NOTE,
   LINEAR_RETRY_NOTE,
+  newRoutineConnectionId,
   routineConnectionStatusLabel,
   ROUTINE_CONTROL_CLASS,
   ROUTINE_DELIVERY_STATUS_LABELS,
@@ -176,7 +177,7 @@ export function LinearConnectionPanel({
       (candidate) =>
         candidate !== null && !connections.some((connection) => connection.id === candidate),
     );
-    const id = reusableId ?? RoutineConnectionId.make("connection-" + Date.now().toString(36));
+    const id = reusableId ?? newRoutineConnectionId();
     authorizationRefreshSawPending.current = false;
     setAuthorizationMetadataGate(reusableId === undefined ? "ready" : "required");
     savePendingLinearConnectionId(environmentId, id);

@@ -542,14 +542,17 @@ const makeRoutineConnections = Effect.gen(function* () {
         // Persist the local stop before remote cleanup. This closes the
         // acceptance gate even if token refresh, provider deletion, or relay
         // revocation is interrupted.
-        let updated = yield* store.updateConnection(current.id, (connection) =>
-          connection.provider === "linear"
-            ? {
-                ...connection,
-                status: "disabled",
-                updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
-              }
-            : connection,
+        let updated = yield* store.updateConnection(
+          input.environmentId,
+          current.id,
+          (connection) =>
+            connection.provider === "linear"
+              ? {
+                  ...connection,
+                  status: "disabled",
+                  updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
+                }
+              : connection,
         );
         yield* secrets
           .remove(routineConnectionSecretName(current.id))
@@ -575,14 +578,17 @@ const makeRoutineConnections = Effect.gen(function* () {
               .pipe(Effect.result);
             if (deletion._tag === "Success") {
               webhookDeleted = true;
-              updated = yield* store.updateConnection(current.id, (connection) =>
-                connection.provider === "linear" && connection.webhookId === current.webhookId
-                  ? {
-                      ...connection,
-                      webhookId: null,
-                      updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
-                    }
-                  : connection,
+              updated = yield* store.updateConnection(
+                input.environmentId,
+                current.id,
+                (connection) =>
+                  connection.provider === "linear" && connection.webhookId === current.webhookId
+                    ? {
+                        ...connection,
+                        webhookId: null,
+                        updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
+                      }
+                    : connection,
               );
             } else {
               yield* Effect.logWarning("routine Linear webhook could not be deleted", {
@@ -625,17 +631,20 @@ const makeRoutineConnections = Effect.gen(function* () {
         .pipe(
           Effect.mapError(() => failure("persistence", "Could not remove the signing secret.")),
         );
-      const updated = yield* store.updateConnection(current.id, (connection) =>
-        connection.provider === "github"
-          ? {
-              ...connection,
-              status: "disabled",
-              // The provider hook is deleted below; keeping its id would offer a
-              // delivery-history link to a hook that no longer exists.
-              hookId: null,
-              updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
-            }
-          : connection,
+      const updated = yield* store.updateConnection(
+        input.environmentId,
+        current.id,
+        (connection) =>
+          connection.provider === "github"
+            ? {
+                ...connection,
+                status: "disabled",
+                // The provider hook is deleted below; keeping its id would offer a
+                // delivery-history link to a hook that no longer exists.
+                hookId: null,
+                updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
+              }
+            : connection,
       );
       if (current.hookId !== null) {
         const path = yield* repositoryPath(current.repositoryName);
@@ -698,7 +707,7 @@ const makeRoutineConnections = Effect.gen(function* () {
         ),
       ),
     );
-    return yield* store.updateConnection(current.id, (connection) => ({
+    return yield* store.updateConnection(input.environmentId, current.id, (connection) => ({
       ...connection,
       updatedAt: DateTime.formatIso(DateTime.nowUnsafe()),
     }));
@@ -748,7 +757,7 @@ const makeRoutineConnections = Effect.gen(function* () {
     const connection = found !== null && found.environmentId === input.environmentId ? found : null;
     const stampMetadataAccess = (metadataAccess: "ok" | "revoked") =>
       store
-        .updateConnection(id, (current) =>
+        .updateConnection(input.environmentId, id, (current) =>
           current.provider === "linear"
             ? { ...current, metadataAccess, updatedAt: DateTime.formatIso(DateTime.nowUnsafe()) }
             : current,

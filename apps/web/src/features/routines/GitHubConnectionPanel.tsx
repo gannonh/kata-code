@@ -1,8 +1,4 @@
-import {
-  RoutineConnectionId,
-  type EnvironmentId,
-  type GitHubRoutineConnection,
-} from "@kata-sh/code-contracts";
+import { type EnvironmentId, type GitHubRoutineConnection } from "@kata-sh/code-contracts";
 import { PlusIcon, RotateCcwIcon, Trash2Icon, WebhookIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -15,6 +11,7 @@ import { FieldLabel } from "./FieldLabel";
 import {
   errorMessage,
   gitHubHookSettingsUrl,
+  newRoutineConnectionId,
   GITHUB_REDELIVERY_NOTE,
   ROUTINE_CONNECTION_STATUS_LABELS,
   ROUTINE_CONTROL_CLASS,
@@ -61,7 +58,7 @@ export function GitHubConnectionPanel({
     if (!name || disabled) return;
     onSetupBusyChange(true);
     setSetupMessage("Creating the webhook through GitHub…");
-    const id = RoutineConnectionId.make(`connection-${Date.now().toString(36)}`);
+    const id = newRoutineConnectionId();
     const created = await createConnection({
       environmentId,
       input: { provider: "github", id, repository: name },

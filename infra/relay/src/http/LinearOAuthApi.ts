@@ -25,6 +25,12 @@ const notConfigured = (_error: LinearOAuth.LinearOAuthNotConfigured, traceId: st
 const notAuthorized = (_error: unknown, traceId: string) =>
   new RelayAuthInvalidError({ code: "auth_invalid", reason: "not_authorized", traceId });
 
+const reauthorizationRequired = (_error: unknown, traceId: string) =>
+  new RelayLinearOAuthReauthorizationRequiredError({
+    code: "linear_oauth_reauthorization_required",
+    traceId,
+  });
+
 const internalError = (_error: unknown, traceId: string) =>
   new RelayInternalError({ code: "internal_error", reason: "internal_error", traceId });
 
@@ -124,13 +130,11 @@ export const linearServerApi = HttpApiBuilder.group(
           },
           mapErrorTags({
             LinearOAuthNotConfigured: notConfigured,
-            LinearOAuthConnectionNotFound: notAuthorized,
+            // The relay holds no readable grant, so only a new Linear authorization helps.
+            LinearOAuthConnectionNotFound: reauthorizationRequired,
             LinearOAuthRequestFailed: (error, traceId) =>
               error.reason === "rejected"
-                ? new RelayLinearOAuthReauthorizationRequiredError({
-                    code: "linear_oauth_reauthorization_required",
-                    traceId,
-                  })
+                ? reauthorizationRequired(error, traceId)
                 : upstreamUnavailable(error, traceId),
           }),
           mapRelayCommonApiErrors("not_authorized"),

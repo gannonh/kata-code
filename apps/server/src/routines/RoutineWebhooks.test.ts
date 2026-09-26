@@ -397,13 +397,13 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
     it.effect("admits nothing for a disabled connection even with a valid signature", () =>
       Effect.gen(function* () {
         const store = yield* RoutineStore;
-        yield* store.updateConnection(connectionId, (current) => ({
+        yield* store.updateConnection(environmentId, connectionId, (current) => ({
           ...current,
           status: "disabled",
         }));
         const response = yield* post({ body: prOpened(10), deliveryId: "d-disabled" });
         assert.equal(response.status, 403);
-        yield* store.updateConnection(connectionId, (current) => ({
+        yield* store.updateConnection(environmentId, connectionId, (current) => ({
           ...current,
           status: "verified",
         }));
@@ -556,7 +556,7 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
         yield* TestClock.setTime(LINEAR_TEST_TIME);
         yield* seedLinear;
         const store = yield* RoutineStore;
-        yield* store.updateConnection(linearConnectionId, (current) => ({
+        yield* store.updateConnection(environmentId, linearConnectionId, (current) => ({
           ...current,
           status: "disabled",
         }));
