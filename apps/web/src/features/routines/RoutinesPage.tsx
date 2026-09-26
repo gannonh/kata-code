@@ -1,21 +1,13 @@
 import {
-  GITHUB_ROUTINE_EVENT_LABELS,
-  LINEAR_ROUTINE_EVENT_LABELS,
   ModelSelection,
   ProviderInstanceId,
   type ProviderOptionSelection,
   Routine,
-  RoutineConnectionId,
-  RoutineDraft,
   type RoutineId,
   isScheduleTrigger,
   type EnvironmentId,
-  type GitHubEventTrigger,
   type GitHubRoutineConnection,
-  type GitHubRoutineEvent,
-  type LinearEventTrigger,
   type LinearRoutineConnection,
-  type LinearRoutineEvent,
   type RoutineRun,
   type RuntimeMode,
   type ServerProvider,
@@ -73,26 +65,19 @@ import {
   firstEnabledProviderModel,
   formatRoutineTrigger,
   gitHubEditorTrigger,
-  gitHubHookSettingsUrl,
-  GITHUB_REDELIVERY_NOTE,
   isRoutineEditorDraftComplete,
   isRoutineEditorScheduleTrigger,
   isRoutineDraftDirty,
   keepDeletedRoutineInEditor,
   libraryRoutinesAfterChange,
-  LINEAR_PROVIDER_REMOVAL_NOTE,
-  LINEAR_RETRY_NOTE,
   linearEditorTrigger,
   newRoutineDraftId,
   newRoutineRequestId,
   preferredWorktreeBaseBranch,
-  routineConnectionStatusLabel,
   routineDraftBaselineAfterAutomaticChange,
   routineDraftRevisionAfterEdit,
   ROUTINE_CANCEL_HINT,
-  ROUTINE_CONNECTION_STATUS_LABELS,
   ROUTINE_CONTROL_CLASS,
-  ROUTINE_DELIVERY_STATUS_LABELS,
   ROUTINE_EDITOR_COLUMN_CLASS,
   ROUTINE_EDITOR_FIELDS_CLASS,
   ROUTINE_PERMISSION_MODE_LABELS,
@@ -103,6 +88,7 @@ import {
   switchRoutineEditorTrigger,
   worktreeWorkspace,
   type GitHubTriggerPatch,
+  type LinearTriggerPatch,
   type RoutineEditorDraft,
   type RoutineEditorGitHubTrigger,
   type RoutineEditorLinearTrigger,
@@ -110,7 +96,8 @@ import {
 } from "./RoutinesPage.logic";
 import { FieldLabel } from "./FieldLabel";
 import { GitHubConnectionPanel } from "./GitHubConnectionPanel";
-import { GitHubTriggerFields } from "./RoutineTriggerFields";
+import { LinearConnectionPanel } from "./LinearConnectionPanel";
+import { GitHubTriggerFields, LinearTriggerFields } from "./RoutineTriggerFields";
 import { RoutineChat } from "./RoutineChat";
 
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
@@ -305,15 +292,6 @@ function RoutineCard({
   );
 }
 
-/** A key set to `undefined` clears that filter; an absent key leaves it alone. */
-type LinearTriggerPatch = {
-  readonly event?: LinearEventTrigger["event"];
-  readonly teamId?: string | undefined;
-  readonly projectId?: string | undefined;
-  readonly stateId?: string | undefined;
-  readonly labelId?: string | undefined;
-};
-
 function GitHubTriggerSection({
   environmentId,
   trigger,
@@ -365,46 +343,7 @@ function GitHubTriggerSection({
   );
 }
 
-/** The server names a missing OAuth bundle with this message; the UI shows it as waiting. */
-const LINEAR_AUTHORIZATION_REQUIRED_MESSAGE = "Connect Linear before reading workspace metadata.";
-const LINEAR_PENDING_CONNECTION_STORAGE_KEY = "kata-code:routines:linear-pending-connection:";
-
-function linearPendingConnectionStorageKey(environmentId: EnvironmentId): string {
-  return `${LINEAR_PENDING_CONNECTION_STORAGE_KEY}${environmentId}`;
-}
-
-function readPendingLinearConnectionId(environmentId: EnvironmentId): RoutineConnectionId | null {
-  try {
-    const value = window.localStorage.getItem(linearPendingConnectionStorageKey(environmentId));
-    return value !== null && /^[A-Za-z0-9_-]{1,128}$/u.test(value)
-      ? RoutineConnectionId.make(value)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function savePendingLinearConnectionId(
-  environmentId: EnvironmentId,
-  id: RoutineConnectionId,
-): void {
-  try {
-    window.localStorage.setItem(linearPendingConnectionStorageKey(environmentId), id);
-  } catch {
-    // The in-memory state still lets this authorization attempt complete when
-    // browser storage is unavailable.
-  }
-}
-
-function clearPendingLinearConnectionId(environmentId: EnvironmentId): void {
-  try {
-    window.localStorage.removeItem(linearPendingConnectionStorageKey(environmentId));
-  } catch {
-    // Storage may be disabled by the browser or shell.
-  }
-}
-
-function LinearTriggerFields({
+function LinearTriggerSection({
   environmentId,
   trigger,
   connections,
@@ -423,75 +362,8 @@ function LinearTriggerFields({
   readonly onTriggerChange: (patch: LinearTriggerPatch) => void;
   readonly onConnectionChange: (connection: LinearRoutineConnection) => void;
 }) {
-  const beginConnectionAuthorization = useAtomCommand(
-    routineEnvironment.beginConnectionAuthorization,
-    { reportFailure: false },
-  );
-  const createConnection = useAtomCommand(routineEnvironment.createConnection, {
-    reportFailure: false,
-  });
-  const verifyConnection = useAtomCommand(routineEnvironment.verifyConnection, {
-    reportFailure: false,
-  });
-  const disableConnection = useAtomCommand(routineEnvironment.disableConnection, {
-    reportFailure: false,
-  });
-  const [pendingAuthorization, setPendingAuthorization] = useState<{
-    readonly environmentId: EnvironmentId;
-    readonly connectionId: RoutineConnectionId;
-  } | null>(null);
-  const [allTeams, setAllTeams] = useState(true);
-  const [teamId, setTeamId] = useState("");
-  const [createdConnection, setCreatedConnection] = useState<LinearRoutineConnection | null>(null);
-  const [authorizationUrl, setAuthorizationUrl] = useState<string | null>(null);
-  const [authorizationPopupBlocked, setAuthorizationPopupBlocked] = useState(false);
-  const [authorizationMetadataGate, setAuthorizationMetadataGate] = useState<
-    "ready" | "required" | "refreshing"
-  >("ready");
-  const authorizationRefreshSawPending = useRef(false);
-  const [setupMessage, setSetupMessage] = useState<string | null>(null);
   const [setupBusy, setSetupBusy] = useState(false);
-  const [showSetup, setShowSetup] = useState(connections.length === 0);
-  const pendingConnectionId =
-    pendingAuthorization?.environmentId === environmentId
-      ? pendingAuthorization.connectionId
-      : null;
-  const connectionIdSignature = connections.map((connection) => connection.id).join("\u0000");
-  useEffect(() => {
-    const persistedId = readPendingLinearConnectionId(environmentId);
-    if (persistedId === null) {
-      setPendingAuthorization((current) => (current === null ? current : null));
-      return;
-    }
-    if (connectionIdSignature.split("\u0000").includes(persistedId)) {
-      clearPendingLinearConnectionId(environmentId);
-      setPendingAuthorization((current) => (current === null ? current : null));
-      return;
-    }
-    setPendingAuthorization((current) =>
-      current?.environmentId === environmentId && current.connectionId === persistedId
-        ? current
-        : { environmentId, connectionId: persistedId },
-    );
-  }, [connectionIdSignature, environmentId]);
-  const authorizationMetadata = useEnvironmentQuery(
-    pendingConnectionId === null
-      ? null
-      : routineEnvironment.linearMetadata({
-          environmentId,
-          input: { connectionId: pendingConnectionId },
-        }),
-  );
-  useEffect(() => {
-    if (authorizationMetadataGate !== "refreshing") return;
-    if (authorizationMetadata.isPending) {
-      authorizationRefreshSawPending.current = true;
-      return;
-    }
-    if (!authorizationRefreshSawPending.current) return;
-    authorizationRefreshSawPending.current = false;
-    setAuthorizationMetadataGate(authorizationMetadata.isSuccess ? "ready" : "required");
-  }, [authorizationMetadata.isPending, authorizationMetadata.isSuccess, authorizationMetadataGate]);
+  const [createdConnection, setCreatedConnection] = useState<LinearRoutineConnection | null>(null);
   const metadata = useEnvironmentQuery(
     selectedConnection
       ? routineEnvironment.linearMetadata({
@@ -507,506 +379,29 @@ function LinearTriggerFields({
       setCreatedConnection(null);
     }
   }, [createdConnection, triggerConnectionId]);
+  // A just-created connection shows before the connections query refreshes.
   const connection =
     createdConnection?.id === triggerConnectionId ? createdConnection : selectedConnection;
-  const stateId = "stateId" in trigger ? trigger.stateId : undefined;
-  const labelId = "labelId" in trigger ? trigger.labelId : undefined;
-  const connectionTeamIds = connection?.teamIds ?? [];
-  const connectionTeams = (metadata.data?.teams ?? []).filter((team) =>
-    connection?.allTeams ? team.visibility === "public" : connectionTeamIds.includes(team.id),
-  );
-  const authorizedTeamIds = new Set(connectionTeams.map((team) => team.id));
-  const availableProjects = (metadata.data?.projects ?? []).filter(
-    (project) =>
-      project.teamIds.some((id) => authorizedTeamIds.has(id)) &&
-      (trigger.teamId === undefined || project.teamIds.includes(trigger.teamId)),
-  );
-  const selectedProject = availableProjects.find((project) => project.id === trigger.projectId);
-  const selectedProjectTeamIds = new Set(selectedProject?.teamIds ?? []);
-  const matchesSelectedScope = (candidateTeamId: string): boolean =>
-    trigger.teamId !== undefined
-      ? candidateTeamId === trigger.teamId
-      : selectedProject === undefined || selectedProjectTeamIds.has(candidateTeamId);
-  const availableStates = (metadata.data?.states ?? []).filter(
-    (state) => authorizedTeamIds.has(state.teamId) && matchesSelectedScope(state.teamId),
-  );
-  const availableLabels = (metadata.data?.labels ?? []).filter(
-    (label) =>
-      label.teamId === null ||
-      (authorizedTeamIds.has(label.teamId) && matchesSelectedScope(label.teamId)),
-  );
-
-  const startAuthorization = async () => {
-    if (disabled) return;
-    let authorizationWindow: Window | null = null;
-    try {
-      authorizationWindow = window.open("about:blank", "_blank");
-      if (authorizationWindow != null) authorizationWindow.opener = null;
-    } catch {
-      authorizationWindow?.close();
-      authorizationWindow = null;
-      // Treat a shell or browser that refuses the popup as a blocked popup and
-      // keep the authorization URL available in the editor below.
-    }
-    setSetupBusy(true);
-    setSetupMessage(null);
-    setAuthorizationUrl(null);
-    setAuthorizationPopupBlocked(false);
-    setCreatedConnection(null);
-    setAllTeams(true);
-    setTeamId("");
-    const storedId = readPendingLinearConnectionId(environmentId);
-    const reusableId = [storedId, pendingConnectionId].find(
-      (candidate) =>
-        candidate !== null && !connections.some((connection) => connection.id === candidate),
-    );
-    const id = reusableId ?? RoutineConnectionId.make("connection-" + Date.now().toString(36));
-    authorizationRefreshSawPending.current = false;
-    setAuthorizationMetadataGate(reusableId === undefined ? "ready" : "required");
-    savePendingLinearConnectionId(environmentId, id);
-    setPendingAuthorization({ environmentId, connectionId: id });
-    try {
-      const result = await beginConnectionAuthorization({ environmentId, input: { id } });
-      setSetupBusy(false);
-      if (result._tag === "Failure") {
-        authorizationWindow?.close();
-        setSetupMessage(errorMessage(result.cause));
-        return;
-      }
-      setAuthorizationUrl(result.value.authorizeUrl);
-      let popupAvailable = authorizationWindow != null && !authorizationWindow.closed;
-      if (popupAvailable && authorizationWindow != null) {
-        try {
-          authorizationWindow.location.href = result.value.authorizeUrl;
-        } catch {
-          authorizationWindow.close();
-          popupAvailable = false;
-        }
-      }
-      setAuthorizationPopupBlocked(!popupAvailable);
-      setPendingAuthorization({ environmentId, connectionId: id });
-      setSetupMessage(
-        popupAvailable
-          ? "Authorize Kata Code in the Linear window, then check the connection."
-          : "The Linear authorization window was blocked. Open the authorization link below, then check the connection.",
-      );
-    } catch (error) {
-      authorizationWindow?.close();
-      setSetupBusy(false);
-      setSetupMessage(errorMessage(error));
-      return;
-    }
-  };
-
-  const runCreateConnection = async () => {
-    if (disabled || pendingConnectionId === null || authorizationMetadataGate !== "ready") return;
-    if (!allTeams && teamId.length === 0) return;
-    setSetupBusy(true);
-    setSetupMessage("Creating the Linear webhook…");
-    const result = await createConnection({
-      environmentId,
-      input: {
-        provider: "linear",
-        id: pendingConnectionId,
-        allTeams,
-        teamIds: allTeams ? [] : [teamId],
-      },
-    });
-    setSetupBusy(false);
-    if (result._tag === "Failure") {
-      setSetupMessage(errorMessage(result.cause));
-      return;
-    }
-    if (result.value.provider !== "linear") {
-      setSetupMessage("The environment did not return a Linear connection.");
-      return;
-    }
-    setCreatedConnection(result.value);
-    clearPendingLinearConnectionId(environmentId);
-    setPendingAuthorization(null);
-    onConnectionChange(result.value);
-    setSetupMessage("Webhook created. Verify the first delivery when Linear sends one.");
-  };
-
-  const runVerify = async () => {
-    if (!connection || disabled) return;
-    setSetupBusy(true);
-    setSetupMessage(null);
-    const result = await verifyConnection({ environmentId, input: { id: connection.id } });
-    setSetupBusy(false);
-    if (result._tag === "Failure") {
-      setSetupMessage(errorMessage(result.cause));
-      return;
-    }
-    if (result.value.provider !== "linear") {
-      setSetupMessage("The environment did not return a Linear connection.");
-      return;
-    }
-    if (createdConnection?.id === result.value.id) setCreatedConnection(result.value);
-    setSetupMessage(
-      result.value.status === "verified"
-        ? "First delivery received. The connection is ready."
-        : "No Linear delivery arrived yet. Create or update an issue in the connected workspace.",
-    );
-  };
-
-  const runDisable = async () => {
-    if (!connection || disabled) return;
-    setSetupBusy(true);
-    setSetupMessage(null);
-    const result = await disableConnection({ environmentId, input: { id: connection.id } });
-    setSetupBusy(false);
-    if (result._tag === "Failure") {
-      setSetupMessage(errorMessage(result.cause));
-      return;
-    }
-    if (result.value.provider !== "linear") {
-      setSetupMessage("The environment did not return a Linear connection.");
-      return;
-    }
-    if (createdConnection?.id === result.value.id) setCreatedConnection(result.value);
-    setSetupMessage(
-      result.value.webhookId === null
-        ? "Linear connection disabled. The provider webhook was removed; retry cleanup if relay revocation is still pending."
-        : LINEAR_PROVIDER_REMOVAL_NOTE,
-    );
-  };
-
-  const lastDelivery = connection?.lastDelivery ?? null;
-
   return (
     <div className="grid gap-2" data-testid="routine-linear-trigger">
-      <div className="grid gap-1.5">
-        <FieldLabel htmlFor="routine-linear-connection">Workspace connection</FieldLabel>
-        <select
-          id="routine-linear-connection"
-          className={ROUTINE_CONTROL_CLASS}
-          value={connection?.id ?? ""}
-          disabled={disabled}
-          onChange={(event) => {
-            const next = connections.find((candidate) => candidate.id === event.target.value);
-            if (next) {
-              setCreatedConnection(null);
-              onConnectionChange(next);
-            }
-          }}
-        >
-          {connections.length === 0 ? <option value="">No connected workspace</option> : null}
-          {connections.map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>
-              {candidate.workspaceName} · {routineConnectionStatusLabel(candidate)}
-            </option>
-          ))}
-        </select>
-        <Button
-          size="sm"
-          variant="outline"
-          className="justify-self-start"
-          onClick={() => setShowSetup((value) => !value)}
-          disabled={disabled}
-        >
-          <PlusIcon className="size-3.5" /> Connect a workspace
-        </Button>
-      </div>
-      {showSetup ? (
-        <div className="grid gap-2 rounded-lg border border-border/50 bg-background/60 p-3">
-          <Button
-            size="sm"
-            variant="outline"
-            className="justify-self-start"
-            onClick={() => void startAuthorization()}
-            disabled={disabled}
-          >
-            <SquareKanbanIcon className="size-3.5" /> Connect Linear
-          </Button>
-          {pendingConnectionId !== null &&
-          (authorizationMetadata.data === null || authorizationMetadataGate !== "ready") ? (
-            <>
-              {authorizationMetadata.error !== null &&
-              authorizationMetadata.error !== LINEAR_AUTHORIZATION_REQUIRED_MESSAGE ? (
-                <p className="text-xs text-destructive" role="status">
-                  {authorizationMetadata.error}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground" role="status">
-                  Waiting for authorization…
-                </p>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                className="justify-self-start"
-                onClick={() => {
-                  if (authorizationMetadataGate === "required") {
-                    authorizationRefreshSawPending.current = false;
-                    setAuthorizationMetadataGate("refreshing");
-                  }
-                  authorizationMetadata.refresh();
-                }}
-                disabled={disabled}
-              >
-                Check authorization
-              </Button>
-            </>
-          ) : null}
-          {authorizationMetadata.data !== null &&
-          authorizationMetadataGate === "ready" &&
-          createdConnection === null ? (
-            <div className="grid gap-1 text-xs text-muted-foreground">
-              <span className="font-medium text-foreground">
-                {authorizationMetadata.data.workspace.name}
-              </span>
-              <label className="flex items-center gap-2">
-                <input
-                  id="routine-linear-all-teams"
-                  type="checkbox"
-                  checked={allTeams}
-                  disabled={disabled}
-                  onChange={(event) => setAllTeams(event.target.checked)}
-                />
-                All public teams
-              </label>
-              {allTeams ? null : (
-                <select
-                  id="routine-linear-team-scope"
-                  className={ROUTINE_CONTROL_CLASS}
-                  value={teamId}
-                  disabled={disabled}
-                  onChange={(event) => setTeamId(event.target.value)}
-                >
-                  <option value="">Choose a team</option>
-                  {authorizationMetadata.data.teams.map((team) => (
-                    <option key={team.id} value={team.id}>
-                      {team.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <Button
-                size="sm"
-                className="justify-self-start"
-                onClick={() => void runCreateConnection()}
-                disabled={disabled || (!allTeams && teamId.length === 0)}
-              >
-                <WebhookIcon className="size-3.5" /> Create webhook
-              </Button>
-            </div>
-          ) : null}
-          {connection ? (
-            <div className="grid gap-1.5 text-xs text-muted-foreground">
-              <span className="break-all">Callback: {connection.callbackUrl}</span>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void runVerify()}
-                  disabled={disabled || connection.status === "disabled"}
-                >
-                  <RotateCcwIcon className="size-3.5" /> Verify
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => void runDisable()}
-                  disabled={disabled}
-                >
-                  <Trash2Icon className="size-3.5 text-destructive" />
-                  {connection.status === "disabled" ? "Retry cleanup" : "Disable"}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      {setupMessage ? (
-        <p className="text-xs text-muted-foreground" role="status">
-          {setupMessage}
-        </p>
-      ) : null}
-      {authorizationPopupBlocked && authorizationUrl ? (
-        <a
-          className="text-xs text-primary hover:underline"
-          href={authorizationUrl}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Open Linear authorization link
-        </a>
-      ) : null}
-      {connection ? (
-        <div
-          className="grid gap-1 rounded-lg border border-border/50 bg-background/60 p-3 text-xs"
-          data-testid="routine-linear-connection-diagnostics"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-medium">{connection.workspaceName}</span>
-            <Badge variant="outline" size="sm">
-              {routineConnectionStatusLabel(connection)}
-            </Badge>
-          </div>
-          <span className="break-all text-muted-foreground">
-            Callback: {connection.callbackUrl}
-          </span>
-          {connection.webhookId !== null ? (
-            <span className="break-all text-muted-foreground">Webhook: {connection.webhookId}</span>
-          ) : null}
-          <span className="text-muted-foreground">
-            Accepted {connection.acceptedCount} · Ignored {connection.ignoredCount} · Rejected{" "}
-            {connection.rejectedCount}
-          </span>
-          <span className="text-muted-foreground">
-            Last delivery:{" "}
-            {lastDelivery
-              ? `${ROUTINE_DELIVERY_STATUS_LABELS[lastDelivery.status]} · ${lastDelivery.event} · ${new Date(lastDelivery.receivedAt).toLocaleString()}${lastDelivery.detail ? ` · ${lastDelivery.detail}` : ""}`
-              : "none yet"}
-          </span>
-          <span className="text-muted-foreground">{LINEAR_RETRY_NOTE}</span>
-          {connection.status === "disabled" && connection.webhookId !== null ? (
-            <span className="text-muted-foreground">{LINEAR_PROVIDER_REMOVAL_NOTE}</span>
-          ) : null}
-          {connection.metadataAccess === "revoked" ? (
-            <span className="text-destructive">
-              Metadata access revoked. Disable this connection and connect Linear again to restore
-              the team, project, status, and label pickers.
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {metadata.error !== null ? (
-        <p className="text-xs text-destructive">{metadata.error}</p>
-      ) : (
-        <>
-          <div className="grid gap-1.5">
-            <FieldLabel htmlFor="routine-linear-event">Event</FieldLabel>
-            <select
-              id="routine-linear-event"
-              className={ROUTINE_CONTROL_CLASS}
-              value={trigger.event}
-              disabled={disabled}
-              onChange={(event) =>
-                onTriggerChange({ event: event.target.value as LinearRoutineEvent })
-              }
-            >
-              {(Object.entries(LINEAR_ROUTINE_EVENT_LABELS) as [LinearRoutineEvent, string][]).map(
-                ([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ),
-              )}
-            </select>
-          </div>
-          <div className="grid gap-1.5">
-            <FieldLabel htmlFor="routine-linear-team">Team</FieldLabel>
-            <select
-              id="routine-linear-team"
-              className={ROUTINE_CONTROL_CLASS}
-              value={trigger.teamId ?? ""}
-              disabled={disabled}
-              onChange={(event) => {
-                const value = event.target.value;
-                onTriggerChange({
-                  teamId: value === "" ? undefined : value,
-                  projectId: undefined,
-                  stateId: undefined,
-                  labelId: undefined,
-                });
-              }}
-            >
-              <option value="">All teams in this connection</option>
-              {connectionTeams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="grid gap-1.5">
-            <FieldLabel htmlFor="routine-linear-project">Project</FieldLabel>
-            <select
-              id="routine-linear-project"
-              className={ROUTINE_CONTROL_CLASS}
-              value={trigger.projectId ?? ""}
-              disabled={disabled}
-              onChange={(event) =>
-                onTriggerChange({
-                  projectId: event.target.value === "" ? undefined : event.target.value,
-                  stateId: undefined,
-                  labelId: undefined,
-                })
-              }
-            >
-              <option value="">All projects</option>
-              {availableProjects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          {trigger.event === "status_changed" ? (
-            <div className="grid gap-1.5">
-              <FieldLabel htmlFor="routine-linear-state">Status</FieldLabel>
-              <select
-                id="routine-linear-state"
-                className={ROUTINE_CONTROL_CLASS}
-                value={stateId ?? ""}
-                disabled={disabled}
-                onChange={(event) =>
-                  onTriggerChange({
-                    stateId: event.target.value === "" ? undefined : event.target.value,
-                  })
-                }
-              >
-                <option value="">Choose a status</option>
-                {availableStates.map((state) => (
-                  <option key={state.id} value={state.id}>
-                    {state.name}
-                  </option>
-                ))}
-              </select>
-              {stateId === undefined ? (
-                <p className="text-xs text-warning-foreground">
-                  Choose the status transition that should start the routine.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-          {trigger.event === "label_added" ? (
-            <div className="grid gap-1.5">
-              <FieldLabel htmlFor="routine-linear-label">Label</FieldLabel>
-              <select
-                id="routine-linear-label"
-                className={ROUTINE_CONTROL_CLASS}
-                value={labelId ?? ""}
-                disabled={disabled}
-                onChange={(event) =>
-                  onTriggerChange({
-                    labelId: event.target.value === "" ? undefined : event.target.value,
-                  })
-                }
-              >
-                <option value="">Choose a label</option>
-                {availableLabels.map((label) => (
-                  <option key={label.id} value={label.id}>
-                    {label.name}
-                  </option>
-                ))}
-              </select>
-              {labelId === undefined ? (
-                <p className="text-xs text-warning-foreground">
-                  Choose the label whose addition should start the routine.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-          <p className="text-xs text-muted-foreground">
-            Filters use Linear&apos;s stable ids, so renamed teams, projects, statuses, and labels
-            keep matching. Event text is passed to the routine as untrusted context under the saved
-            instruction.
-          </p>
-        </>
-      )}
+      <LinearConnectionPanel
+        environmentId={environmentId}
+        connections={connections}
+        connection={connection}
+        createdConnection={createdConnection}
+        disabled={disabled}
+        onCreatedConnectionChange={setCreatedConnection}
+        onSetupBusyChange={setSetupBusy}
+        onConnectionChange={onConnectionChange}
+      />
+      <LinearTriggerFields
+        trigger={trigger}
+        connection={connection}
+        metadata={metadata.data}
+        metadataError={metadata.error}
+        disabled={disabled}
+        onTriggerChange={onTriggerChange}
+      />
     </div>
   );
 }
@@ -1586,7 +981,7 @@ function RoutineEditor({
               />
             ) : null}
             {linearTrigger !== null ? (
-              <LinearTriggerFields
+              <LinearTriggerSection
                 environmentId={draft.environmentId}
                 trigger={linearTrigger}
                 connections={linearConnections}

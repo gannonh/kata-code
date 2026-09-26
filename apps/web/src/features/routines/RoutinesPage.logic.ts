@@ -407,6 +407,9 @@ function nonBlank(value: string | undefined): value is string {
   return value !== undefined && value.trim().length > 0;
 }
 
+/** A key set to `undefined` clears that filter; an absent key leaves it alone. */
+export type LinearTriggerPatch = Partial<Omit<LinearTriggerInput, "connectionId" | "workspaceId">>;
+
 /**
  * A status transition carries the destination state; a label event carries the
  * added label. Dropping the filter the event cannot use keeps a hidden value

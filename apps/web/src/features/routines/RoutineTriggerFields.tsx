@@ -1,11 +1,20 @@
-import { GITHUB_ROUTINE_EVENT_LABELS, type GitHubRoutineEvent } from "@kata-sh/code-contracts";
+import {
+  GITHUB_ROUTINE_EVENT_LABELS,
+  LINEAR_ROUTINE_EVENT_LABELS,
+  type GitHubRoutineEvent,
+  type LinearRoutineConnection,
+  type LinearRoutineEvent,
+  type RoutineLinearMetadata,
+} from "@kata-sh/code-contracts";
 
 import { Input } from "../../components/ui/input";
 import { FieldLabel } from "./FieldLabel";
 import {
   ROUTINE_CONTROL_CLASS,
   type GitHubTriggerPatch,
+  type LinearTriggerPatch,
   type RoutineEditorGitHubTrigger,
+  type RoutineEditorLinearTrigger,
 } from "./RoutinesPage.logic";
 
 /** GitHub event and the filters that event supports. */
@@ -102,6 +111,186 @@ export function GitHubTriggerFields({
       <p className="text-xs text-muted-foreground">
         Filters use GitHub's stable ids, so renamed repositories and labels keep matching. Event
         text is passed to the routine as untrusted context under the saved instruction.
+      </p>
+    </>
+  );
+}
+
+/**
+ * Linear event and its team, project, status, and label filters. Pickers list
+ * only what `connection` is authorized for.
+ */
+export function LinearTriggerFields({
+  trigger,
+  connection,
+  metadata,
+  metadataError,
+  disabled,
+  onTriggerChange,
+}: {
+  readonly trigger: RoutineEditorLinearTrigger;
+  readonly connection: LinearRoutineConnection | undefined;
+  readonly metadata: RoutineLinearMetadata | null;
+  readonly metadataError: string | null;
+  readonly disabled: boolean;
+  readonly onTriggerChange: (patch: LinearTriggerPatch) => void;
+}) {
+  const stateId = "stateId" in trigger ? trigger.stateId : undefined;
+  const labelId = "labelId" in trigger ? trigger.labelId : undefined;
+  const connectionTeamIds = connection?.teamIds ?? [];
+  const connectionTeams = (metadata?.teams ?? []).filter((team) =>
+    connection?.allTeams ? team.visibility === "public" : connectionTeamIds.includes(team.id),
+  );
+  const authorizedTeamIds = new Set(connectionTeams.map((team) => team.id));
+  const availableProjects = (metadata?.projects ?? []).filter(
+    (project) =>
+      project.teamIds.some((id) => authorizedTeamIds.has(id)) &&
+      (trigger.teamId === undefined || project.teamIds.includes(trigger.teamId)),
+  );
+  const selectedProject = availableProjects.find((project) => project.id === trigger.projectId);
+  const selectedProjectTeamIds = new Set(selectedProject?.teamIds ?? []);
+  const matchesSelectedScope = (candidateTeamId: string): boolean =>
+    trigger.teamId !== undefined
+      ? candidateTeamId === trigger.teamId
+      : selectedProject === undefined || selectedProjectTeamIds.has(candidateTeamId);
+  const availableStates = (metadata?.states ?? []).filter(
+    (state) => authorizedTeamIds.has(state.teamId) && matchesSelectedScope(state.teamId),
+  );
+  const availableLabels = (metadata?.labels ?? []).filter(
+    (label) =>
+      label.teamId === null ||
+      (authorizedTeamIds.has(label.teamId) && matchesSelectedScope(label.teamId)),
+  );
+
+  if (metadataError !== null) return <p className="text-xs text-destructive">{metadataError}</p>;
+  return (
+    <>
+      <div className="grid gap-1.5">
+        <FieldLabel htmlFor="routine-linear-event">Event</FieldLabel>
+        <select
+          id="routine-linear-event"
+          className={ROUTINE_CONTROL_CLASS}
+          value={trigger.event}
+          disabled={disabled}
+          onChange={(event) => onTriggerChange({ event: event.target.value as LinearRoutineEvent })}
+        >
+          {(Object.entries(LINEAR_ROUTINE_EVENT_LABELS) as [LinearRoutineEvent, string][]).map(
+            ([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ),
+          )}
+        </select>
+      </div>
+      <div className="grid gap-1.5">
+        <FieldLabel htmlFor="routine-linear-team">Team</FieldLabel>
+        <select
+          id="routine-linear-team"
+          className={ROUTINE_CONTROL_CLASS}
+          value={trigger.teamId ?? ""}
+          disabled={disabled}
+          onChange={(event) => {
+            const value = event.target.value;
+            onTriggerChange({
+              teamId: value === "" ? undefined : value,
+              projectId: undefined,
+              stateId: undefined,
+              labelId: undefined,
+            });
+          }}
+        >
+          <option value="">All teams in this connection</option>
+          {connectionTeams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="grid gap-1.5">
+        <FieldLabel htmlFor="routine-linear-project">Project</FieldLabel>
+        <select
+          id="routine-linear-project"
+          className={ROUTINE_CONTROL_CLASS}
+          value={trigger.projectId ?? ""}
+          disabled={disabled}
+          onChange={(event) =>
+            onTriggerChange({
+              projectId: event.target.value === "" ? undefined : event.target.value,
+              stateId: undefined,
+              labelId: undefined,
+            })
+          }
+        >
+          <option value="">All projects</option>
+          {availableProjects.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      {trigger.event === "status_changed" ? (
+        <div className="grid gap-1.5">
+          <FieldLabel htmlFor="routine-linear-state">Status</FieldLabel>
+          <select
+            id="routine-linear-state"
+            className={ROUTINE_CONTROL_CLASS}
+            value={stateId ?? ""}
+            disabled={disabled}
+            onChange={(event) =>
+              onTriggerChange({
+                stateId: event.target.value === "" ? undefined : event.target.value,
+              })
+            }
+          >
+            <option value="">Choose a status</option>
+            {availableStates.map((state) => (
+              <option key={state.id} value={state.id}>
+                {state.name}
+              </option>
+            ))}
+          </select>
+          {stateId === undefined ? (
+            <p className="text-xs text-warning-foreground">
+              Choose the status transition that should start the routine.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {trigger.event === "label_added" ? (
+        <div className="grid gap-1.5">
+          <FieldLabel htmlFor="routine-linear-label">Label</FieldLabel>
+          <select
+            id="routine-linear-label"
+            className={ROUTINE_CONTROL_CLASS}
+            value={labelId ?? ""}
+            disabled={disabled}
+            onChange={(event) =>
+              onTriggerChange({
+                labelId: event.target.value === "" ? undefined : event.target.value,
+              })
+            }
+          >
+            <option value="">Choose a label</option>
+            {availableLabels.map((label) => (
+              <option key={label.id} value={label.id}>
+                {label.name}
+              </option>
+            ))}
+          </select>
+          {labelId === undefined ? (
+            <p className="text-xs text-warning-foreground">
+              Choose the label whose addition should start the routine.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      <p className="text-xs text-muted-foreground">
+        Filters use Linear&apos;s stable ids, so renamed teams, projects, statuses, and labels keep
+        matching. Event text is passed to the routine as untrusted context under the saved
+        instruction.
       </p>
     </>
   );
