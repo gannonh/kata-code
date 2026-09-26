@@ -331,6 +331,41 @@ tag does not exist. Check the Sandbox image job before changing `VERCEL_TOKEN`.
 - Publishes the CLI npm packages (`@kata-sh/code-cli` and `@kata-sh/code-cli-<platform>-<arch>`) to the `nightly` npm dist-tag using the same nightly version.
 - Does not commit version bumps back to `main`.
 
+## Mobile TestFlight
+
+- Workflow: `.github/workflows/mobile-testflight.yml`, manual `workflow_dispatch` only. Set
+  `upload=false` to build and sign without uploading.
+- Local agents use the `release-testflight` skill, which dispatches the workflow and watches it.
+- `scripts/mobile-testflight.ts` does the build on a `macos-26` runner or on a maintainer's Mac:
+  1. Prebuilds the production variant (`com.katacode.app`) with OTA updates off. Kata has no EAS
+     Update project, and the updates URL in `apps/mobile/app.config.ts` belongs to upstream.
+  2. Archives with Xcode automatic signing for team `ZBZKKWF95G`. Xcode registers the app,
+     widget, and share extension identifiers and their capabilities on first use.
+  3. Exports with `method=app-store-connect` and uploads to App Store Connect.
+- The build number is the UTC upload minute (`YYYYMMDDHHmm`), so CI and local uploads never
+  collide. The marketing version is `version` in `apps/mobile/app.config.ts`. After App Store
+  approval, Apple closes that version, so bump `version` before the next upload.
+- Clerk and relay settings come from the `production` environment: `CLERK_PUBLISHABLE_KEY`,
+  `CLERK_JWT_TEMPLATE`, and `RELAY_DOMAIN` or `RELAY_API_ZONE_NAME`.
+- Uploads enter App Store Connect processing first. The build appears in TestFlight for
+  internal testers when processing finishes.
+
+One-time setup:
+
+1. In App Store Connect, create an iOS app with bundle ID `com.katacode.app`.
+2. Create an internal testing group in TestFlight and add testers.
+3. Create an App Store Connect Team API key with the Admin role. Xcode cloud signing needs Admin
+   to create distribution certificates and profiles.
+4. Store the key as repository secrets `APPLE_API_KEY` (the `.p8` file contents),
+   `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`. Desktop notarization uses the same secrets.
+
+Run locally without the API key:
+
+1. Sign in to Xcode > Settings > Accounts with an Apple account on team `ZBZKKWF95G`.
+2. Export `OP_SERVICE_ACCOUNT_TOKEN` so the Expo config loads Clerk and relay settings from
+   1Password.
+3. Run `node scripts/mobile-testflight.ts`. Pass `--no-upload` to stop after export.
+
 ## Server self-update release invariant
 
 Connected servers update to the client's exact version, not to an npm dist-tag. Every released

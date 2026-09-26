@@ -116,6 +116,15 @@ import {
   shouldRetryCloudLink,
 } from "./relayResponse.ts";
 
+const CLOUD_HEALTH_REPLAY_PREFIX = "cloud-health";
+const CLOUD_MINT_REPLAY_PREFIX = "cloud-mint";
+const CLOUD_LINEAR_OAUTH_REPLAY_PREFIX = "cloud-linear-oauth";
+/** Secret store name prefixes of cloud replay markers. The server prunes expired ones. */
+export const CLOUD_REPLAY_MARKER_PREFIXES = [
+  CLOUD_HEALTH_REPLAY_PREFIX,
+  CLOUD_MINT_REPLAY_PREFIX,
+  CLOUD_LINEAR_OAUTH_REPLAY_PREFIX,
+].flatMap((prefix) => [`${prefix}-jti-`, `${prefix}-nonce-`]);
 const CLOUD_PROOF_MAX_LIFETIME_SECONDS = 5 * 60;
 const CLOUD_PROOF_CLOCK_SKEW_SECONDS = 60;
 // The desktop app stops its backends within seconds of writing the marker.
@@ -1688,7 +1697,7 @@ const cloudEnvironmentHealthHandler = Effect.fn("environment.cloud.health")(
         typ: RELAY_HEALTH_REQUEST_TYP,
         decode: decodeCloudHealthProof,
         accepts: (proof) => hasExactScope({ scopes: proof.scope, expected: "environment:status" }),
-        replayPrefix: "cloud-health",
+        replayPrefix: CLOUD_HEALTH_REPLAY_PREFIX,
         invalidMessage: "Invalid cloud health request.",
         consumedMessage: "Cloud health request was already consumed.",
       },
@@ -1757,7 +1766,7 @@ const cloudMintCredentialHandler = Effect.fn("environment.cloud.mintCredential")
         accepts: (proof) =>
           proof.cnf.jkt === proof.clientProofKeyThumbprint &&
           hasExactScope({ scopes: proof.scope, expected: "environment:connect" }),
-        replayPrefix: "cloud-mint",
+        replayPrefix: CLOUD_MINT_REPLAY_PREFIX,
         invalidMessage: "Invalid cloud mint request.",
         consumedMessage: "Cloud mint request was already consumed.",
       },
@@ -1823,7 +1832,7 @@ const cloudLinearOAuthDeliveryHandler = Effect.fn("environment.cloud.linearOAuth
       token: request.proof,
       typ: RELAY_LINEAR_OAUTH_DELIVERY_TYP,
       decode: decodeCloudLinearOAuthDeliveryProof,
-      replayPrefix: "cloud-linear-oauth",
+      replayPrefix: CLOUD_LINEAR_OAUTH_REPLAY_PREFIX,
       invalidMessage: "Invalid Linear OAuth delivery.",
       consumedMessage: "Linear OAuth delivery was already consumed.",
     });
