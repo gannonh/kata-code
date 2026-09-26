@@ -47,6 +47,7 @@ const relaySettings: RelayConfiguration.RelayConfiguration["Service"] = {
   linearOAuth: {
     clientId: "linear-client-id",
     clientSecret: Redacted.make("linear-client-secret"),
+    tokenEncryptionKey: Redacted.make("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="),
   },
 };
 

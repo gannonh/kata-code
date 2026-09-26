@@ -188,22 +188,7 @@ export const ApiLive = Api.make(
     const clerkPublishableKey = yield* Config.String("CLERK_PUBLISHABLE_KEY");
     const clerkJwtAudience = yield* Config.String("CLERK_JWT_AUDIENCE");
 
-    const linearOAuthClientId = Option.getOrUndefined(
-      Option.filter(
-        yield* Config.option(Config.String("LINEAR_OAUTH_CLIENT_ID")),
-        (value) => value.trim().length > 0,
-      ),
-    );
-    const linearOAuthClientSecret = Option.getOrUndefined(
-      Option.filter(
-        yield* Config.option(Config.Redacted("LINEAR_OAUTH_CLIENT_SECRET")),
-        (value) => Redacted.value(value).trim().length > 0,
-      ),
-    );
-    const linearOAuth =
-      linearOAuthClientId && linearOAuthClientSecret
-        ? { clientId: linearOAuthClientId, clientSecret: linearOAuthClientSecret }
-        : null;
+    const linearOAuth = yield* RelayConfiguration.linearOAuthConfig;
 
     const cloudMintPrivateKey = yield* cloudMintKeyPair.privateKey;
     const cloudMintPublicKey = yield* cloudMintKeyPair.publicKey;
