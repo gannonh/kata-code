@@ -56,6 +56,7 @@ const encodeDelivery = Schema.encodeSync(Schema.fromJsonString(RoutineDelivery))
 const DELIVERY_DIGEST_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 /** Rejected deliveries arrive before signature verification, so bound what is stored. */
 export const MAX_DELIVERY_HEADER_LENGTH = 128;
+export const REJECTED_DELIVERY_CHANGE_INTERVAL_MS = 10_000;
 const boundedDeliveryHeader = (value: string) => value.slice(0, MAX_DELIVERY_HEADER_LENGTH);
 export type RoutineEventSummary = GitHubRoutineEventSummary | LinearRoutineEventSummary;
 export interface RoutineEventAdmissionInput {
@@ -610,24 +611,50 @@ export const makeRoutineStore = Effect.gen(function* () {
         return next;
       }),
     );
+  const rejectionChangeAt = new Map<string, number>();
   const recordRejectedDelivery = (
     connectionId: string,
     input: { readonly deliveryId: string; readonly event: string; readonly detail: string },
     now: number,
   ) =>
-    updateConnection(connectionId, (connection) => ({
-      ...connection,
-      rejectedCount: connection.rejectedCount + 1,
-      lastDelivery: {
-        deliveryId: boundedDeliveryHeader(input.deliveryId),
-        event: boundedDeliveryHeader(input.event),
-        status: "rejected",
-        detail: input.detail,
-        runId: null,
-        receivedAt: isoAt(now),
-      },
-      updatedAt: isoAt(now),
-    })).pipe(Effect.asVoid);
+    transaction(
+      Effect.gen(function* () {
+        const connection = yield* readConnection(connectionId);
+        const previous = connection.lastDelivery;
+        const lastChangeAt = rejectionChangeAt.get(connectionId);
+        yield* writeConnection({
+          ...connection,
+          rejectedCount: connection.rejectedCount + 1,
+          lastDelivery: {
+            deliveryId: boundedDeliveryHeader(input.deliveryId),
+            event: boundedDeliveryHeader(input.event),
+            status: "rejected",
+            detail: input.detail,
+            runId: null,
+            receivedAt: isoAt(now),
+          },
+          updatedAt: isoAt(now),
+        });
+        // Unauthenticated callers reach this path, so change rows are coalesced
+        // per connection; the rejected count stays exact. The window is anchored
+        // to the last emitted change, not the last rejection, so a sustained
+        // stream still refreshes subscribers once per interval.
+        const coalesced =
+          previous?.status === "rejected" &&
+          lastChangeAt !== undefined &&
+          now - lastChangeAt < REJECTED_DELIVERY_CHANGE_INTERVAL_MS;
+        if (coalesced) return false;
+        yield* recordChange(connection.environmentId);
+        return true;
+      }),
+    ).pipe(
+      Effect.tap((emitted) =>
+        Effect.sync(() => {
+          if (emitted) rejectionChangeAt.set(connectionId, now);
+        }),
+      ),
+      Effect.asVoid,
+    );
   /**
    * Owns the whole admission decision table for a known connection: disabled
    * connections and payloads for another repository are rejected, unsupported
