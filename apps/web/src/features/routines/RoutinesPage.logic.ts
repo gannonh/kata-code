@@ -4,6 +4,7 @@ import {
   ModelSelection,
   isProviderAvailable,
   isScheduleTrigger,
+  RoutineConnectionId,
   RoutineId,
   RoutineRequestId,
   SCHEDULE_TRIGGER_KINDS,
@@ -36,6 +37,10 @@ export function newRoutineDraftId(): RoutineId {
 
 export function newRoutineRequestId(): RoutineRequestId {
   return RoutineRequestId.make(`routine-request-${randomUUID()}`);
+}
+
+export function newRoutineConnectionId(): RoutineConnectionId {
+  return RoutineConnectionId.make(`connection-${randomUUID()}`);
 }
 
 function remoteRefBranchName(ref: Pick<VcsRef, "name" | "remoteName" | "isRemote">): string {

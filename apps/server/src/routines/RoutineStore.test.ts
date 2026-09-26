@@ -1326,6 +1326,58 @@ it.layer(storeLayer)("RoutineStore", (it) => {
   );
 
   it.effect(
+    "serves a connection from the database environment that owns it when a copied record names another environment",
+    () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const sql = yield* SqlClient.SqlClient;
+        const environmentA = EnvironmentId.make("connection-copy-source-environment");
+        const environmentB = EnvironmentId.make("connection-copy-target-environment");
+        const connectionId = RoutineConnectionId.make("connection-copied-record");
+        yield* store.saveConnection(githubConnection(connectionId, environmentA));
+        yield* sql`UPDATE routine_connections SET environment_id=${environmentB} WHERE id=${connectionId}`;
+        const listed = yield* store.listConnections(environmentB);
+        assert.deepEqual(
+          listed.map((connection) => [connection.id, connection.environmentId]),
+          [[connectionId, environmentB]],
+        );
+        const missing = yield* store
+          .getConnection(environmentA, connectionId)
+          .pipe(
+            Effect.match({ onFailure: (error) => error.code, onSuccess: () => "success" as const }),
+          );
+        assert.equal(missing, "not-found");
+        assert.equal(
+          (yield* store.getConnection(environmentB, connectionId)).environmentId,
+          environmentB,
+        );
+        assert.equal((yield* store.findConnection(connectionId))?.environmentId, environmentB);
+        const saved = yield* store.save(
+          environmentB,
+          {
+            id: RoutineId.make("routine-on-copied-connection"),
+            expectedRevision: 0,
+            configuration: githubConfiguration(connectionId),
+          },
+          100_050,
+        );
+        assert.equal(saved.environmentId, environmentB);
+        const rejected = yield* store
+          .save(
+            environmentA,
+            {
+              id: RoutineId.make("routine-on-foreign-connection"),
+              expectedRevision: 0,
+              configuration: githubConfiguration(connectionId),
+            },
+            100_060,
+          )
+          .pipe(Effect.flip);
+        assert.equal(rejected.message, "Connect the GitHub repository before saving.");
+      }),
+  );
+
+  it.effect(
     "admits a test run in the environment that serves the routine, not the environment in the copied record",
     () =>
       Effect.gen(function* () {
@@ -1458,12 +1510,6 @@ it.layer(storeLayer)("RoutineStore", (it) => {
         );
         yield* sql`UPDATE routines SET environment_id=${environmentB} WHERE id=${routine.id}`;
         yield* sql`UPDATE routine_connections SET environment_id=${environmentB} WHERE id=${connectionId}`;
-        // The copied database keeps the source environment in both records; the
-        // target environment re-owns its inherited connection.
-        yield* store.updateConnection(connectionId, (current) => ({
-          ...current,
-          environmentId: environmentB,
-        }));
         const changes = () =>
           sql<{
             environmentId: EnvironmentId;
@@ -1534,12 +1580,6 @@ it.layer(storeLayer)("RoutineStore", (it) => {
         assert.equal(first.runs[0]?.environmentId, environmentA);
         yield* sql`UPDATE routines SET environment_id=${environmentB} WHERE id=${routine.id}`;
         yield* sql`UPDATE routine_connections SET environment_id=${environmentB} WHERE id=${connectionId}`;
-        // The copied database keeps the source environment in both records; the
-        // target environment re-owns its inherited connection.
-        yield* store.updateConnection(connectionId, (current) => ({
-          ...current,
-          environmentId: environmentB,
-        }));
         // The original delivery falls outside the digest window, so the replay
         // reaches the existing-run branch with a record that still names A.
         const replayed = yield* store.admitEvent({
