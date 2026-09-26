@@ -9,10 +9,13 @@ import {
   SCHEDULE_TRIGGER_KINDS,
   type GitHubEventTrigger,
   type GitHubRoutineConnection,
+  type GitHubRoutineEvent,
   type LinearEventTrigger,
   type LinearRoutineConnection,
+  type LinearRoutineEvent,
   type Routine,
   type RoutineConnection,
+  type RoutineConnectionId,
   type RoutineDeliveryStatus,
   type RoutineDraft,
   type RoutineDraftConversationMessage,
@@ -24,6 +27,8 @@ import {
   type ScheduleTrigger,
   type VcsRef,
 } from "@kata-sh/code-contracts";
+import * as Cause from "effect/Cause";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { randomUUID } from "../../lib/utils";
@@ -43,6 +48,15 @@ function remoteRefBranchName(ref: Pick<VcsRef, "name" | "remoteName" | "isRemote
     return ref.name.slice(ref.remoteName.length + 1);
   }
   return ref.name;
+}
+
+export function worktreeWorkspace(baseBranch: string): RoutineDraft["workspace"] {
+  return {
+    kind: "worktree",
+    baseBranch,
+    startFromOrigin: true,
+    runSetupScript: true,
+  };
 }
 
 export function preferredWorktreeBaseBranch(refs: ReadonlyArray<VcsRef>): string | null {
@@ -131,29 +145,28 @@ export const DELETE_ROUTINE_MESSAGE =
 export const ROUTINE_CANCEL_HINT =
   "Discards unsaved changes. A canceled draft is not saved as a routine.";
 
-/** Editor-only state while GitHub setup has not produced a real connection. */
+/** GitHub choice before a connection exists. Never saved. */
 export type GitHubTriggerDraft = {
-  readonly kind: "github";
-  readonly event: GitHubEventTrigger["event"];
-  readonly branch?: GitHubEventTrigger["branch"];
+  readonly kind: "github-draft";
+  readonly event: GitHubRoutineEvent;
+  readonly branch?: string;
   readonly includeDrafts: boolean;
-  readonly issueLabelId?: GitHubEventTrigger["issueLabelId"];
+  readonly issueLabelId?: number;
 };
 export type RoutineEditorGitHubTrigger = GitHubTriggerDraft | GitHubEventTrigger;
-/** Editor-only state while Linear setup has not produced a real connection. */
+/** Linear choice missing its connection or the filter its event requires. Never saved. */
 export type LinearTriggerDraft = {
-  readonly kind: "linear";
-  readonly event: LinearEventTrigger["event"];
-  readonly teamId?: LinearEventTrigger["teamId"];
-  readonly projectId?: LinearEventTrigger["projectId"];
+  readonly kind: "linear-draft";
+  readonly connectionId?: RoutineConnectionId;
+  readonly workspaceId?: string;
+  readonly teamId?: string;
+  readonly projectId?: string;
+  readonly event: LinearRoutineEvent;
   readonly stateId?: string;
   readonly labelId?: string;
 };
 export type RoutineEditorLinearTrigger = LinearTriggerDraft | LinearEventTrigger;
-export type RoutineEditorTrigger =
-  | ScheduleTrigger
-  | RoutineEditorGitHubTrigger
-  | RoutineEditorLinearTrigger;
+export type RoutineEditorTrigger = RoutineTrigger | GitHubTriggerDraft | LinearTriggerDraft;
 export type RoutineEditorDraft = Omit<RoutineDraft, "trigger"> & {
   readonly trigger: RoutineEditorTrigger;
 };
@@ -192,8 +205,7 @@ export function routineDraftForGenerationInput(
 ): RoutineDraftConversationState | null {
   if (
     !initialized ||
-    (!isRoutineEditorScheduleTrigger(current.trigger) &&
-      (!isCompleteLinearTrigger(current.trigger) || !linearTriggerFiltersComplete(current.trigger)))
+    (!isRoutineEditorScheduleTrigger(current.trigger) && current.trigger.kind !== "linear")
   ) {
     return null;
   }
@@ -280,6 +292,17 @@ export function applyRoutineDraftGenerationResponse(
   return { status: "applied", draft: reviewDraft, revision: currentRevision + 1 };
 }
 
+/** RPC command results carry the expected failure inside a cause; unwrap it for its message. */
+export function errorMessage(value: unknown): string {
+  const error = Cause.isCause(value) ? Option.getOrNull(Cause.findErrorOption(value)) : value;
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return "The routine request failed. Try again.";
+}
+
 /** Fail closed when the themed confirm host is not registered yet (`undefined`). */
 export function confirmDialogAccepted(result: boolean | undefined): boolean {
   return result === true;
@@ -315,83 +338,115 @@ export function isRoutineEditorScheduleTrigger(
   return SCHEDULE_TRIGGER_KINDS.has(trigger.kind);
 }
 
-export function isCompleteGitHubTrigger(
+export function isRoutineEditorTriggerComplete(
   trigger: RoutineEditorTrigger,
-): trigger is GitHubEventTrigger {
-  return trigger.kind === "github" && "connectionId" in trigger && "repositoryId" in trigger;
-}
-
-export function isCompleteLinearTrigger(
-  trigger: RoutineEditorTrigger,
-): trigger is LinearEventTrigger {
-  return trigger.kind === "linear" && "connectionId" in trigger && "workspaceId" in trigger;
-}
-
-/** Update events are complete only after the user selects their transition filter. */
-export function linearTriggerFiltersComplete(trigger: RoutineEditorTrigger): boolean {
-  if (trigger.kind !== "linear") return true;
-  if (trigger.event === "status_changed")
-    return (
-      "stateId" in trigger &&
-      typeof trigger.stateId === "string" &&
-      trigger.stateId.trim().length > 0
-    );
-  if (trigger.event === "label_added")
-    return (
-      "labelId" in trigger &&
-      typeof trigger.labelId === "string" &&
-      trigger.labelId.trim().length > 0
-    );
-  return true;
+): trigger is RoutineTrigger {
+  return trigger.kind !== "github-draft" && trigger.kind !== "linear-draft";
 }
 
 export function isRoutineEditorDraftComplete(draft: RoutineEditorDraft): draft is RoutineDraft {
-  return (
-    isRoutineEditorScheduleTrigger(draft.trigger) ||
-    isCompleteGitHubTrigger(draft.trigger) ||
-    isCompleteLinearTrigger(draft.trigger)
-  );
+  return isRoutineEditorTriggerComplete(draft.trigger);
 }
 
 export function routineTriggerKind(trigger: RoutineEditorTrigger): RoutineTriggerKind {
   if (isRoutineEditorScheduleTrigger(trigger)) return "schedule";
-  return trigger.kind === "linear" ? "linear" : "github";
+  return trigger.kind === "linear" || trigger.kind === "linear-draft" ? "linear" : "github";
 }
+
+/** What the GitHub trigger fields edit. A key set to `undefined` clears that filter. */
+export type GitHubTriggerInput = {
+  readonly connectionId?: RoutineConnectionId | undefined;
+  readonly repositoryId?: number | undefined;
+  readonly event: GitHubRoutineEvent;
+  readonly branch?: string | undefined;
+  readonly includeDrafts: boolean;
+  readonly issueLabelId?: number | undefined;
+};
+
+/** A key set to `undefined` clears that filter; an absent key leaves it alone. */
+export type GitHubTriggerPatch = Partial<Omit<GitHubTriggerInput, "connectionId" | "repositoryId">>;
 
 /**
  * Branch filters apply to pull requests and workflows; label filters apply to
  * issues. Dropping the filter an event cannot use keeps a hidden value from
- * silently blocking every delivery, and a key cleared to `undefined` is
- * removed so it cannot come back from the previously saved value.
+ * silently blocking every delivery. Keys follow the contract schema's order
+ * because the dirty check compares serialized drafts.
  */
-export function withApplicableTriggerFilters(
-  trigger: RoutineEditorGitHubTrigger,
-): RoutineEditorGitHubTrigger {
-  const omitted = trigger.event === "issue_opened" ? "branch" : "issueLabelId";
-  return Object.fromEntries(
-    Object.entries(trigger).filter(([key, value]) => key !== omitted && value !== undefined),
-  ) as RoutineEditorGitHubTrigger;
+export function gitHubEditorTrigger(input: GitHubTriggerInput): RoutineEditorGitHubTrigger {
+  const branch = input.event === "issue_opened" ? undefined : input.branch;
+  const issueLabelId = input.event === "issue_opened" ? input.issueLabelId : undefined;
+  const filters = {
+    event: input.event,
+    ...(branch === undefined ? {} : { branch }),
+    includeDrafts: input.includeDrafts,
+    ...(issueLabelId === undefined ? {} : { issueLabelId }),
+  };
+  if (input.connectionId === undefined || input.repositoryId === undefined) {
+    return { kind: "github-draft", ...filters };
+  }
+  return {
+    kind: "github",
+    connectionId: input.connectionId,
+    repositoryId: input.repositoryId,
+    ...filters,
+  };
 }
+
+/** What the Linear trigger fields edit. A key set to `undefined` clears that filter. */
+export type LinearTriggerInput = {
+  readonly connectionId?: RoutineConnectionId | undefined;
+  readonly workspaceId?: string | undefined;
+  readonly teamId?: string | undefined;
+  readonly projectId?: string | undefined;
+  readonly event: LinearRoutineEvent;
+  readonly stateId?: string | undefined;
+  readonly labelId?: string | undefined;
+};
+
+function nonBlank(value: string | undefined): value is string {
+  return value !== undefined && value.trim().length > 0;
+}
+
+/** A key set to `undefined` clears that filter; an absent key leaves it alone. */
+export type LinearTriggerPatch = Partial<Omit<LinearTriggerInput, "connectionId" | "workspaceId">>;
 
 /**
  * A status transition carries the destination state; a label event carries the
  * added label. Dropping the filter the event cannot use keeps a hidden value
- * from silently blocking every delivery, and a key cleared to `undefined` is
- * removed so it cannot come back from the previously saved value.
+ * from silently blocking every delivery. The trigger is complete only with a
+ * connection and the filter its event requires. Keys follow the contract
+ * schema's order because the dirty check compares serialized drafts.
  */
-export function withApplicableLinearTriggerFilters(
-  trigger: RoutineEditorLinearTrigger,
-): RoutineEditorLinearTrigger {
-  const omitted = new Set(
-    trigger.event === "status_changed"
-      ? ["labelId"]
-      : trigger.event === "label_added"
-        ? ["stateId"]
-        : ["stateId", "labelId"],
-  );
-  return Object.fromEntries(
-    Object.entries(trigger).filter(([key, value]) => !omitted.has(key) && value !== undefined),
-  ) as RoutineEditorLinearTrigger;
+export function linearEditorTrigger(input: LinearTriggerInput): RoutineEditorLinearTrigger {
+  const scope = {
+    ...(input.teamId === undefined ? {} : { teamId: input.teamId }),
+    ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+  };
+  const stateId = input.event === "status_changed" ? input.stateId : undefined;
+  const labelId = input.event === "label_added" ? input.labelId : undefined;
+  const { connectionId, workspaceId } = input;
+  if (connectionId !== undefined && workspaceId !== undefined) {
+    const connected = { kind: "linear", connectionId, workspaceId, ...scope } as const;
+    switch (input.event) {
+      case "issue_created":
+        return { ...connected, event: "issue_created" };
+      case "status_changed":
+        if (nonBlank(stateId)) return { ...connected, event: "status_changed", stateId };
+        break;
+      case "label_added":
+        if (nonBlank(labelId)) return { ...connected, event: "label_added", labelId };
+        break;
+    }
+  }
+  return {
+    kind: "linear-draft",
+    ...(connectionId === undefined ? {} : { connectionId }),
+    ...(workspaceId === undefined ? {} : { workspaceId }),
+    ...scope,
+    event: input.event,
+    ...(stateId === undefined ? {} : { stateId }),
+    ...(labelId === undefined ? {} : { labelId }),
+  };
 }
 
 export function formatRoutineTrigger(trigger: RoutineTrigger): string {
@@ -424,30 +479,46 @@ export function defaultGitHubTrigger(connection: GitHubRoutineConnection): GitHu
   };
 }
 
+export function defaultGitHubTriggerDraft(): GitHubTriggerDraft {
+  return { kind: "github-draft", event: "pr_opened", includeDrafts: false };
+}
+
 export function defaultLinearTrigger(connection: LinearRoutineConnection): LinearEventTrigger {
   return {
     kind: "linear",
     connectionId: connection.id,
     workspaceId: connection.workspaceId,
-    event: "issue_created",
     ...(connection.teamIds.length === 1 ? { teamId: connection.teamIds[0]! } : {}),
+    event: "issue_created",
   };
 }
 
 export function defaultLinearTriggerDraft(): LinearTriggerDraft {
-  return { kind: "linear", event: "issue_created" };
+  return { kind: "linear-draft", event: "issue_created" };
 }
 
-export function linearTriggerConnectionId(trigger: RoutineEditorLinearTrigger): string | null {
-  return "connectionId" in trigger ? trigger.connectionId : null;
-}
-
-export function defaultGitHubTriggerDraft(): GitHubTriggerDraft {
-  return {
-    kind: "github",
-    event: "pr_opened",
-    includeDrafts: false,
-  };
+/**
+ * Switching to an event kind starts from the first selectable connection's
+ * default, or a draft when none exists. Switching back to Schedule restores
+ * the schedule the editor held before it left.
+ */
+export function switchRoutineEditorTrigger(
+  current: RoutineEditorTrigger,
+  kind: RoutineTriggerKind,
+  options: {
+    readonly githubConnections: readonly GitHubRoutineConnection[];
+    readonly linearConnections: readonly LinearRoutineConnection[];
+    readonly returnSchedule: ScheduleTrigger;
+  },
+): RoutineEditorTrigger {
+  if (kind === routineTriggerKind(current)) return current;
+  if (kind === "schedule") return options.returnSchedule;
+  if (kind === "github") {
+    const first = options.githubConnections[0];
+    return first ? defaultGitHubTrigger(first) : defaultGitHubTriggerDraft();
+  }
+  const first = options.linearConnections[0];
+  return first ? defaultLinearTrigger(first) : defaultLinearTriggerDraft();
 }
 
 /** Connections a new trigger may target; disabled ones stay listed only when already saved. */
