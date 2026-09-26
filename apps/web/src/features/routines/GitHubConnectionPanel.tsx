@@ -21,7 +21,6 @@ import {
   ROUTINE_DELIVERY_STATUS_LABELS,
 } from "./RoutinesPage.logic";
 
-/** Repository connection picker, webhook setup, and connection diagnostics. */
 export function GitHubConnectionPanel({
   environmentId,
   connections,

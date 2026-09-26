@@ -23,7 +23,6 @@ import {
   type RoutineEditorLinearTrigger,
 } from "./RoutinesPage.logic";
 
-/** GitHub event and the filters that event supports. */
 export function GitHubTriggerFields({
   trigger,
   defaultBranch,
@@ -318,7 +317,6 @@ function formatDateInTimezone(value: string, timezone: string): string {
   }
 }
 
-/** Schedule kind, its time or cron fields, the timezone, and the next-runs preview. */
 export function ScheduleTriggerFields({
   environmentId,
   trigger,
