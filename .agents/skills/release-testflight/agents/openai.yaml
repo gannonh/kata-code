@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release TestFlight"
+  short_description: "Ship a Kata Code iOS build to TestFlight"
+  default_prompt: "Use $release-testflight to dispatch the Mobile TestFlight workflow on main, watch it, and report the uploaded version and build."
