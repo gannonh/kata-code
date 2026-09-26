@@ -146,17 +146,22 @@ describe("UsageService", () => {
   it.live("does not send a Cursor login to cursor.com when a custom endpoint is configured", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
-      const authPath = NodePath.join(home, "config", "cursor", "auth.json");
       const payload = Buffer.from(encodeUnknownJsonString({ sub: "auth0|user_1" })).toString(
         "base64url",
       );
-      yield* Effect.promise(async () => {
-        await NodeFSP.mkdir(NodePath.dirname(authPath), { recursive: true });
-        await NodeFSP.writeFile(
-          authPath,
-          encodeUnknownJsonString({ accessToken: `header.${payload}.signature` }),
-        );
-      });
+      // Linux and Windows file logins; APPDATA points at the same config directory.
+      for (const authPath of [
+        NodePath.join(home, "config", "cursor", "auth.json"),
+        NodePath.join(home, "config", "Cursor", "auth.json"),
+      ]) {
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.dirname(authPath), { recursive: true });
+          await NodeFSP.writeFile(
+            authPath,
+            encodeUnknownJsonString({ accessToken: `header.${payload}.signature` }),
+          );
+        });
+      }
       const fetchSpy = vi.spyOn(globalThis, "fetch");
       yield* Effect.addFinalizer(() => Effect.sync(() => fetchSpy.mockRestore()));
       for (const [index, testCase] of [
@@ -171,6 +176,26 @@ describe("UsageService", () => {
           environment: {},
         },
         { settings, environment: { CURSOR_API_ENDPOINT: "https://cursor.example.test/" } },
+        {
+          settings: {
+            ...settings,
+            providerInstances: {
+              [ProviderInstanceId.make("cursor")]: {
+                driver: ProviderDriverKind.make("cursor"),
+                config: {},
+                environment: [
+                  {
+                    name: "cursor_api_endpoint",
+                    value: "https://cursor.example.test",
+                    sensitive: false,
+                  },
+                ],
+              },
+            },
+          },
+          environment: {},
+          platform: "win32" as const,
+        },
       ].entries()) {
         const service = yield* UsageService.make.pipe(
           Effect.provide(
@@ -179,6 +204,7 @@ describe("UsageService", () => {
               home,
               settings: testCase.settings,
               environment: testCase.environment,
+              ...("platform" in testCase ? { platform: testCase.platform } : {}),
             }),
           ),
         );

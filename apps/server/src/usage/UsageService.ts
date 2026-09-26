@@ -626,16 +626,24 @@ export const make = Effect.gen(function* () {
     if (!Object.hasOwn(settings.providerInstances, "cursor")) {
       cursorInstances.push({ config: settings.providers.cursor });
     }
+    const isCustomCursorEndpoint = (value: string | undefined) => {
+      const endpoint = value?.trim().replace(/\/$/, "");
+      return Boolean(endpoint) && endpoint !== DEFAULT_CURSOR_API_ENDPOINT;
+    };
     const customCursorEndpoint = cursorInstances.some((instance) => {
       const configured = (instance.config as { readonly apiEndpoint?: unknown } | undefined)
         ?.apiEndpoint;
-      const endpoint =
-        (typeof configured === "string" ? configured.trim() : "") ||
-        mergeProviderInstanceEnvironment(instance.environment, hostEnvironment)[
-          "CURSOR_API_ENDPOINT"
-        ]?.trim() ||
-        DEFAULT_CURSOR_API_ENDPOINT;
-      return endpoint.replace(/\/$/, "") !== DEFAULT_CURSOR_API_ENDPOINT;
+      if (typeof configured === "string" && configured.trim()) {
+        return isCustomCursorEndpoint(configured);
+      }
+      const environment = mergeProviderInstanceEnvironment(instance.environment, hostEnvironment);
+      // Windows variable names are case-insensitive, so any casing can set it.
+      return platform === "win32"
+        ? Object.entries(environment).some(
+            ([name, value]) =>
+              name.toUpperCase() === "CURSOR_API_ENDPOINT" && isCustomCursorEndpoint(value),
+          )
+        : isCustomCursorEndpoint(environment["CURSOR_API_ENDPOINT"]);
     });
     const cursorUntilMs = yield* Clock.currentTimeMillis;
     const account = loginUnavailable
