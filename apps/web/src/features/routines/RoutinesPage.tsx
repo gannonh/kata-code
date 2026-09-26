@@ -102,12 +102,15 @@ import {
   selectableConnections,
   switchRoutineEditorTrigger,
   worktreeWorkspace,
+  type GitHubTriggerPatch,
   type RoutineEditorDraft,
   type RoutineEditorGitHubTrigger,
   type RoutineEditorLinearTrigger,
   type RoutineTriggerKind,
 } from "./RoutinesPage.logic";
 import { FieldLabel } from "./FieldLabel";
+import { GitHubConnectionPanel } from "./GitHubConnectionPanel";
+import { GitHubTriggerFields } from "./RoutineTriggerFields";
 import { RoutineChat } from "./RoutineChat";
 
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
@@ -303,14 +306,6 @@ function RoutineCard({
 }
 
 /** A key set to `undefined` clears that filter; an absent key leaves it alone. */
-type GitHubTriggerPatch = {
-  readonly event?: GitHubEventTrigger["event"];
-  readonly branch?: string | undefined;
-  readonly includeDrafts?: boolean;
-  readonly issueLabelId?: number | undefined;
-};
-
-/** A key set to `undefined` clears that filter; an absent key leaves it alone. */
 type LinearTriggerPatch = {
   readonly event?: LinearEventTrigger["event"];
   readonly teamId?: string | undefined;
@@ -319,7 +314,7 @@ type LinearTriggerPatch = {
   readonly labelId?: string | undefined;
 };
 
-function GitHubTriggerFields({
+function GitHubTriggerSection({
   environmentId,
   trigger,
   connections,
@@ -338,316 +333,34 @@ function GitHubTriggerFields({
   readonly onTriggerChange: (patch: GitHubTriggerPatch) => void;
   readonly onConnectionChange: (connection: GitHubRoutineConnection) => void;
 }) {
-  const createConnection = useAtomCommand(routineEnvironment.createConnection, {
-    reportFailure: false,
-  });
-  const verifyConnection = useAtomCommand(routineEnvironment.verifyConnection, {
-    reportFailure: false,
-  });
-  const disableConnection = useAtomCommand(routineEnvironment.disableConnection, {
-    reportFailure: false,
-  });
-  const rotateSecret = useAtomCommand(routineEnvironment.rotateConnectionSecret, {
-    reportFailure: false,
-  });
-  const [repository, setRepository] = useState("");
-  const [setupMessage, setSetupMessage] = useState<string | null>(null);
   const [setupBusy, setSetupBusy] = useState(false);
-  const [showSetup, setShowSetup] = useState(connections.length === 0);
   const metadata = useEnvironmentQuery(
     routineEnvironment.gitHubMetadata({
       environmentId,
       input: selectedConnection ? { repository: selectedConnection.repositoryName } : {},
     }),
   );
-  const repositoryNames = metadata.data?.repositories.map((entry) => entry.nameWithOwner) ?? [];
-  const branches = metadata.data?.repository?.branches ?? [];
-  const labels = metadata.data?.repository?.labels ?? [];
   const disabled = offline || busy || setupBusy;
-
-  const runSetup = async () => {
-    const name = repository.trim();
-    if (!name || disabled) return;
-    setSetupBusy(true);
-    setSetupMessage("Creating the webhook through GitHub…");
-    const id = RoutineConnectionId.make(`connection-${Date.now().toString(36)}`);
-    const created = await createConnection({
-      environmentId,
-      input: { provider: "github", id, repository: name },
-    });
-    if (created._tag === "Failure") {
-      setSetupBusy(false);
-      setSetupMessage(errorMessage(created.cause));
-      return;
-    }
-    if (created.value.provider !== "github") {
-      setSetupBusy(false);
-      setSetupMessage("The environment did not return a GitHub connection.");
-      return;
-    }
-    onConnectionChange(created.value);
-    setSetupMessage(`Webhook created. Waiting for GitHub to ping ${created.value.callbackUrl}…`);
-    const verified = await verifyConnection({ environmentId, input: { id } });
-    setSetupBusy(false);
-    if (verified._tag === "Failure") {
-      setSetupMessage(errorMessage(verified.cause));
-      return;
-    }
-    setSetupMessage(
-      verified.value.status === "verified"
-        ? "GitHub ping received. The connection is ready."
-        : "GitHub has not pinged the callback yet. Check the tunnel and the repository's webhook settings.",
-    );
-    setShowSetup(false);
-  };
-
-  const runConnectionAction = async (action: "verify" | "disable" | "rotate") => {
-    if (!selectedConnection || disabled) return;
-    setSetupBusy(true);
-    setSetupMessage(null);
-    const input = { environmentId, input: { id: selectedConnection.id } };
-    const result =
-      action === "verify"
-        ? await verifyConnection(input)
-        : action === "disable"
-          ? await disableConnection(input)
-          : await rotateSecret(input);
-    setSetupBusy(false);
-    setSetupMessage(
-      result._tag === "Failure"
-        ? errorMessage(result.cause)
-        : action === "verify"
-          ? result.value.status === "verified"
-            ? "GitHub ping received."
-            : "No GitHub ping arrived yet."
-          : action === "disable"
-            ? "Connection disabled. New deliveries are rejected."
-            : "Signing secret rotated. The old secret no longer verifies.",
-    );
-  };
-
-  const hookSettingsUrl = selectedConnection ? gitHubHookSettingsUrl(selectedConnection) : null;
-  const lastDelivery = selectedConnection?.lastDelivery ?? null;
-
   return (
     <div className="grid gap-2" data-testid="routine-github-trigger">
-      <div className="grid gap-1.5">
-        <FieldLabel htmlFor="routine-connection">Repository connection</FieldLabel>
-        <select
-          id="routine-connection"
-          className={ROUTINE_CONTROL_CLASS}
-          value={selectedConnection?.id ?? ""}
-          disabled={disabled}
-          onChange={(event) => {
-            const next = connections.find((candidate) => candidate.id === event.target.value);
-            if (next) onConnectionChange(next);
-          }}
-        >
-          {connections.length === 0 ? <option value="">No connected repository</option> : null}
-          {connections.map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>
-              {candidate.repositoryName} · {ROUTINE_CONNECTION_STATUS_LABELS[candidate.status]}
-            </option>
-          ))}
-        </select>
-        <Button
-          size="sm"
-          variant="outline"
-          className="justify-self-start"
-          onClick={() => setShowSetup((value) => !value)}
-          disabled={disabled}
-        >
-          <PlusIcon className="size-3.5" /> Connect a repository
-        </Button>
-      </div>
-      {showSetup ? (
-        <div className="grid gap-2 rounded-lg border border-border/50 bg-background/60 p-3">
-          <FieldLabel htmlFor="routine-repository">GitHub repository (owner/name)</FieldLabel>
-          <Input
-            id="routine-repository"
-            list="routine-repository-options"
-            value={repository}
-            onValueChange={setRepository}
-            placeholder="acme/widgets"
-            disabled={disabled}
-          />
-          <datalist id="routine-repository-options">
-            {repositoryNames.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-          <p className="text-xs text-muted-foreground">
-            Kata creates the repository webhook with <code>gh api</code> and waits for GitHub's
-            ping. You need admin access to the repository and a Kata Code Connect managed tunnel.
-            The signing secret is generated on this environment and never shown.
-          </p>
-          <Button
-            size="sm"
-            className="justify-self-start"
-            onClick={() => void runSetup()}
-            disabled={disabled || repository.trim().length === 0}
-          >
-            <WebhookIcon className="size-3.5" /> {setupBusy ? "Working…" : "Create webhook"}
-          </Button>
-        </div>
-      ) : null}
-      {setupMessage ? (
-        <p className="text-xs text-muted-foreground" role="status">
-          {setupMessage}
-        </p>
-      ) : null}
-      {selectedConnection ? (
-        <div
-          className="grid gap-1 rounded-lg border border-border/50 bg-background/60 p-3 text-xs"
-          data-testid="routine-connection-diagnostics"
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-medium">
-              <a
-                className="text-primary hover:underline"
-                href={selectedConnection.repositoryUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {selectedConnection.repositoryName}
-              </a>
-            </span>
-            <Badge variant="outline" size="sm">
-              {ROUTINE_CONNECTION_STATUS_LABELS[selectedConnection.status]}
-            </Badge>
-          </div>
-          <span className="break-all text-muted-foreground">
-            Callback: {selectedConnection.callbackUrl}
-          </span>
-          <span className="text-muted-foreground">
-            Hook id: {selectedConnection.hookId ?? "none"} · Accepted{" "}
-            {selectedConnection.acceptedCount} · Ignored {selectedConnection.ignoredCount} ·
-            Rejected {selectedConnection.rejectedCount}
-          </span>
-          <span className="text-muted-foreground">
-            Last delivery:{" "}
-            {lastDelivery
-              ? `${ROUTINE_DELIVERY_STATUS_LABELS[lastDelivery.status]} · ${lastDelivery.event} · ${new Date(lastDelivery.receivedAt).toLocaleString()}${lastDelivery.detail ? ` · ${lastDelivery.detail}` : ""}`
-              : "none yet"}
-          </span>
-          <span className="text-muted-foreground">
-            {GITHUB_REDELIVERY_NOTE}{" "}
-            {hookSettingsUrl ? (
-              <a
-                className="text-primary hover:underline"
-                href={hookSettingsUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Open delivery history
-              </a>
-            ) : null}
-          </span>
-          <div className="mt-1 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void runConnectionAction("verify")}
-              disabled={disabled || selectedConnection.status === "disabled"}
-            >
-              <RotateCcwIcon className="size-3.5" /> Check ping
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void runConnectionAction("rotate")}
-              disabled={disabled || selectedConnection.status === "disabled"}
-            >
-              Rotate secret
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void runConnectionAction("disable")}
-              disabled={disabled || selectedConnection.status === "disabled"}
-            >
-              <Trash2Icon className="size-3.5 text-destructive" /> Disable
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      <div className="grid gap-1.5">
-        <FieldLabel htmlFor="routine-github-event">Event</FieldLabel>
-        <select
-          id="routine-github-event"
-          className={ROUTINE_CONTROL_CLASS}
-          value={trigger.event}
-          disabled={disabled}
-          onChange={(event) => onTriggerChange({ event: event.target.value as GitHubRoutineEvent })}
-        >
-          {(Object.entries(GITHUB_ROUTINE_EVENT_LABELS) as [GitHubRoutineEvent, string][]).map(
-            ([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ),
-          )}
-        </select>
-      </div>
-      {trigger.event !== "issue_opened" ? (
-        <div className="grid gap-1.5">
-          <FieldLabel htmlFor="routine-github-branch">
-            {trigger.event === "workflow_failed" ? "Head branch" : "Base branch"} (blank for any)
-          </FieldLabel>
-          <Input
-            id="routine-github-branch"
-            list="routine-branch-options"
-            value={trigger.branch ?? ""}
-            onValueChange={(value) =>
-              onTriggerChange({ branch: value.trim().length === 0 ? undefined : value })
-            }
-            placeholder={selectedConnection?.defaultBranch ?? "main"}
-            disabled={disabled}
-          />
-          <datalist id="routine-branch-options">
-            {branches.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-        </div>
-      ) : null}
-      {trigger.event === "pr_opened" || trigger.event === "pr_updated" ? (
-        <label className="flex items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={trigger.includeDrafts}
-            disabled={disabled}
-            onChange={(event) => onTriggerChange({ includeDrafts: event.target.checked })}
-          />
-          Include draft pull requests
-        </label>
-      ) : null}
-      {trigger.event === "issue_opened" ? (
-        <div className="grid gap-1.5">
-          <FieldLabel htmlFor="routine-github-label">Issue label (any when unset)</FieldLabel>
-          <select
-            id="routine-github-label"
-            className={ROUTINE_CONTROL_CLASS}
-            value={trigger.issueLabelId === undefined ? "" : String(trigger.issueLabelId)}
-            disabled={disabled}
-            onChange={(event) => {
-              const value = event.target.value;
-              onTriggerChange({ issueLabelId: value === "" ? undefined : Number(value) });
-            }}
-          >
-            <option value="">Any label</option>
-            {labels.map((label) => (
-              <option key={label.id} value={String(label.id)}>
-                {label.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      ) : null}
-      <p className="text-xs text-muted-foreground">
-        Filters use GitHub's stable ids, so renamed repositories and labels keep matching. Event
-        text is passed to the routine as untrusted context under the saved instruction.
-      </p>
+      <GitHubConnectionPanel
+        environmentId={environmentId}
+        connections={connections}
+        selectedConnection={selectedConnection}
+        repositoryNames={metadata.data?.repositories.map((entry) => entry.nameWithOwner) ?? []}
+        disabled={disabled}
+        setupBusy={setupBusy}
+        onSetupBusyChange={setSetupBusy}
+        onConnectionChange={onConnectionChange}
+      />
+      <GitHubTriggerFields
+        trigger={trigger}
+        defaultBranch={selectedConnection?.defaultBranch}
+        branches={metadata.data?.repository?.branches ?? []}
+        labels={metadata.data?.repository?.labels ?? []}
+        disabled={disabled}
+        onTriggerChange={onTriggerChange}
+      />
     </div>
   );
 }
@@ -1859,7 +1572,7 @@ function RoutineEditor({
               </Button>
             </div>
             {gitHubTrigger !== null ? (
-              <GitHubTriggerFields
+              <GitHubTriggerSection
                 environmentId={draft.environmentId}
                 trigger={gitHubTrigger}
                 connections={githubConnections}

@@ -363,6 +363,9 @@ export type GitHubTriggerInput = {
   readonly issueLabelId?: number | undefined;
 };
 
+/** A key set to `undefined` clears that filter; an absent key leaves it alone. */
+export type GitHubTriggerPatch = Partial<Omit<GitHubTriggerInput, "connectionId" | "repositoryId">>;
+
 /**
  * Branch filters apply to pull requests and workflows; label filters apply to
  * issues. Dropping the filter an event cannot use keeps a hidden value from
