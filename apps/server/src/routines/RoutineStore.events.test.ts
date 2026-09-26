@@ -418,7 +418,10 @@ it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
         assert.equal(wrongRepository.reason, "wrong-resource");
         assert.equal(wrongRepository.detail, "Delivery names a different repository.");
       }
-      yield* store.updateConnection(id, (current) => ({ ...current, status: "disabled" }));
+      yield* store.updateConnection(environmentId, id, (current) => ({
+        ...current,
+        status: "disabled",
+      }));
       const disabled = yield* store.admitEvent({
         connectionId: id,
         ...prOpened(2, "delivery-disabled"),
@@ -728,7 +731,10 @@ it.layer(storeLayer)("RoutineStore Linear events", (it) => {
         assert.equal(otherTeam.runs.length, 0);
         const afterTeam = yield* store.getConnection(environmentId, id);
         assert.include(afterTeam.lastDelivery?.detail ?? "", "team");
-        yield* store.updateConnection(id, (current) => ({ ...current, status: "disabled" }));
+        yield* store.updateConnection(environmentId, id, (current) => ({
+          ...current,
+          status: "disabled",
+        }));
         const disabled = yield* store.admitEvent({
           connectionId: id,
           ...linearEvent("linear-delivery-disabled", linearPayload("create", {})),

@@ -3,9 +3,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   EnvironmentId,
+  RoutineConnection,
   RoutineConnectionId,
   RoutineError,
-  type RoutineConnection,
   type RoutineLinearMetadata,
 } from "@kata-sh/code-contracts";
 import type { RelayLinearAccessToken } from "@kata-sh/code-contracts/relay";
@@ -68,6 +68,7 @@ const decodeHookConfigPayload = Schema.decodeUnknownEffect(
     }),
   ),
 );
+const decodeConnectionRecord = Schema.decodeUnknownEffect(Schema.fromJsonString(RoutineConnection));
 const output = (stdout: string): VcsProcess.VcsProcessOutput => ({
   exitCode: ChildProcessSpawner.ExitCode(0),
   stdout,
@@ -503,6 +504,42 @@ it.layer(layer)("RoutineConnections", (it) => {
       const after = Option.getOrThrow(yield* secrets.get(routineConnectionSecretName(id)));
       assert.deepEqual(Buffer.from(after), Buffer.from(before));
     }),
+  );
+
+  it.effect(
+    "verifies, rotates, and disables a copied connection only through the environment that owns its row",
+    () =>
+      Effect.gen(function* () {
+        const connections = yield* RoutineConnections;
+        const sql = yield* SqlClient.SqlClient;
+        const owner = EnvironmentId.make("routine-connections-copy-target");
+        const id = RoutineConnectionId.make("connection-copied-actions");
+        yield* connections.create({
+          environmentId,
+          provider: "github",
+          id,
+          repository: "acme/widgets",
+        });
+        yield* sql`UPDATE routine_connections SET environment_id=${owner} WHERE id=${id}`;
+        const codeOf = <A>(effect: Effect.Effect<A, RoutineError>) =>
+          effect.pipe(
+            Effect.match({ onFailure: (error) => error.code, onSuccess: () => "success" as const }),
+          );
+        assert.equal(yield* codeOf(connections.rotateSecret({ environmentId, id })), "not-found");
+        assert.equal(yield* codeOf(connections.disable({ environmentId, id })), "not-found");
+        assert.equal(yield* codeOf(connections.verify({ environmentId, id })), "not-found");
+        const rotated = yield* connections.rotateSecret({ environmentId: owner, id });
+        assert.equal(rotated.environmentId, owner);
+        const disabled = yield* connections.disable({ environmentId: owner, id });
+        assert.deepEqual([disabled.status, disabled.environmentId], ["disabled", owner]);
+        const verified = yield* connections.verify({ environmentId: owner, id });
+        assert.deepEqual([verified.status, verified.environmentId], ["disabled", owner]);
+        const stored = yield* sql<{
+          record: string;
+        }>`SELECT record FROM routine_connections WHERE id=${id}`;
+        const record = yield* decodeConnectionRecord(stored[0]!.record);
+        assert.equal(record.environmentId, owner);
+      }),
   );
 
   it.effect("releases the reserved secret when setup fails so the id can be retried", () =>

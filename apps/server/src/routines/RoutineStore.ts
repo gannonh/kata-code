@@ -168,17 +168,31 @@ export const makeRoutineStore = Effect.gen(function* () {
       catch: persistenceError,
     });
   };
+  const connectionOfRow = (row: {
+    readonly record: string;
+    readonly environmentId: EnvironmentId;
+  }) => withOwningEnvironment(row.environmentId, decodeConnection(row.record));
+  /** Callback lookup by id alone; the caller verifies the signature before trusting anything else. */
+  const findConnection = (id: string) =>
+    sql<{
+      record: string;
+      environmentId: EnvironmentId;
+    }>`SELECT record, environment_id AS environmentId FROM routine_connections WHERE id = ${id}`.pipe(
+      Effect.flatMap((rows) =>
+        rows[0]
+          ? Effect.try({ try: () => connectionOfRow(rows[0]!), catch: persistenceError })
+          : Effect.succeed<RoutineConnection | null>(null),
+      ),
+      Effect.mapError(persistenceError),
+    );
   const readConnection = (id: string) =>
-    Effect.gen(function* () {
-      const rows = yield* sql<{
-        record: string;
-      }>`SELECT record FROM routine_connections WHERE id = ${id}`;
-      if (!rows[0]) return yield* failure("not-found", "Connection no longer exists.");
-      return yield* Effect.try({
-        try: () => decodeConnection(rows[0]!.record),
-        catch: persistenceError,
-      });
-    });
+    findConnection(id).pipe(
+      Effect.flatMap((connection) =>
+        connection === null
+          ? Effect.fail(failure("not-found", "Connection no longer exists."))
+          : Effect.succeed(connection),
+      ),
+    );
   const writeConnection = (
     connection: RoutineConnection,
   ) => sql`INSERT INTO routine_connections (id, environment_id, status, record)
@@ -195,14 +209,10 @@ export const makeRoutineStore = Effect.gen(function* () {
       if (isScheduleTrigger(trigger)) return;
       const rows = yield* sql<{
         record: string;
-      }>`SELECT record FROM routine_connections WHERE id = ${trigger.connectionId}`;
+      }>`SELECT record FROM routine_connections WHERE id = ${trigger.connectionId} AND environment_id = ${environmentId}`;
       const connection = rows[0] ? decodeConnection(rows[0].record) : undefined;
       if (trigger.kind === "github") {
-        if (
-          !connection ||
-          connection.environmentId !== environmentId ||
-          connection.provider !== "github"
-        )
+        if (!connection || connection.provider !== "github")
           return yield* failure("validation", "Connect the GitHub repository before saving.");
         if (connection.status === "disabled")
           return yield* failure("validation", "This GitHub connection is disabled.");
@@ -213,11 +223,7 @@ export const makeRoutineStore = Effect.gen(function* () {
           );
         return;
       }
-      if (
-        !connection ||
-        connection.environmentId !== environmentId ||
-        connection.provider !== "linear"
-      )
+      if (!connection || connection.provider !== "linear")
         return yield* failure("validation", "Connect the Linear workspace before saving.");
       if (connection.status === "disabled")
         return yield* failure("validation", "This Linear connection is disabled.");
@@ -568,7 +574,7 @@ export const makeRoutineStore = Effect.gen(function* () {
     }>`SELECT record FROM routine_connections WHERE environment_id=${environmentId} ORDER BY id`.pipe(
       Effect.flatMap((rows) =>
         Effect.try({
-          try: () => rows.map((row) => decodeConnection(row.record)),
+          try: () => rows.map((row) => connectionOfRow({ record: row.record, environmentId })),
           catch: persistenceError,
         }),
       ),
@@ -582,16 +588,6 @@ export const makeRoutineStore = Effect.gen(function* () {
       ),
       Effect.mapError(persistenceError),
     );
-  /** Callback lookup by id alone; the caller verifies the signature before trusting anything else. */
-  const findConnection = (id: string) =>
-    sql<{ record: string }>`SELECT record FROM routine_connections WHERE id = ${id}`.pipe(
-      Effect.flatMap((rows) =>
-        rows[0]
-          ? Effect.try({ try: () => decodeConnection(rows[0]!.record), catch: persistenceError })
-          : Effect.succeed<RoutineConnection | null>(null),
-      ),
-      Effect.mapError(persistenceError),
-    );
   const saveConnection = (connection: RoutineConnection) =>
     transaction(
       sql`INSERT INTO routine_connections (id, environment_id, status, record)
@@ -599,18 +595,23 @@ export const makeRoutineStore = Effect.gen(function* () {
         Effect.andThen(recordChange(connection.environmentId)),
       ),
     );
-  const updateConnection = (
-    id: string,
+  const patchConnection = (
+    read: Effect.Effect<RoutineConnection, RoutineError>,
     patch: (connection: RoutineConnection) => RoutineConnection,
   ) =>
     transaction(
       Effect.gen(function* () {
-        const next = patch(yield* readConnection(id));
+        const next = patch(yield* read);
         yield* writeConnection(next);
         yield* recordChange(next.environmentId);
         return next;
       }),
     );
+  const updateConnection = (
+    environmentId: EnvironmentId,
+    id: string,
+    patch: (connection: RoutineConnection) => RoutineConnection,
+  ) => patchConnection(getConnection(environmentId, id), patch);
   const rejectionChangeAt = new Map<string, number>();
   const recordRejectedDelivery = (
     connectionId: string,

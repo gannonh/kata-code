@@ -225,8 +225,10 @@ export const relayLinearOAuthTokens = pgTable(
     userId: varchar("user_id", { length: 191 }).notNull(),
     environmentId: varchar("environment_id", { length: 191 }).notNull(),
     connectionId: varchar("connection_id", { length: 128 }).notNull(),
-    accessToken: text("access_token").notNull(),
-    refreshToken: text("refresh_token").notNull(),
+    // AES-256-GCM over the JSON access/refresh token pair, base64 encoded.
+    tokenCiphertext: text("token_ciphertext").notNull(),
+    tokenNonce: varchar("token_nonce", { length: 16 }).notNull(),
+    keyVersion: integer("key_version").notNull(),
     expiresAt: bigint("expires_at", { mode: "number" }).notNull(),
     scope: text("scope").notNull(),
     createdAt: varchar("created_at", { length: 64 }).notNull(),
