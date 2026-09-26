@@ -34,6 +34,11 @@ const linearOAuthActiveStateMigration = NodeFS.readFileSync(
   "utf8",
 );
 
+const linearOAuthTokenEncryptionMigration = NodeFS.readFileSync(
+  new URL("20260926004121_linear_oauth_token_encryption/migration.sql", postgresMigrationsDir),
+  "utf8",
+);
+
 const productionAppliedArchiveMigrations = [
   {
     file: "20260712150134_environment_link_leases/migration.sql",
@@ -68,14 +73,32 @@ describe("relay persisted schema reconciliation", () => {
     expect("codeVerifier" in relayLinearOAuthStates).toBe(true);
     expect("consumedAt" in relayLinearOAuthStates).toBe(true);
     expect("stateHash" in relayLinearOAuthStates).toBe(true);
-    expect("accessToken" in relayLinearOAuthTokens).toBe(true);
-    expect("refreshToken" in relayLinearOAuthTokens).toBe(true);
     expect(linearOAuthMigration).toContain('CREATE TABLE "relay_linear_oauth_states"');
     expect(linearOAuthMigration).toContain('"code_verifier" text NOT NULL');
     expect(linearOAuthMigration).toContain('"consumed_at" varchar(64)');
     expect(linearOAuthMigration).toContain('CREATE TABLE "relay_linear_oauth_tokens"');
     expect(linearOAuthMigration).toContain('"access_token" text NOT NULL');
     expect(linearOAuthMigration).toContain('"refresh_token" text NOT NULL');
+  });
+
+  it("stores Linear OAuth tokens only as ciphertext, dropping existing plaintext rows first", () => {
+    expect("tokenCiphertext" in relayLinearOAuthTokens).toBe(true);
+    expect("tokenNonce" in relayLinearOAuthTokens).toBe(true);
+    expect("keyVersion" in relayLinearOAuthTokens).toBe(true);
+    expect("accessToken" in relayLinearOAuthTokens).toBe(false);
+    expect("refreshToken" in relayLinearOAuthTokens).toBe(false);
+
+    const statements = linearOAuthTokenEncryptionMigration
+      .split("--> statement-breakpoint")
+      .map((statement) => statement.trim());
+    expect(statements).toEqual([
+      'DELETE FROM "relay_linear_oauth_tokens";',
+      'ALTER TABLE "relay_linear_oauth_tokens" ADD COLUMN "token_ciphertext" text NOT NULL;',
+      'ALTER TABLE "relay_linear_oauth_tokens" ADD COLUMN "token_nonce" varchar(16) NOT NULL;',
+      'ALTER TABLE "relay_linear_oauth_tokens" ADD COLUMN "key_version" integer NOT NULL;',
+      'ALTER TABLE "relay_linear_oauth_tokens" DROP COLUMN "access_token";',
+      'ALTER TABLE "relay_linear_oauth_tokens" DROP COLUMN "refresh_token";',
+    ]);
   });
 
   it("stores Linear OAuth expiries as epoch milliseconds, which overflow a 32-bit integer", () => {
@@ -150,7 +173,7 @@ describe("relay migration snapshot chain", () => {
   const heads = snapshots.filter(({ snapshot }) => !referenced.has(snapshot.id));
 
   it("has exactly one snapshot head", () => {
-    expect(heads.map(({ dir }) => dir)).toEqual(["20260925143808_merge_upstream_kata_heads"]);
+    expect(heads.map(({ dir }) => dir)).toEqual(["20260926004121_linear_oauth_token_encryption"]);
   });
 
   it("includes both the Linear OAuth tables and managed endpoint recovery in the head", () => {
