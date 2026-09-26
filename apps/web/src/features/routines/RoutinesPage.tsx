@@ -89,6 +89,7 @@ import {
   LINEAR_RETRY_NOTE,
   linearTriggerFiltersComplete,
   linearTriggerConnectionId,
+  newRoutineConnectionId,
   newRoutineDraftId,
   newRoutineRequestId,
   preferredWorktreeBaseBranch,
@@ -412,7 +413,7 @@ function GitHubTriggerFields({
     if (!name || disabled) return;
     setSetupBusy(true);
     setSetupMessage("Creating the webhook through GitHub…");
-    const id = RoutineConnectionId.make(`connection-${Date.now().toString(36)}`);
+    const id = newRoutineConnectionId();
     const created = await createConnection({
       environmentId,
       input: { provider: "github", id, repository: name },
@@ -889,7 +890,7 @@ function LinearTriggerFields({
       (candidate) =>
         candidate !== null && !connections.some((connection) => connection.id === candidate),
     );
-    const id = reusableId ?? RoutineConnectionId.make("connection-" + Date.now().toString(36));
+    const id = reusableId ?? newRoutineConnectionId();
     authorizationRefreshSawPending.current = false;
     setAuthorizationMetadataGate(reusableId === undefined ? "ready" : "required");
     savePendingLinearConnectionId(environmentId, id);
