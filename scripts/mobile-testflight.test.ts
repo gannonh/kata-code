@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   iosBuildNumber,
   missingConnectConfig,
+  normalizePrivateKey,
   resolveAppStoreConnectAuth,
 } from "./mobile-testflight.ts";
 
@@ -54,5 +55,30 @@ describe("missingConnectConfig", () => {
         KATACODE_RELAY_URL: "https://relay.kata.sh",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("normalizePrivateKey", () => {
+  const pem = [
+    "-----BEGIN PRIVATE KEY-----",
+    "A".repeat(64),
+    "B".repeat(64),
+    "CCCC",
+    "-----END PRIVATE KEY-----",
+  ].join("\n");
+
+  it("restores line breaks in a key pasted as one line", () => {
+    expect(normalizePrivateKey(pem.replaceAll("\n", " "))).toBe(pem);
+    expect(normalizePrivateKey(pem.replaceAll("\n", ""))).toBe(pem);
+  });
+
+  it("leaves a well-formed key unchanged", () => {
+    expect(normalizePrivateKey(`${pem}\n`)).toBe(pem);
+  });
+
+  it("rejects a value that is not a PEM private key", () => {
+    expect(() => normalizePrivateKey("93ULL6CC34")).toThrow(
+      "APPLE_API_KEY is not a PEM private key (.p8 contents).",
+    );
   });
 });

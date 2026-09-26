@@ -45,10 +45,22 @@ export function resolveAppStoreConnectAuth(
   }
   return {
     kind: "api-key",
-    key: env.APPLE_API_KEY!.trim(),
+    key: normalizePrivateKey(env.APPLE_API_KEY!),
     keyId: env.APPLE_API_KEY_ID!.trim(),
     issuerId: env.APPLE_API_ISSUER!.trim(),
   };
+}
+
+/**
+ * Rebuilds PEM line structure. 1Password Environments store the `.p8` as one line, and xcodebuild
+ * rejects a key whose base64 body isn't on its own lines.
+ */
+export function normalizePrivateKey(value: string): string {
+  const match = /-----BEGIN PRIVATE KEY-----([\s\S]*?)-----END PRIVATE KEY-----/.exec(value);
+  if (!match) throw new Error("APPLE_API_KEY is not a PEM private key (.p8 contents).");
+  const body = match[1]!.replace(/\s+/g, "");
+  const lines = body.match(/.{1,64}/g) ?? [];
+  return ["-----BEGIN PRIVATE KEY-----", ...lines, "-----END PRIVATE KEY-----"].join("\n");
 }
 
 const CONNECT_VARIABLES = [
