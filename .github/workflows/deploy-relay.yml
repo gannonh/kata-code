@@ -69,6 +69,7 @@ jobs:
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           LINEAR_OAUTH_CLIENT_ID: ${{ secrets.LINEAR_OAUTH_CLIENT_ID }}
           LINEAR_OAUTH_CLIENT_SECRET: ${{ secrets.LINEAR_OAUTH_CLIENT_SECRET }}
+          LINEAR_OAUTH_TOKEN_ENCRYPTION_KEY: ${{ secrets.LINEAR_OAUTH_TOKEN_ENCRYPTION_KEY }}
 
       - name: Apply production relay deploy
         if: ${{ !inputs.dry_run }}
@@ -84,6 +85,7 @@ jobs:
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
           LINEAR_OAUTH_CLIENT_ID: ${{ secrets.LINEAR_OAUTH_CLIENT_ID }}
           LINEAR_OAUTH_CLIENT_SECRET: ${{ secrets.LINEAR_OAUTH_CLIENT_SECRET }}
+          LINEAR_OAUTH_TOKEN_ENCRYPTION_KEY: ${{ secrets.LINEAR_OAUTH_TOKEN_ENCRYPTION_KEY }}
 
       - name: Verify relay public endpoints
         if: ${{ !inputs.dry_run }}
