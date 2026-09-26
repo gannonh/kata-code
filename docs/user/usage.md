@@ -21,6 +21,8 @@ Cursor reads account usage from Cursor's dashboard API using the CLI login saved
 This includes headless Kata Code sessions and desktop usage across machines; the same account counts
 once across connected environments. Without an accessible CLI login, Kata Code shows a
 notice instead of incomplete local totals. Kata Code does not estimate missing tokens from conversation text.
+Account history needs Cursor's default API endpoint. If a Cursor provider or `CURSOR_API_ENDPOINT`
+names another endpoint, Kata Code shows a notice and does not send that login to Cursor.
 On macOS, choose **Enable Cursor usage** on Usage to allow Kata Code to read your existing CLI login
 from Keychain. You can turn it off in **Settings → Providers → Usage providers**. macOS may ask
 you to allow access on the server Mac.

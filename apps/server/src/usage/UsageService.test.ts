@@ -27,6 +27,7 @@ import * as Scheduler from "effect/Scheduler";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -139,6 +140,59 @@ describe("UsageService", () => {
       const cursor = summary.sources.find((source) => source.fingerprint.provider === "cursor");
       assert.strictEqual(cursor?.status, "missing");
       assert.strictEqual(cursor?.action, "enableCursorKeychain");
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("does not send a Cursor login to cursor.com when a custom endpoint is configured", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      const authPath = NodePath.join(home, "config", "cursor", "auth.json");
+      const payload = Buffer.from(encodeUnknownJsonString({ sub: "auth0|user_1" })).toString(
+        "base64url",
+      );
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(NodePath.dirname(authPath), { recursive: true });
+        await NodeFSP.writeFile(
+          authPath,
+          encodeUnknownJsonString({ accessToken: `header.${payload}.signature` }),
+        );
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      yield* Effect.addFinalizer(() => Effect.sync(() => fetchSpy.mockRestore()));
+      for (const [index, testCase] of [
+        {
+          settings: {
+            ...settings,
+            providers: {
+              ...settings.providers,
+              cursor: { apiEndpoint: "https://cursor.example.test" },
+            },
+          },
+          environment: {},
+        },
+        { settings, environment: { CURSOR_API_ENDPOINT: "https://cursor.example.test/" } },
+      ].entries()) {
+        const service = yield* UsageService.make.pipe(
+          Effect.provide(
+            serviceLayers({
+              prefix: `usage-service-cursor-endpoint-${index}`,
+              home,
+              settings: testCase.settings,
+              environment: testCase.environment,
+            }),
+          ),
+        );
+        const summary = yield* service.readSummary(WINDOW);
+        const cursor = summary.sources.find((source) => source.fingerprint.provider === "cursor");
+        assert.strictEqual(cursor?.status, "missing");
+        assert.strictEqual(
+          cursor?.message,
+          "Cursor account history requires the default Cursor endpoint.",
+        );
+      }
+      assert.isFalse(
+        fetchSpy.mock.calls.some(([url]) => String(url).startsWith("https://cursor.com/")),
+      );
     }).pipe(Effect.scoped),
   );
 

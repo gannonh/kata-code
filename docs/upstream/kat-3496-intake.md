@@ -81,6 +81,14 @@ Upstream's server test "rejects cloud replays by time alone once their markers c
 
 Clean merges and new files received the same review as conflicts. All 20 new files fit Kata. Four needed remapping (`projectIcon.ts`, `trace.ts`, `HeapSnapshot.ts`, and the `shell.ts` change). The Antigravity reader keeps its managed profiles under the Kata state directory. `katacode trace summary` reads `KATACODE_HOME` and `KATACODE_TRACE_FILE`. Heap snapshots go to Kata's logs directory. The Cursor Keychain read is limited to Cursor's own `cursor-access-token` entry and requires the `cursorKeychainUsageEnabled` opt-in. Process byte APIs, credential cleanup, sandbox bootstrap-token stripping, Docker/Sprite behavior, the disabled-by-default sandbox preview, the Linear OAuth broker, relay wire identity, the `SettingsScopeContext.tsx` optimistic-file fix, migrations, and desktop identity are untouched by the range. `ProcessRunner` gains only a `process.command` span annotation.
 
+## Codex review
+
+Codex reviewed `69d5e1c` and raised three findings, all in upstream code this merge takes unchanged:
+
+- **P1, fixed here.** Upstream's Cursor account-history scan posts the stored CLI login to `cursor.com` even when a Cursor provider or `CURSOR_API_ENDPOINT` names another endpoint. The limits path already refuses that case. The login is a credential boundary, so `UsageService` now skips the history scan when any Cursor provider instance or its environment names a non-default endpoint, and shows "Cursor account history requires the default Cursor endpoint." `DEFAULT_CURSOR_API_ENDPOINT` is exported from `cursorUsageLimits.ts` so both paths use one value. A new `UsageService.test.ts` case fails without the guard and asserts no request to `cursor.com`.
+- **P1, filed as KAT-3501 (Backlog).** Upstream #13673's `closeIdle` treats a same-name child of the terminal shell with no children as an async prompt helper, so a user-started `bash script.sh` running only builtins can be closed when its thread settles. This is upstream's heuristic and needs its own design.
+- **P2, filed as KAT-3502 (Backlog).** In a mixed-version fleet, `usageMerge.ts` can count legacy v4/v5 buckets twice when a v6 partial scan shares one of their roots. The effect is display-only.
+
 ## Sandbox runtime lock
 
 Upstream adds `@napi-rs/keyring` to `apps/server/package.json` for the Cursor Keychain store. `packages/kata-sandbox-docker/runtime-package-lock.json` must list the same CLI dependencies, or `imageBuild.test.ts` fails and `writeRuntimeInstallLock` refuses to build the sandbox image. The lock now carries `@napi-rs/keyring` 1.3.0 (the `pnpm-lock.yaml` version) and its platform packages, generated with `npm install --package-lock-only` for that exact version.

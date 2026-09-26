@@ -52,6 +52,7 @@ import { resolveAntigravityInstanceDirectories } from "../provider/antigravityAu
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
 import { readOpenCodeUsage } from "./opencodeUsageReader.ts";
 import { readAntigravityUsage } from "./antigravityUsageReader.ts";
+import { DEFAULT_CURSOR_API_ENDPOINT } from "../provider/Layers/cursorUsageLimits.ts";
 import { readCursorAccountUsage } from "./cursorUsageReader.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
 import { createOverrideRateTable, parseRateTable, type RateTable } from "./usagePricing.ts";
@@ -618,6 +619,24 @@ export const make = Effect.gen(function* () {
       });
       return scanned;
     }
+    // The history scan posts the stored login to cursor.com, so a login for
+    // another endpoint must not be sent there.
+    const cursorInstances: Array<Pick<ProviderInstanceConfig, "config" | "environment">> =
+      Object.values(settings.providerInstances).filter((instance) => instance.driver === "cursor");
+    if (!Object.hasOwn(settings.providerInstances, "cursor")) {
+      cursorInstances.push({ config: settings.providers.cursor });
+    }
+    const customCursorEndpoint = cursorInstances.some((instance) => {
+      const configured = (instance.config as { readonly apiEndpoint?: unknown } | undefined)
+        ?.apiEndpoint;
+      const endpoint =
+        (typeof configured === "string" ? configured.trim() : "") ||
+        mergeProviderInstanceEnvironment(instance.environment, hostEnvironment)[
+          "CURSOR_API_ENDPOINT"
+        ]?.trim() ||
+        DEFAULT_CURSOR_API_ENDPOINT;
+      return endpoint.replace(/\/$/, "") !== DEFAULT_CURSOR_API_ENDPOINT;
+    });
     const cursorUntilMs = yield* Clock.currentTimeMillis;
     const account = loginUnavailable
       ? {
@@ -626,15 +645,22 @@ export const make = Effect.gen(function* () {
           missing: true,
           error: "Cursor account history needs a Cursor CLI login on this server.",
         }
-      : yield* Effect.promise(() =>
-          readCursorAccountUsage(
-            platform === "darwin" && credentialStore !== "file"
-              ? { kind: "keychain" }
-              : cursorAuthPath,
-            windowStartMs,
-            cursorUntilMs,
-          ),
-        );
+      : customCursorEndpoint
+        ? {
+            accountKey: null,
+            records: [],
+            missing: true,
+            error: "Cursor account history requires the default Cursor endpoint.",
+          }
+        : yield* Effect.promise(() =>
+            readCursorAccountUsage(
+              platform === "darwin" && credentialStore !== "file"
+                ? { kind: "keychain" }
+                : cursorAuthPath,
+              windowStartMs,
+              cursorUntilMs,
+            ),
+          );
     if (account.accountKey !== null && account.error === null && !account.missing) {
       // The same account includes CLI and desktop history from every machine.
       // A stable remote fingerprint prevents connected environments counting it twice.

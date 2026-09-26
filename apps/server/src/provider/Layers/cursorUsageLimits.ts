@@ -17,7 +17,7 @@ import {
 import { readMacCursorAccessToken } from "../cursorCredentialStore.ts";
 
 const CursorCredentials = Schema.Struct({ accessToken: Schema.optional(Schema.String) });
-const DEFAULT_CURSOR_API_ENDPOINT = "https://api2.cursor.sh";
+export const DEFAULT_CURSOR_API_ENDPOINT = "https://api2.cursor.sh";
 const decodeCredentials = Schema.decodeEffect(Schema.fromJsonString(CursorCredentials));
 const CursorUsageResponse = Schema.Struct({
   billingCycleEnd: Schema.optional(Schema.Union([Schema.String, Schema.Number])),
