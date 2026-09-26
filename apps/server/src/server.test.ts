@@ -4181,6 +4181,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             cloudUserId: "user_123",
             environmentCredential: "t3env_test_credential",
             cloudMintPublicKey: cloudKeyPair.publicKey,
+            endpoint: manualRelayEndpoint,
             endpointRuntime: null,
           }),
         },
@@ -4197,7 +4198,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       };
       const requests = [
         [
-          "/api/t3-connect/health",
+          "/api/kata-connect/health",
           makeCloudEnvironmentHealthRequest({
             privateKey: cloudKeyPair.privateKey,
             environmentId: testEnvironmentDescriptor.environmentId,
@@ -4206,7 +4207,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           }),
         ],
         [
-          "/api/t3-connect/mint-credential",
+          "/api/kata-connect/mint-credential",
           makeCloudMintCredentialRequest({
             privateKey: cloudKeyPair.privateKey,
             environmentId: testEnvironmentDescriptor.environmentId,
