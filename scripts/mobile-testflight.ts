@@ -152,6 +152,8 @@ function main() {
   if (auth.kind === "api-key") {
     const keyPath = NodePath.join(workDir, `AuthKey_${auth.keyId}.p8`);
     NodeFS.writeFileSync(keyPath, `${auth.key}\n`, { mode: 0o600 });
+    // Runs after success and after a thrown build failure; the archive and export stay behind.
+    process.on("exit", () => NodeFS.rmSync(keyPath, { force: true }));
     authArgs.push(
       "-authenticationKeyPath",
       keyPath,

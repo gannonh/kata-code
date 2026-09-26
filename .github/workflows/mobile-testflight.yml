@@ -26,10 +26,9 @@ jobs:
     timeout-minutes: 90
     environment:
       name: production
+    # The Admin API key stays out of job scope so checkout, setup, and dependency
+    # install never see it; only the check and build steps receive it.
     env:
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       KATACODE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
       KATACODE_CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
       RELAY_DOMAIN: ${{ vars.RELAY_DOMAIN }}
@@ -38,6 +37,10 @@ jobs:
     steps:
       - name: Check release configuration
         shell: bash
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           set -euo pipefail
           relay_domain="${RELAY_DOMAIN:-}"
@@ -60,10 +63,10 @@ jobs:
           echo "KATACODE_RELAY_URL=https://$relay_domain" >> "$GITHUB_ENV"
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0
         with:
           node-version-file: package.json
           cache: true
@@ -77,4 +80,8 @@ jobs:
           pod --version
 
       - name: Build and upload
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: node scripts/mobile-testflight.ts ${{ inputs.upload == false && '--no-upload' || '' }}

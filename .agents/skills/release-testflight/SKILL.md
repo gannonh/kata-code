@@ -16,18 +16,19 @@ gh secret list -R gannonh/kata-code | grep -E '^APPLE_API_(KEY|KEY_ID|ISSUER)\b'
 gh workflow view mobile-testflight.yml -R gannonh/kata-code >/dev/null
 ```
 
-All three secrets must be listed. If any is missing, stop and tell the user which ones, and point to the one-time setup in the release doc. Creating the App Store Connect app record and the API key needs a human. If the workflow is not on `main` yet, only the local path (step 4) works.
+CI needs all three secrets and the workflow on `main`. If either is missing, CI can't run, so tell the user which piece is missing and go to the local path (step 4). Point to the one-time setup in the release doc for the secrets, since creating the App Store Connect app record and the API key needs a human.
 
 ## 2. Dispatch and watch
 
 Build from `main` unless the user names another ref. Pass `-f upload=false` when they want a signed build without an upload.
 
 ```bash
-gh workflow run mobile-testflight.yml -R gannonh/kata-code --ref main
-sleep 5
-run_id="$(gh run list -R gannonh/kata-code --workflow mobile-testflight.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+run_url="$(gh workflow run mobile-testflight.yml -R gannonh/kata-code --ref main 2>&1 | grep -Eo 'https://github.com/[^ ]+/actions/runs/[0-9]+')"
+run_id="${run_url##*/}"
 gh run watch "$run_id" -R gannonh/kata-code --exit-status --interval 60
 ```
+
+`gh workflow run` prints the URL of the run it created when GitHub returns one. Watch that run, not the latest one in `gh run list`, which can belong to someone else's dispatch. If no URL comes back, upgrade `gh` rather than guessing the run.
 
 A run takes roughly 30 to 60 minutes. Run the watch in the background and wait for it to exit instead of polling.
 
@@ -49,6 +50,7 @@ On failure, find the first error with `gh run view "$run_id" -R gannonh/kata-cod
 | `No profiles for 'com.katacode.app...'`, or a certificate can't be created | The API key lacks the Admin role, or the Apple account has a pending agreement. Ask the user to check in App Store Connect. |
 | `No suitable application records were found` | The App Store Connect app record for `com.katacode.app` doesn't exist. Ask the user to create it. |
 | `The train version ... is closed` or `must be higher than the previously approved version` | App Store approval closed the current `version`. Ask the user which version to bump to. Don't pick one. |
+| `The bundle version must be higher than the previously uploaded version`, or a duplicate build number | Another upload started in the same UTC minute. Dispatch again; the new run gets a later build number. |
 | Compile or `pod install` errors | A real build break. Reproduce it locally with `node scripts/mobile-testflight.ts --no-upload` and fix it on a branch with its own Linear issue. |
 
 ## 4. Local fallback
