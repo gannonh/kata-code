@@ -18,8 +18,9 @@ import { APP_VERSION } from "~/branding";
 
 const DEFAULT_EXPORT_INTERVAL_MS = 1_000;
 const CLIENT_TRACING_RESOURCE = {
-  serviceName: "kata-web",
+  serviceName: "katacode-web",
   attributes: {
+    "service.namespace": "katacode",
     "service.runtime": "kata-web",
     "service.mode": isElectron ? "electron" : "browser",
     "service.version": APP_VERSION,
