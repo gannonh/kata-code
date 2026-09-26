@@ -611,6 +611,7 @@ export const makeRoutineStore = Effect.gen(function* () {
         return next;
       }),
     );
+  const rejectionChangeAt = new Map<string, number>();
   const recordRejectedDelivery = (
     connectionId: string,
     input: { readonly deliveryId: string; readonly event: string; readonly detail: string },
@@ -620,6 +621,7 @@ export const makeRoutineStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const connection = yield* readConnection(connectionId);
         const previous = connection.lastDelivery;
+        const lastChangeAt = rejectionChangeAt.get(connectionId);
         yield* writeConnection({
           ...connection,
           rejectedCount: connection.rejectedCount + 1,
@@ -634,13 +636,25 @@ export const makeRoutineStore = Effect.gen(function* () {
           updatedAt: isoAt(now),
         });
         // Unauthenticated callers reach this path, so change rows are coalesced
-        // per connection; the rejected count stays exact.
-        const recentlyRejected =
+        // per connection; the rejected count stays exact. The window is anchored
+        // to the last emitted change, not the last rejection, so a sustained
+        // stream still refreshes subscribers once per interval.
+        const coalesced =
           previous?.status === "rejected" &&
-          now - Date.parse(previous.receivedAt) < REJECTED_DELIVERY_CHANGE_INTERVAL_MS;
-        if (!recentlyRejected) yield* recordChange(connection.environmentId);
+          lastChangeAt !== undefined &&
+          now - lastChangeAt < REJECTED_DELIVERY_CHANGE_INTERVAL_MS;
+        if (coalesced) return false;
+        yield* recordChange(connection.environmentId);
+        return true;
       }),
-    ).pipe(Effect.asVoid);
+    ).pipe(
+      Effect.tap((emitted) =>
+        Effect.sync(() => {
+          if (emitted) rejectionChangeAt.set(connectionId, now);
+        }),
+      ),
+      Effect.asVoid,
+    );
   /**
    * Owns the whole admission decision table for a known connection: disabled
    * connections and payloads for another repository are rejected, unsupported

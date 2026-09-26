@@ -411,6 +411,33 @@ it.layer(appLayer.pipe(Layer.provideMerge(NodeHttpServer.layerTest)))(
       }),
     );
 
+    it.effect("refreshes subscribers once per interval during a sustained unsigned stream", () =>
+      Effect.gen(function* () {
+        const store = yield* RoutineStore;
+        const sql = yield* SqlClient.SqlClient;
+        const changeCount = sql<{
+          count: number;
+        }>`SELECT COUNT(*) AS count FROM routine_changes`.pipe(
+          Effect.map((rows) => rows[0]!.count),
+        );
+        yield* TestClock.adjust(REJECTED_DELIVERY_CHANGE_INTERVAL_MS);
+        const changesBefore = yield* changeCount;
+        const before = yield* store.getConnection(environmentId, connectionId);
+        for (let i = 0; i < 7; i++) {
+          if (i > 0) yield* TestClock.adjust(REJECTED_DELIVERY_CHANGE_INTERVAL_MS / 2);
+          const response = yield* post({
+            body: prOpened(8),
+            signature: null,
+            deliveryId: `stream-${i}`,
+          });
+          assert.equal(response.status, 400);
+        }
+        const after = yield* store.getConnection(environmentId, connectionId);
+        assert.equal(after.rejectedCount - before.rejectedCount, 7);
+        assert.equal((yield* changeCount) - changesBefore, 4);
+      }),
+    );
+
     it.effect("returns 503 instead of acknowledging a ping whose durable receipt fails", () =>
       Effect.gen(function* () {
         const store = yield* RoutineStore;
