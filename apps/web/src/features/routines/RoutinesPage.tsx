@@ -68,18 +68,15 @@ import {
   canSaveRoutineDraft,
   confirmDialogAccepted,
   defaultGitHubTrigger,
-  defaultGitHubTriggerDraft,
   defaultLinearTrigger,
-  defaultLinearTriggerDraft,
   DELETE_ROUTINE_MESSAGE,
   DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
   firstEnabledProviderModel,
   formatRoutineTrigger,
+  gitHubEditorTrigger,
   gitHubHookSettingsUrl,
   GITHUB_REDELIVERY_NOTE,
-  isCompleteGitHubTrigger,
-  isCompleteLinearTrigger,
   isRoutineEditorDraftComplete,
   isRoutineEditorScheduleTrigger,
   isRoutineDraftDirty,
@@ -87,8 +84,7 @@ import {
   libraryRoutinesAfterChange,
   LINEAR_PROVIDER_REMOVAL_NOTE,
   LINEAR_RETRY_NOTE,
-  linearTriggerFiltersComplete,
-  linearTriggerConnectionId,
+  linearEditorTrigger,
   newRoutineDraftId,
   newRoutineRequestId,
   preferredWorktreeBaseBranch,
@@ -106,8 +102,7 @@ import {
   routineTriggerKind,
   routinesLibraryEmptyKind,
   selectableConnections,
-  withApplicableLinearTriggerFilters,
-  withApplicableTriggerFilters,
+  switchRoutineEditorTrigger,
   type RoutineEditorDraft,
   type RoutineEditorGitHubTrigger,
   type RoutineEditorLinearTrigger,
@@ -351,9 +346,6 @@ type GitHubTriggerPatch = {
 
 /** A key set to `undefined` clears that filter; an absent key leaves it alone. */
 type LinearTriggerPatch = {
-  readonly kind?: "linear";
-  readonly connectionId?: LinearEventTrigger["connectionId"];
-  readonly workspaceId?: LinearEventTrigger["workspaceId"];
   readonly event?: LinearEventTrigger["event"];
   readonly teamId?: string | undefined;
   readonly projectId?: string | undefined;
@@ -369,7 +361,7 @@ function GitHubTriggerFields({
   offline,
   busy,
   onTriggerChange,
-  onConnectionCreated,
+  onConnectionChange,
 }: {
   readonly environmentId: EnvironmentId;
   readonly trigger: RoutineEditorGitHubTrigger;
@@ -378,7 +370,7 @@ function GitHubTriggerFields({
   readonly offline: boolean;
   readonly busy: boolean;
   readonly onTriggerChange: (patch: GitHubTriggerPatch) => void;
-  readonly onConnectionCreated: (connection: GitHubRoutineConnection) => void;
+  readonly onConnectionChange: (connection: GitHubRoutineConnection) => void;
 }) {
   const createConnection = useAtomCommand(routineEnvironment.createConnection, {
     reportFailure: false,
@@ -427,7 +419,7 @@ function GitHubTriggerFields({
       setSetupMessage("The environment did not return a GitHub connection.");
       return;
     }
-    onConnectionCreated(created.value);
+    onConnectionChange(created.value);
     setSetupMessage(`Webhook created. Waiting for GitHub to ping ${created.value.callbackUrl}…`);
     const verified = await verifyConnection({ environmentId, input: { id } });
     setSetupBusy(false);
@@ -482,7 +474,7 @@ function GitHubTriggerFields({
           disabled={disabled}
           onChange={(event) => {
             const next = connections.find((candidate) => candidate.id === event.target.value);
-            if (next) onTriggerChange(defaultGitHubTrigger(next));
+            if (next) onConnectionChange(next);
           }}
         >
           {connections.length === 0 ? <option value="">No connected repository</option> : null}
@@ -741,7 +733,7 @@ function LinearTriggerFields({
   offline,
   busy,
   onTriggerChange,
-  onConnectionCreated,
+  onConnectionChange,
 }: {
   readonly environmentId: EnvironmentId;
   readonly trigger: RoutineEditorLinearTrigger;
@@ -750,7 +742,7 @@ function LinearTriggerFields({
   readonly offline: boolean;
   readonly busy: boolean;
   readonly onTriggerChange: (patch: LinearTriggerPatch) => void;
-  readonly onConnectionCreated: (connection: LinearRoutineConnection) => void;
+  readonly onConnectionChange: (connection: LinearRoutineConnection) => void;
 }) {
   const beginConnectionAuthorization = useAtomCommand(
     routineEnvironment.beginConnectionAuthorization,
@@ -830,7 +822,7 @@ function LinearTriggerFields({
       : null,
   );
   const disabled = offline || busy || setupBusy;
-  const triggerConnectionId = linearTriggerConnectionId(trigger);
+  const triggerConnectionId = trigger.connectionId ?? null;
   useEffect(() => {
     if (createdConnection !== null && createdConnection.id !== triggerConnectionId) {
       setCreatedConnection(null);
@@ -953,7 +945,7 @@ function LinearTriggerFields({
     setCreatedConnection(result.value);
     clearPendingLinearConnectionId(environmentId);
     setPendingAuthorization(null);
-    onConnectionCreated(result.value);
+    onConnectionChange(result.value);
     setSetupMessage("Webhook created. Verify the first delivery when Linear sends one.");
   };
 
@@ -1016,7 +1008,7 @@ function LinearTriggerFields({
             const next = connections.find((candidate) => candidate.id === event.target.value);
             if (next) {
               setCreatedConnection(null);
-              onTriggerChange(defaultLinearTrigger(next));
+              onConnectionChange(next);
             }
           }}
         >
@@ -1415,7 +1407,9 @@ function RoutineEditor({
   const connections = useEnvironmentQuery(
     routineEnvironment.connections({ environmentId: draft.environmentId, input: {} }),
   );
-  const [scheduleTrigger, setScheduleTrigger] = useState<ScheduleTrigger>(() =>
+  // Editor-only: the schedule restored when the user switches back from an
+  // event kind. It never enters the draft, the save payload, or the dirty check.
+  const [returnSchedule, setReturnSchedule] = useState<ScheduleTrigger>(() =>
     isRoutineEditorScheduleTrigger(draft.configuration.trigger)
       ? draft.configuration.trigger
       : { kind: "daily", time: "09:00", timezone: "UTC" },
@@ -1431,38 +1425,21 @@ function RoutineEditor({
     if (!isRoutineEditorScheduleTrigger(configuration.trigger)) return;
     setConfiguration({ trigger: { ...configuration.trigger, ...patch } as ScheduleTrigger });
   };
+  const trigger = configuration.trigger;
+  const gitHubTrigger =
+    trigger.kind === "github" || trigger.kind === "github-draft" ? trigger : null;
+  const linearTrigger =
+    trigger.kind === "linear" || trigger.kind === "linear-draft" ? trigger : null;
+  const scheduleTrigger = isRoutineEditorScheduleTrigger(trigger) ? trigger : null;
   const setGitHubTrigger = (patch: GitHubTriggerPatch) => {
-    if (configuration.trigger.kind !== "github") return;
-    setConfiguration({
-      trigger: withApplicableTriggerFilters({
-        ...configuration.trigger,
-        ...patch,
-      }),
-    });
+    if (gitHubTrigger === null) return;
+    setConfiguration({ trigger: gitHubEditorTrigger({ ...gitHubTrigger, ...patch }) });
   };
   const setLinearTrigger = (patch: LinearTriggerPatch) => {
-    if (configuration.trigger.kind !== "linear") return;
-    const previousConnectionId = linearTriggerConnectionId(configuration.trigger);
-    const next = {
-      ...configuration.trigger,
-      ...patch,
-    } as RoutineEditorLinearTrigger;
-    const connectionId = linearTriggerConnectionId(next);
-    if (connectionId !== previousConnectionId) {
-      const connection = linearConnections.find((candidate) => candidate.id === connectionId);
-      if (connection) {
-        setConfiguration({
-          trigger: withApplicableLinearTriggerFilters(defaultLinearTrigger(connection)),
-        });
-        return;
-      }
-    }
-    setConfiguration({ trigger: withApplicableLinearTriggerFilters(next) });
+    if (linearTrigger === null) return;
+    setConfiguration({ trigger: linearEditorTrigger({ ...linearTrigger, ...patch }) });
   };
-  const triggerKind = routineTriggerKind(configuration.trigger);
-  const scheduleFields: ScheduleTrigger = isRoutineEditorScheduleTrigger(configuration.trigger)
-    ? configuration.trigger
-    : scheduleTrigger;
+  const triggerKind = routineTriggerKind(trigger);
   const savedConnectionId =
     routine && !isScheduleTrigger(routine.configuration.trigger)
       ? routine.configuration.trigger.connectionId
@@ -1475,45 +1452,32 @@ function RoutineEditor({
     (connection): connection is LinearRoutineConnection => connection.provider === "linear",
   );
   const allConnections = connections.data ?? [];
-  const selectedGitHubTrigger = isCompleteGitHubTrigger(configuration.trigger)
-    ? configuration.trigger
-    : undefined;
-  const selectedGitHubConnection = selectedGitHubTrigger
-    ? allConnections.find(
-        (candidate): candidate is GitHubRoutineConnection =>
-          candidate.provider === "github" && candidate.id === selectedGitHubTrigger.connectionId,
-      )
-    : undefined;
-  const selectedLinearTrigger = isCompleteLinearTrigger(configuration.trigger)
-    ? configuration.trigger
-    : undefined;
-  const selectedLinearConnection = selectedLinearTrigger
-    ? allConnections.find(
-        (candidate): candidate is LinearRoutineConnection =>
-          candidate.provider === "linear" && candidate.id === selectedLinearTrigger.connectionId,
-      )
-    : undefined;
+  const gitHubConnectionId = trigger.kind === "github" ? trigger.connectionId : undefined;
+  const selectedGitHubConnection =
+    gitHubConnectionId === undefined
+      ? undefined
+      : allConnections.find(
+          (candidate): candidate is GitHubRoutineConnection =>
+            candidate.provider === "github" && candidate.id === gitHubConnectionId,
+        );
+  const linearConnectionId = linearTrigger?.connectionId;
+  const selectedLinearConnection =
+    linearConnectionId === undefined
+      ? undefined
+      : allConnections.find(
+          (candidate): candidate is LinearRoutineConnection =>
+            candidate.provider === "linear" && candidate.id === linearConnectionId,
+        );
   const selectedConnection =
     triggerKind === "linear" ? selectedLinearConnection : selectedGitHubConnection;
   const switchTriggerKind = (kind: RoutineTriggerKind) => {
-    if (kind === triggerKind) return;
-    if (kind === "schedule") {
-      setConfiguration({ trigger: scheduleTrigger });
-      return;
-    }
-    if (isRoutineEditorScheduleTrigger(configuration.trigger))
-      setScheduleTrigger(configuration.trigger);
-    if (kind === "github") {
-      const first = githubConnections[0];
-      setConfiguration({
-        trigger: first ? defaultGitHubTrigger(first) : defaultGitHubTriggerDraft(),
-      });
-      return;
-    }
-    const first = linearConnections[0];
-    setConfiguration({
-      trigger: first ? defaultLinearTrigger(first) : defaultLinearTriggerDraft(),
+    if (scheduleTrigger !== null && kind !== "schedule") setReturnSchedule(scheduleTrigger);
+    const next = switchRoutineEditorTrigger(trigger, kind, {
+      githubConnections,
+      linearConnections,
+      returnSchedule,
     });
+    if (next !== trigger) setConfiguration({ trigger: next });
   };
   const project = projects.find((candidate) => candidate.id === configuration.projectId);
   const selectableProviders = enabledProviders(providers);
@@ -1556,9 +1520,7 @@ function RoutineEditor({
       }),
     });
   };
-  const hasCompleteTrigger =
-    isRoutineEditorDraftComplete(configuration) &&
-    linearTriggerFiltersComplete(configuration.trigger);
+  const hasCompleteTrigger = isRoutineEditorDraftComplete(configuration);
   const canSave =
     canSaveRoutineDraft({
       name: configuration.name,
@@ -1930,35 +1892,35 @@ function RoutineEditor({
                 <SquareKanbanIcon className="size-3.5" /> Linear event
               </Button>
             </div>
-            {configuration.trigger.kind === "github" ? (
+            {gitHubTrigger !== null ? (
               <GitHubTriggerFields
                 environmentId={draft.environmentId}
-                trigger={configuration.trigger}
+                trigger={gitHubTrigger}
                 connections={githubConnections}
                 selectedConnection={selectedGitHubConnection}
                 offline={offline}
                 busy={busy}
                 onTriggerChange={setGitHubTrigger}
-                onConnectionCreated={(connection) =>
+                onConnectionChange={(connection) =>
                   setConfiguration({ trigger: defaultGitHubTrigger(connection) })
                 }
               />
             ) : null}
-            {configuration.trigger.kind === "linear" ? (
+            {linearTrigger !== null ? (
               <LinearTriggerFields
                 environmentId={draft.environmentId}
-                trigger={configuration.trigger}
+                trigger={linearTrigger}
                 connections={linearConnections}
                 selectedConnection={selectedLinearConnection}
                 offline={offline}
                 busy={busy}
                 onTriggerChange={setLinearTrigger}
-                onConnectionCreated={(connection) =>
+                onConnectionChange={(connection) =>
                   setConfiguration({ trigger: defaultLinearTrigger(connection) })
                 }
               />
             ) : null}
-            {triggerKind === "schedule" && isRoutineEditorScheduleTrigger(configuration.trigger) ? (
+            {scheduleTrigger !== null ? (
               <>
                 <div className={ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS}>
                   {(["daily", "weekdays", "weekly", "cron"] as const).map((kind) => (
@@ -1966,7 +1928,7 @@ function RoutineEditor({
                       key={kind}
                       size="sm"
                       className="min-w-0 shrink"
-                      variant={scheduleFields.kind === kind ? "default" : "outline"}
+                      variant={scheduleTrigger.kind === kind ? "default" : "outline"}
                       onClick={() => {
                         if (kind === "cron")
                           setConfiguration({
@@ -1984,10 +1946,10 @@ function RoutineEditor({
                     </Button>
                   ))}
                 </div>
-                {scheduleFields.kind === "cron" ? (
+                {scheduleTrigger.kind === "cron" ? (
                   <Input
                     aria-label="Cron expression"
-                    value={scheduleFields.expression}
+                    value={scheduleTrigger.expression}
                     onValueChange={(value) => setTrigger({ expression: value })}
                     placeholder="0 9 * * 1-5"
                   />
@@ -1996,14 +1958,14 @@ function RoutineEditor({
                     <Input
                       aria-label="Schedule time"
                       type="time"
-                      value={scheduleFields.time}
+                      value={scheduleTrigger.time}
                       onValueChange={(value) => setTrigger({ time: value })}
                     />
-                    {scheduleFields.kind === "weekly" ? (
+                    {scheduleTrigger.kind === "weekly" ? (
                       <select
                         aria-label="Weekday"
                         className={ROUTINE_CONTROL_CLASS}
-                        value={String(scheduleFields.weekday)}
+                        value={String(scheduleTrigger.weekday)}
                         onChange={(event) => setTrigger({ weekday: Number(event.target.value) })}
                       >
                         <option value="1">Monday</option>
@@ -2021,7 +1983,7 @@ function RoutineEditor({
                 )}
                 <Input
                   aria-label="IANA timezone"
-                  value={scheduleFields.timezone}
+                  value={scheduleTrigger.timezone}
                   onValueChange={(value) => setTrigger({ timezone: value })}
                   placeholder="America/Los_Angeles"
                 />
@@ -2029,14 +1991,7 @@ function RoutineEditor({
                   <div className="grid gap-1 text-xs text-muted-foreground">
                     <span>Next runs</span>
                     {preview.data.dates.map((date) => (
-                      <span key={date}>
-                        {formatDateInTimezone(
-                          date,
-                          isRoutineEditorScheduleTrigger(configuration.trigger)
-                            ? configuration.trigger.timezone
-                            : "UTC",
-                        )}
-                      </span>
+                      <span key={date}>{formatDateInTimezone(date, scheduleTrigger.timezone)}</span>
                     ))}
                   </div>
                 ) : preview.error ? (

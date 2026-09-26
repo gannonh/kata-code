@@ -25,18 +25,18 @@ import {
   defaultLinearTriggerDraft,
   DELETE_ROUTINE_MESSAGE,
   formatRoutineTrigger,
+  gitHubEditorTrigger,
   gitHubHookSettingsUrl,
   DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
   firstEnabledProviderModel,
   isRoutineDraftDirty,
-  isCompleteGitHubTrigger,
-  isCompleteLinearTrigger,
   isRoutineEditorDraftComplete,
   isRoutineEditorScheduleTrigger,
+  isRoutineEditorTriggerComplete,
   keepDeletedRoutineInEditor,
-  linearTriggerFiltersComplete,
   libraryRoutinesAfterChange,
+  linearEditorTrigger,
   newRoutineDraftId,
   newRoutineRequestId,
   preferredWorktreeBaseBranch,
@@ -54,8 +54,7 @@ import {
   routinesLibraryEmptyKind,
   routineTriggerKind,
   selectableConnections,
-  withApplicableLinearTriggerFilters,
-  withApplicableTriggerFilters,
+  switchRoutineEditorTrigger,
   worktreeBaseExists,
 } from "./RoutinesPage.logic";
 
@@ -513,47 +512,59 @@ describe("GitHub event triggers", () => {
 
   it("drops filters the selected event cannot use", () => {
     expect(
-      withApplicableTriggerFilters({
-        kind: "github",
-        event: "issue_opened",
-        branch: "main",
-        includeDrafts: false,
-      }),
-    ).toEqual({ kind: "github", event: "issue_opened", includeDrafts: false });
+      gitHubEditorTrigger({ event: "issue_opened", branch: "main", includeDrafts: false }),
+    ).toEqual({ kind: "github-draft", event: "issue_opened", includeDrafts: false });
     expect(
-      withApplicableTriggerFilters({
-        kind: "github",
+      gitHubEditorTrigger({
         event: "pr_opened",
         branch: "main",
         includeDrafts: false,
         issueLabelId: 5,
       }),
-    ).toEqual({ kind: "github", event: "pr_opened", branch: "main", includeDrafts: false });
+    ).toEqual({ kind: "github-draft", event: "pr_opened", branch: "main", includeDrafts: false });
+    expect(
+      gitHubEditorTrigger({
+        connectionId: RoutineConnectionId.make("connection-1"),
+        repositoryId: 42,
+        event: "issue_opened",
+        branch: "main",
+        includeDrafts: false,
+        issueLabelId: 5,
+      }),
+    ).toEqual({
+      kind: "github",
+      connectionId: "connection-1",
+      repositoryId: 42,
+      event: "issue_opened",
+      includeDrafts: false,
+      issueLabelId: 5,
+    });
     // A filter cleared to `undefined` is removed instead of reverting to the
     // value it had before the edit.
     expect(
-      withApplicableTriggerFilters({
-        kind: "github",
-        event: "pr_opened",
-        branch: undefined,
-        includeDrafts: false,
-      }),
-    ).toEqual({ kind: "github", event: "pr_opened", includeDrafts: false });
+      gitHubEditorTrigger({ event: "pr_opened", branch: undefined, includeDrafts: false }),
+    ).toEqual({ kind: "github-draft", event: "pr_opened", includeDrafts: false });
     expect(
-      withApplicableTriggerFilters({
-        kind: "github",
-        event: "issue_opened",
-        includeDrafts: false,
-        issueLabelId: undefined,
-      }),
-    ).toEqual({ kind: "github", event: "issue_opened", includeDrafts: false });
+      gitHubEditorTrigger({ event: "issue_opened", includeDrafts: false, issueLabelId: undefined }),
+    ).toEqual({ kind: "github-draft", event: "issue_opened", includeDrafts: false });
+  });
+
+  it("keeps a saved GitHub trigger clean after its branch is cleared and restored", () => {
+    const saved = draft({ trigger: defaultGitHubTrigger(connection()) });
+    const savedTrigger = defaultGitHubTrigger(connection());
+    const cleared = gitHubEditorTrigger({ ...savedTrigger, branch: undefined });
+    const restored = gitHubEditorTrigger({ ...cleared, branch: "main" });
+
+    expect(isRoutineDraftDirty({ ...saved, trigger: cleared }, saved)).toBe(true);
+    expect(isRoutineDraftDirty({ ...saved, trigger: restored }, saved)).toBe(false);
   });
 
   it("keeps an unconnected GitHub choice outside the saved trigger contract", () => {
     const trigger = defaultGitHubTriggerDraft();
 
-    expect(trigger).toEqual({ kind: "github", event: "pr_opened", includeDrafts: false });
-    expect(isCompleteGitHubTrigger(trigger)).toBe(false);
+    expect(trigger).toEqual({ kind: "github-draft", event: "pr_opened", includeDrafts: false });
+    expect(isRoutineEditorTriggerComplete(trigger)).toBe(false);
+    expect(isRoutineEditorTriggerComplete(defaultGitHubTrigger(connection()))).toBe(true);
   });
 
   it("defaults a new GitHub trigger to PR opened on the repository default branch", () => {
@@ -590,22 +601,55 @@ describe("GitHub event triggers", () => {
 
 describe("Linear event triggers", () => {
   it("treats a Linear trigger as an event trigger, not a schedule", () => {
-    expect(isRoutineEditorScheduleTrigger({ kind: "linear", event: "issue_created" })).toBe(false);
+    expect(isRoutineEditorScheduleTrigger(defaultLinearTriggerDraft())).toBe(false);
     expect(isRoutineEditorScheduleTrigger({ kind: "daily", time: "09:00", timezone: "UTC" })).toBe(
       true,
     );
   });
 
   it("keeps an unconnected Linear choice outside the saved trigger contract", () => {
-    expect(isCompleteLinearTrigger({ kind: "linear", event: "issue_created" })).toBe(false);
-    expect(
-      isCompleteLinearTrigger({
-        kind: "linear",
-        event: "issue_created",
-        connectionId: RoutineConnectionId.make("connection-1"),
-        workspaceId: "workspace-1",
-      }),
-    ).toBe(true);
+    expect(defaultLinearTriggerDraft()).toEqual({ kind: "linear-draft", event: "issue_created" });
+    expect(isRoutineEditorTriggerComplete(defaultLinearTriggerDraft())).toBe(false);
+    const connected = linearEditorTrigger({
+      connectionId: RoutineConnectionId.make("connection-1"),
+      workspaceId: "workspace-1",
+      event: "issue_created",
+    });
+    expect(connected).toEqual({
+      kind: "linear",
+      connectionId: "connection-1",
+      workspaceId: "workspace-1",
+      event: "issue_created",
+    });
+    expect(isRoutineEditorTriggerComplete(connected)).toBe(true);
+  });
+
+  it("keeps a connected Linear update event a draft until its filter is chosen", () => {
+    const scope = {
+      connectionId: RoutineConnectionId.make("connection-1"),
+      workspaceId: "workspace-1",
+    };
+    const withoutState = linearEditorTrigger({ ...scope, event: "status_changed" });
+    expect(withoutState).toEqual({
+      kind: "linear-draft",
+      connectionId: "connection-1",
+      workspaceId: "workspace-1",
+      event: "status_changed",
+    });
+    expect(isRoutineEditorTriggerComplete(withoutState)).toBe(false);
+    expect(linearEditorTrigger({ ...scope, event: "status_changed", stateId: "" }).kind).toBe(
+      "linear-draft",
+    );
+    expect(linearEditorTrigger({ ...scope, event: "label_added", labelId: "   " }).kind).toBe(
+      "linear-draft",
+    );
+    expect(linearEditorTrigger({ ...scope, event: "label_added", labelId: "label-1" })).toEqual({
+      kind: "linear",
+      connectionId: "connection-1",
+      workspaceId: "workspace-1",
+      event: "label_added",
+      labelId: "label-1",
+    });
   });
 
   it("treats a draft with a complete Linear trigger as saveable", () => {
@@ -659,22 +703,16 @@ describe("Linear event triggers", () => {
     const linearScope = defaultLinearTrigger(linearConnection());
     expect(
       routineDraftForGenerationInput(
-        { ...draft(), trigger: { ...linearScope, event: "status_changed" } },
+        { ...draft(), trigger: linearEditorTrigger({ ...linearScope, event: "status_changed" }) },
         true,
       ),
     ).toBeNull();
     expect(
       routineDraftForGenerationInput(
-        { ...draft(), trigger: { ...linearScope, event: "label_added" } },
+        { ...draft(), trigger: linearEditorTrigger({ ...linearScope, event: "label_added" }) },
         true,
       ),
     ).toBeNull();
-    expect(
-      linearTriggerFiltersComplete({ ...linearScope, event: "status_changed", stateId: "" }),
-    ).toBe(false);
-    expect(
-      linearTriggerFiltersComplete({ ...linearScope, event: "label_added", labelId: "   " }),
-    ).toBe(false);
     expect(
       routineDraftForGenerationInput(
         {
@@ -719,29 +757,30 @@ describe("Linear event triggers", () => {
 
   it("drops Linear filters the selected event cannot use", () => {
     expect(
-      withApplicableLinearTriggerFilters({
-        kind: "linear",
-        event: "status_changed",
-        stateId: "state-1",
-        labelId: "label-1",
-      }),
-    ).toEqual({ kind: "linear", event: "status_changed", stateId: "state-1" });
+      linearEditorTrigger({ event: "status_changed", stateId: "state-1", labelId: "label-1" }),
+    ).toEqual({ kind: "linear-draft", event: "status_changed", stateId: "state-1" });
     expect(
-      withApplicableLinearTriggerFilters({
-        kind: "linear",
-        event: "label_added",
-        stateId: "state-1",
-        labelId: "label-1",
-      }),
-    ).toEqual({ kind: "linear", event: "label_added", labelId: "label-1" });
+      linearEditorTrigger({ event: "label_added", stateId: "state-1", labelId: "label-1" }),
+    ).toEqual({ kind: "linear-draft", event: "label_added", labelId: "label-1" });
     expect(
-      withApplicableLinearTriggerFilters({
-        kind: "linear",
+      linearEditorTrigger({ event: "issue_created", teamId: undefined, projectId: undefined }),
+    ).toEqual({ kind: "linear-draft", event: "issue_created" });
+    expect(
+      linearEditorTrigger({
+        connectionId: RoutineConnectionId.make("connection-1"),
+        workspaceId: "workspace-1",
+        teamId: "team-1",
         event: "issue_created",
-        teamId: undefined,
-        projectId: undefined,
+        stateId: "state-1",
+        labelId: "label-1",
       }),
-    ).toEqual({ kind: "linear", event: "issue_created" });
+    ).toEqual({
+      kind: "linear",
+      connectionId: "connection-1",
+      workspaceId: "workspace-1",
+      teamId: "team-1",
+      event: "issue_created",
+    });
   });
 
   it("labels each Linear event for the library card", () => {
@@ -764,7 +803,60 @@ describe("Linear event triggers", () => {
   it("names schedule, GitHub, and Linear trigger kinds for the editor", () => {
     expect(routineTriggerKind({ kind: "daily", time: "09:00", timezone: "UTC" })).toBe("schedule");
     expect(routineTriggerKind(defaultGitHubTriggerDraft())).toBe("github");
-    expect(routineTriggerKind({ kind: "linear", event: "issue_created" })).toBe("linear");
+    expect(routineTriggerKind(defaultLinearTriggerDraft())).toBe("linear");
+    expect(routineTriggerKind(defaultLinearTrigger(linearConnection()))).toBe("linear");
+  });
+});
+
+describe("switching the trigger kind", () => {
+  const weekly = { kind: "weekly", weekday: 3, time: "08:30", timezone: "UTC" } as const;
+  const noConnections = { githubConnections: [], linearConnections: [], returnSchedule: weekly };
+
+  it("starts an event kind from the first connection's default or a draft", () => {
+    expect(
+      switchRoutineEditorTrigger(weekly, "github", {
+        ...noConnections,
+        githubConnections: [connection({ defaultBranch: "develop" })],
+      }),
+    ).toEqual({
+      kind: "github",
+      connectionId: "connection-1",
+      repositoryId: 42,
+      event: "pr_opened",
+      branch: "develop",
+      includeDrafts: false,
+    });
+    expect(switchRoutineEditorTrigger(weekly, "github", noConnections)).toEqual({
+      kind: "github-draft",
+      event: "pr_opened",
+      includeDrafts: false,
+    });
+    expect(
+      switchRoutineEditorTrigger(weekly, "linear", {
+        ...noConnections,
+        linearConnections: [linearConnection()],
+      }),
+    ).toEqual({
+      kind: "linear",
+      connectionId: "connection-1",
+      workspaceId: "workspace-1",
+      event: "issue_created",
+    });
+    expect(switchRoutineEditorTrigger(weekly, "linear", noConnections)).toEqual({
+      kind: "linear-draft",
+      event: "issue_created",
+    });
+  });
+
+  it("returns to the held schedule and keeps the trigger when the kind is unchanged", () => {
+    const githubDraft = defaultGitHubTriggerDraft();
+    expect(switchRoutineEditorTrigger(githubDraft, "schedule", noConnections)).toEqual({
+      kind: "weekly",
+      weekday: 3,
+      time: "08:30",
+      timezone: "UTC",
+    });
+    expect(switchRoutineEditorTrigger(githubDraft, "github", noConnections)).toBe(githubDraft);
   });
 });
 
