@@ -5,12 +5,18 @@ import {
   type LinearRoutineConnection,
   type LinearRoutineEvent,
   type RoutineLinearMetadata,
+  type ScheduleTrigger,
+  type EnvironmentId,
 } from "@kata-sh/code-contracts";
 
+import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { useEnvironmentQuery } from "../../state/query";
+import { routineEnvironment } from "../../state/routines";
 import { FieldLabel } from "./FieldLabel";
 import {
   ROUTINE_CONTROL_CLASS,
+  ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS,
   type GitHubTriggerPatch,
   type LinearTriggerPatch,
   type RoutineEditorGitHubTrigger,
@@ -292,6 +298,113 @@ export function LinearTriggerFields({
         matching. Event text is passed to the routine as untrusted context under the saved
         instruction.
       </p>
+    </>
+  );
+}
+
+function formatDateInTimezone(value: string, timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: timezone,
+      timeZoneName: "shortOffset",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
+}
+
+/** Schedule kind, its time or cron fields, the timezone, and the next-runs preview. */
+export function ScheduleTriggerFields({
+  environmentId,
+  trigger,
+  onTriggerChange,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly trigger: ScheduleTrigger;
+  readonly onTriggerChange: (trigger: ScheduleTrigger) => void;
+}) {
+  const preview = useEnvironmentQuery(
+    routineEnvironment.preview({ environmentId, input: { trigger } }),
+  );
+  return (
+    <>
+      <div className={ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS}>
+        {(["daily", "weekdays", "weekly", "cron"] as const).map((kind) => (
+          <Button
+            key={kind}
+            size="sm"
+            className="min-w-0 shrink"
+            variant={trigger.kind === kind ? "default" : "outline"}
+            onClick={() => {
+              if (kind === "cron")
+                onTriggerChange({ kind, expression: "0 9 * * 1-5", timezone: "UTC" });
+              else if (kind === "weekly")
+                onTriggerChange({ kind, weekday: 1, time: "09:00", timezone: "UTC" });
+              else onTriggerChange({ kind, time: "09:00", timezone: "UTC" });
+            }}
+          >
+            {kind[0]!.toUpperCase() + kind.slice(1)}
+          </Button>
+        ))}
+      </div>
+      {trigger.kind === "cron" ? (
+        <Input
+          aria-label="Cron expression"
+          value={trigger.expression}
+          onValueChange={(value) => onTriggerChange({ ...trigger, expression: value })}
+          placeholder="0 9 * * 1-5"
+        />
+      ) : (
+        <div className="grid grid-cols-2 gap-2">
+          <Input
+            aria-label="Schedule time"
+            type="time"
+            value={trigger.time}
+            onValueChange={(value) => onTriggerChange({ ...trigger, time: value })}
+          />
+          {trigger.kind === "weekly" ? (
+            <select
+              aria-label="Weekday"
+              className={ROUTINE_CONTROL_CLASS}
+              value={String(trigger.weekday)}
+              onChange={(event) =>
+                onTriggerChange({ ...trigger, weekday: Number(event.target.value) })
+              }
+            >
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5">Friday</option>
+              <option value="6">Saturday</option>
+              <option value="0">Sunday</option>
+            </select>
+          ) : (
+            <span />
+          )}
+        </div>
+      )}
+      <Input
+        aria-label="IANA timezone"
+        value={trigger.timezone}
+        onValueChange={(value) => onTriggerChange({ ...trigger, timezone: value })}
+        placeholder="America/Los_Angeles"
+      />
+      {preview.data ? (
+        <div className="grid gap-1 text-xs text-muted-foreground">
+          <span>Next runs</span>
+          {preview.data.dates.map((date) => (
+            <span key={date}>{formatDateInTimezone(date, trigger.timezone)}</span>
+          ))}
+        </div>
+      ) : preview.error ? (
+        <p className="text-xs text-destructive">{preview.error}</p>
+      ) : null}
     </>
   );
 }

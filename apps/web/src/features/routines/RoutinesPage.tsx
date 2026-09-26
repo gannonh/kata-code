@@ -97,7 +97,11 @@ import {
 import { FieldLabel } from "./FieldLabel";
 import { GitHubConnectionPanel } from "./GitHubConnectionPanel";
 import { LinearConnectionPanel } from "./LinearConnectionPanel";
-import { GitHubTriggerFields, LinearTriggerFields } from "./RoutineTriggerFields";
+import {
+  GitHubTriggerFields,
+  LinearTriggerFields,
+  ScheduleTriggerFields,
+} from "./RoutineTriggerFields";
 import { RoutineChat } from "./RoutineChat";
 
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
@@ -171,22 +175,6 @@ function defaultDraft(
       trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
     },
   };
-}
-
-function formatDateInTimezone(value: string, timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      timeZone: timezone,
-      timeZoneName: "shortOffset",
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
 }
 
 function RoutineEnvironmentRows({
@@ -470,14 +458,6 @@ function RoutineEditor({
     setOlderCursor(olderHistory.data.nextCursor);
     setHistoryBefore(null);
   }, [historyBefore, olderHistory.data]);
-  const preview = useEnvironmentQuery(
-    isRoutineEditorScheduleTrigger(draft.configuration.trigger)
-      ? routineEnvironment.preview({
-          environmentId: draft.environmentId,
-          input: { trigger: draft.configuration.trigger },
-        })
-      : null,
-  );
   const connections = useEnvironmentQuery(
     routineEnvironment.connections({ environmentId: draft.environmentId, input: {} }),
   );
@@ -495,10 +475,6 @@ function RoutineEditor({
   const configuration = draft.configuration;
   const setConfiguration = (patch: Partial<RoutineEditorDraft>) =>
     onDraftChange({ ...draft, configuration: { ...configuration, ...patch } });
-  const setTrigger = (patch: Partial<ScheduleTrigger>) => {
-    if (!isRoutineEditorScheduleTrigger(configuration.trigger)) return;
-    setConfiguration({ trigger: { ...configuration.trigger, ...patch } as ScheduleTrigger });
-  };
   const trigger = configuration.trigger;
   const gitHubTrigger =
     trigger.kind === "github" || trigger.kind === "github-draft" ? trigger : null;
@@ -995,83 +971,11 @@ function RoutineEditor({
               />
             ) : null}
             {scheduleTrigger !== null ? (
-              <>
-                <div className={ROUTINE_WHEN_TO_RUN_ACTIONS_CLASS}>
-                  {(["daily", "weekdays", "weekly", "cron"] as const).map((kind) => (
-                    <Button
-                      key={kind}
-                      size="sm"
-                      className="min-w-0 shrink"
-                      variant={scheduleTrigger.kind === kind ? "default" : "outline"}
-                      onClick={() => {
-                        if (kind === "cron")
-                          setConfiguration({
-                            trigger: { kind, expression: "0 9 * * 1-5", timezone: "UTC" },
-                          });
-                        else if (kind === "weekly")
-                          setConfiguration({
-                            trigger: { kind, weekday: 1, time: "09:00", timezone: "UTC" },
-                          });
-                        else
-                          setConfiguration({ trigger: { kind, time: "09:00", timezone: "UTC" } });
-                      }}
-                    >
-                      {kind[0]!.toUpperCase() + kind.slice(1)}
-                    </Button>
-                  ))}
-                </div>
-                {scheduleTrigger.kind === "cron" ? (
-                  <Input
-                    aria-label="Cron expression"
-                    value={scheduleTrigger.expression}
-                    onValueChange={(value) => setTrigger({ expression: value })}
-                    placeholder="0 9 * * 1-5"
-                  />
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    <Input
-                      aria-label="Schedule time"
-                      type="time"
-                      value={scheduleTrigger.time}
-                      onValueChange={(value) => setTrigger({ time: value })}
-                    />
-                    {scheduleTrigger.kind === "weekly" ? (
-                      <select
-                        aria-label="Weekday"
-                        className={ROUTINE_CONTROL_CLASS}
-                        value={String(scheduleTrigger.weekday)}
-                        onChange={(event) => setTrigger({ weekday: Number(event.target.value) })}
-                      >
-                        <option value="1">Monday</option>
-                        <option value="2">Tuesday</option>
-                        <option value="3">Wednesday</option>
-                        <option value="4">Thursday</option>
-                        <option value="5">Friday</option>
-                        <option value="6">Saturday</option>
-                        <option value="0">Sunday</option>
-                      </select>
-                    ) : (
-                      <span />
-                    )}
-                  </div>
-                )}
-                <Input
-                  aria-label="IANA timezone"
-                  value={scheduleTrigger.timezone}
-                  onValueChange={(value) => setTrigger({ timezone: value })}
-                  placeholder="America/Los_Angeles"
-                />
-                {preview.data ? (
-                  <div className="grid gap-1 text-xs text-muted-foreground">
-                    <span>Next runs</span>
-                    {preview.data.dates.map((date) => (
-                      <span key={date}>{formatDateInTimezone(date, scheduleTrigger.timezone)}</span>
-                    ))}
-                  </div>
-                ) : preview.error ? (
-                  <p className="text-xs text-destructive">{preview.error}</p>
-                ) : null}
-              </>
+              <ScheduleTriggerFields
+                environmentId={draft.environmentId}
+                trigger={scheduleTrigger}
+                onTriggerChange={(next) => setConfiguration({ trigger: next })}
+              />
             ) : null}
           </div>
           <div className="grid gap-1.5">
