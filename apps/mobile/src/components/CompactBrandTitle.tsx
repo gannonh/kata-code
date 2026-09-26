@@ -6,6 +6,7 @@ import { AppText as Text } from "./AppText";
 import { KataMark } from "./KataMark";
 import { IPAD_HOME_TITLE_OFFSET } from "../lib/layoutMetrics";
 import { resolveMobileStageLabel } from "../lib/mobileBranding";
+import { useAndroidControlSizing } from "./useAndroidControlSizing";
 
 /**
  * Horizontal correction applied to content rendered in the brand title slot,
@@ -26,6 +27,7 @@ export function CompactBrandTitle(
 ) {
   const stageLabel = resolveMobileStageLabel(Constants.expoConfig?.extra?.appVariant);
   const titleOffset = brandTitleOffset();
+  const { scale } = useAndroidControlSizing();
 
   return (
     <View
@@ -37,12 +39,12 @@ export function CompactBrandTitle(
         alignItems: "center",
         flexDirection: "row",
         flexShrink: 1,
-        gap: 6,
+        gap: Platform.OS === "android" ? 5.25 * scale : 6,
         marginLeft: titleOffset,
         minWidth: 0,
       }}
     >
-      <KataMark borderRadius={6} size={20} />
+      <KataMark borderRadius={Math.round(6 * scale)} size={Math.round(20 * scale)} />
       <Text
         allowFontScaling={props.allowFontScaling}
         className="text-foreground-muted"
@@ -51,8 +53,8 @@ export function CompactBrandTitle(
         style={{
           flexShrink: 1,
           fontFamily: "DMSans-Medium",
-          fontSize: 21,
-          letterSpacing: -0.5,
+          fontSize: 21 * scale,
+          letterSpacing: -0.5 * scale,
           minWidth: 0,
         }}
       >
@@ -63,13 +65,14 @@ export function CompactBrandTitle(
         style={{
           borderRadius: 999,
           flexShrink: 0,
-          paddingHorizontal: 6,
-          paddingVertical: 2,
+          paddingHorizontal: Platform.OS === "android" ? 5.25 * scale : 6,
+          paddingVertical: Platform.OS === "android" ? 1.75 * scale : 2,
         }}
       >
         <Text
           allowFontScaling={props.allowFontScaling}
-          className="font-t3-bold text-[9px] tracking-[0.9px] text-foreground-muted uppercase"
+          className="font-t3-bold text-foreground-muted uppercase"
+          style={{ fontSize: 9 * scale, letterSpacing: 0.9 * scale }}
         >
           {stageLabel}
         </Text>
