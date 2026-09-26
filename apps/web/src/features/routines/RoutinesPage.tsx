@@ -90,18 +90,11 @@ import {
   type GitHubTriggerPatch,
   type LinearTriggerPatch,
   type RoutineEditorDraft,
-  type RoutineEditorGitHubTrigger,
-  type RoutineEditorLinearTrigger,
   type RoutineTriggerKind,
 } from "./RoutinesPage.logic";
 import { FieldLabel } from "./FieldLabel";
-import { GitHubConnectionPanel } from "./GitHubConnectionPanel";
-import { LinearConnectionPanel } from "./LinearConnectionPanel";
-import {
-  GitHubTriggerFields,
-  LinearTriggerFields,
-  ScheduleTriggerFields,
-} from "./RoutineTriggerFields";
+import { ScheduleTriggerFields } from "./RoutineTriggerFields";
+import { GitHubTriggerSection, LinearTriggerSection } from "./EventTriggerSections";
 import { RoutineChat } from "./RoutineChat";
 
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
@@ -277,120 +270,6 @@ function RoutineCard({
         </span>
       </div>
     </button>
-  );
-}
-
-function GitHubTriggerSection({
-  environmentId,
-  trigger,
-  connections,
-  selectedConnection,
-  offline,
-  busy,
-  onTriggerChange,
-  onConnectionChange,
-}: {
-  readonly environmentId: EnvironmentId;
-  readonly trigger: RoutineEditorGitHubTrigger;
-  readonly connections: readonly GitHubRoutineConnection[];
-  readonly selectedConnection: GitHubRoutineConnection | undefined;
-  readonly offline: boolean;
-  readonly busy: boolean;
-  readonly onTriggerChange: (patch: GitHubTriggerPatch) => void;
-  readonly onConnectionChange: (connection: GitHubRoutineConnection) => void;
-}) {
-  const [setupBusy, setSetupBusy] = useState(false);
-  const metadata = useEnvironmentQuery(
-    routineEnvironment.gitHubMetadata({
-      environmentId,
-      input: selectedConnection ? { repository: selectedConnection.repositoryName } : {},
-    }),
-  );
-  const disabled = offline || busy || setupBusy;
-  return (
-    <div className="grid gap-2" data-testid="routine-github-trigger">
-      <GitHubConnectionPanel
-        environmentId={environmentId}
-        connections={connections}
-        selectedConnection={selectedConnection}
-        repositoryNames={metadata.data?.repositories.map((entry) => entry.nameWithOwner) ?? []}
-        disabled={disabled}
-        setupBusy={setupBusy}
-        onSetupBusyChange={setSetupBusy}
-        onConnectionChange={onConnectionChange}
-      />
-      <GitHubTriggerFields
-        trigger={trigger}
-        defaultBranch={selectedConnection?.defaultBranch}
-        branches={metadata.data?.repository?.branches ?? []}
-        labels={metadata.data?.repository?.labels ?? []}
-        disabled={disabled}
-        onTriggerChange={onTriggerChange}
-      />
-    </div>
-  );
-}
-
-function LinearTriggerSection({
-  environmentId,
-  trigger,
-  connections,
-  selectedConnection,
-  offline,
-  busy,
-  onTriggerChange,
-  onConnectionChange,
-}: {
-  readonly environmentId: EnvironmentId;
-  readonly trigger: RoutineEditorLinearTrigger;
-  readonly connections: readonly LinearRoutineConnection[];
-  readonly selectedConnection: LinearRoutineConnection | undefined;
-  readonly offline: boolean;
-  readonly busy: boolean;
-  readonly onTriggerChange: (patch: LinearTriggerPatch) => void;
-  readonly onConnectionChange: (connection: LinearRoutineConnection) => void;
-}) {
-  const [setupBusy, setSetupBusy] = useState(false);
-  const [createdConnection, setCreatedConnection] = useState<LinearRoutineConnection | null>(null);
-  const metadata = useEnvironmentQuery(
-    selectedConnection
-      ? routineEnvironment.linearMetadata({
-          environmentId,
-          input: { connectionId: selectedConnection.id },
-        })
-      : null,
-  );
-  const disabled = offline || busy || setupBusy;
-  const triggerConnectionId = trigger.connectionId ?? null;
-  useEffect(() => {
-    if (createdConnection !== null && createdConnection.id !== triggerConnectionId) {
-      setCreatedConnection(null);
-    }
-  }, [createdConnection, triggerConnectionId]);
-  // A just-created connection shows before the connections query refreshes.
-  const connection =
-    createdConnection?.id === triggerConnectionId ? createdConnection : selectedConnection;
-  return (
-    <div className="grid gap-2" data-testid="routine-linear-trigger">
-      <LinearConnectionPanel
-        environmentId={environmentId}
-        connections={connections}
-        connection={connection}
-        createdConnection={createdConnection}
-        disabled={disabled}
-        onCreatedConnectionChange={setCreatedConnection}
-        onSetupBusyChange={setSetupBusy}
-        onConnectionChange={onConnectionChange}
-      />
-      <LinearTriggerFields
-        trigger={trigger}
-        connection={connection}
-        metadata={metadata.data}
-        metadataError={metadata.error}
-        disabled={disabled}
-        onTriggerChange={onTriggerChange}
-      />
-    </div>
   );
 }
 
