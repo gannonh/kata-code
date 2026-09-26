@@ -59,6 +59,8 @@ it.layer(NodeServices.layer)("replayMarkers", (it) => {
         "cloud-mint-nonce-old",
         "cloud-health-jti-old",
         "cloud-health-nonce-old",
+        "cloud-linear-oauth-jti-old",
+        "cloud-linear-oauth-nonce-old",
       ];
       for (const name of expiredMarkers) yield* writeAged(name, justExpired);
       yield* writeAged("dpop-proof-at-max-age", REPLAY_MARKER_MAX_AGE);
