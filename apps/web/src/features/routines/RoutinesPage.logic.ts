@@ -27,6 +27,8 @@ import {
   type ScheduleTrigger,
   type VcsRef,
 } from "@kata-sh/code-contracts";
+import * as Cause from "effect/Cause";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { randomUUID } from "../../lib/utils";
@@ -46,6 +48,15 @@ function remoteRefBranchName(ref: Pick<VcsRef, "name" | "remoteName" | "isRemote
     return ref.name.slice(ref.remoteName.length + 1);
   }
   return ref.name;
+}
+
+export function worktreeWorkspace(baseBranch: string): RoutineDraft["workspace"] {
+  return {
+    kind: "worktree",
+    baseBranch,
+    startFromOrigin: true,
+    runSetupScript: true,
+  };
 }
 
 export function preferredWorktreeBaseBranch(refs: ReadonlyArray<VcsRef>): string | null {
@@ -279,6 +290,17 @@ export function applyRoutineDraftGenerationResponse(
   }
 
   return { status: "applied", draft: reviewDraft, revision: currentRevision + 1 };
+}
+
+/** RPC command results carry the expected failure inside a cause; unwrap it for its message. */
+export function errorMessage(value: unknown): string {
+  const error = Cause.isCause(value) ? Option.getOrNull(Cause.findErrorOption(value)) : value;
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message;
+  }
+  return "The routine request failed. Try again.";
 }
 
 /** Fail closed when the themed confirm host is not registered yet (`undefined`). */

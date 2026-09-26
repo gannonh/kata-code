@@ -22,10 +22,7 @@ import {
   type ScheduleTrigger,
 } from "@kata-sh/code-contracts";
 import { useAtomValue } from "@effect/atom-react";
-import * as Cause from "effect/Cause";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import type { ReactNode } from "react";
 import {
   CalendarClockIcon,
   CheckCircle2Icon,
@@ -72,6 +69,7 @@ import {
   DELETE_ROUTINE_MESSAGE,
   DISCARD_UNSAVED_ROUTINE_MESSAGE,
   enabledProviders,
+  errorMessage,
   firstEnabledProviderModel,
   formatRoutineTrigger,
   gitHubEditorTrigger,
@@ -103,11 +101,13 @@ import {
   routinesLibraryEmptyKind,
   selectableConnections,
   switchRoutineEditorTrigger,
+  worktreeWorkspace,
   type RoutineEditorDraft,
   type RoutineEditorGitHubTrigger,
   type RoutineEditorLinearTrigger,
   type RoutineTriggerKind,
 } from "./RoutinesPage.logic";
+import { FieldLabel } from "./FieldLabel";
 import { RoutineChat } from "./RoutineChat";
 
 const decodeModelSelection = Schema.decodeUnknownSync(ModelSelection);
@@ -149,15 +149,6 @@ const runStatusLabel: Record<RoutineRun["status"], string> = {
   skipped: "Skipped",
   blocked: "Blocked",
 };
-
-function worktreeWorkspace(baseBranch: string): RoutineDraft["workspace"] {
-  return {
-    kind: "worktree",
-    baseBranch,
-    startFromOrigin: true,
-    runSetupScript: true,
-  };
-}
 
 function defaultDraft(
   environmentId: EnvironmentId,
@@ -206,17 +197,6 @@ function formatDateInTimezone(value: string, timezone: string): string {
   } catch {
     return value;
   }
-}
-
-/** RPC command results carry the expected failure inside a cause; unwrap it for its message. */
-function errorMessage(value: unknown): string {
-  const error = Cause.isCause(value) ? Option.getOrNull(Cause.findErrorOption(value)) : value;
-  if (error instanceof Error && error.message.trim()) return error.message;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return "The routine request failed. Try again.";
 }
 
 function RoutineEnvironmentRows({
@@ -319,20 +299,6 @@ function RoutineCard({
         </span>
       </div>
     </button>
-  );
-}
-
-function FieldLabel({
-  children,
-  htmlFor,
-}: {
-  readonly children: ReactNode;
-  readonly htmlFor: string;
-}) {
-  return (
-    <label htmlFor={htmlFor} className="text-xs font-medium text-muted-foreground">
-      {children}
-    </label>
   );
 }
 
