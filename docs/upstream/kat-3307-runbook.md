@@ -51,6 +51,27 @@ The checker also requires `HEAD` to resolve to `candidate` and rejects every
 non-ignored working-tree change. Run it from a clean checkout of the exact
 candidate commit.
 
+## Retire a check or path
+
+Because CI runs the base checker, a PR cannot remove a check or an owner path
+and pass: the base contract still requires it. Retire it in two PRs instead.
+
+1. Add the check ID to `RETIRED_CHECKS`, or the path to `RETIRED_PATHS`, in
+   `scripts/lib/upstream-preservation/checks.ts`. Each entry names its Linear
+   issue and reason. Leave the code and the inventory unchanged. The base
+   checker accepts this PR because the inventory still matches its contract.
+   After it lands, the new checker skips the retired check, removes retired
+   paths from owner, required, and trusted paths, and accepts an inventory that
+   still lists them.
+2. Once step 1 is on `main`, delete the retired code and inventory entries in a
+   second PR. Its base checker already treats them as retired.
+
+A retirement changes a retained outcome, so it needs a Linear issue that records
+the human decision. The checker rejects a retired ID or path that is not in
+the contract, and a retirement that would leave a check without owner paths or
+a command without required paths. KAT-3543 retired the sandbox checks this way
+before KAT-3544 removed the sandbox feature.
+
 ## Review the full delta
 
 Before running the command, review every path in the complete `base..candidate`

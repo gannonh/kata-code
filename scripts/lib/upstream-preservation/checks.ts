@@ -40,7 +40,7 @@ const vpTestCommand = (paths: ReadonlyArray<string>): CommandPlan => ({
   trustedPaths: paths,
 });
 
-export const PRESERVATION_CHECKS = [
+const CONTRACT_CHECKS = [
   {
     id: "product-identity-release-ownership",
     title: "Kata product identity and release ownership",
@@ -520,5 +520,85 @@ export const PRESERVATION_CHECKS = [
     commands: [],
   },
 ] as const satisfies ReadonlyArray<PreservationCheck>;
+
+export interface Retirement {
+  readonly issue: string;
+  readonly reason: string;
+}
+
+const SANDBOX_REMOVAL: Retirement = {
+  issue: "KAT-3543",
+  reason: "Kata sandboxes are removed (KAT-3544); Docker was their only driver.",
+};
+
+// A retired check does not run, and the inventory may still list it. A retired path leaves
+// every check's owner, required, and trusted paths. Both let a retirement land before the
+// code and inventory entries it covers are deleted, because CI runs the base checker.
+export const RETIRED_CHECKS: ReadonlyMap<string, Retirement> = new Map([
+  ["sandbox-preview-default", SANDBOX_REMOVAL],
+  ["sandbox-route-driver-registration", SANDBOX_REMOVAL],
+]);
+
+export const RETIRED_PATHS: ReadonlyMap<string, Retirement> = new Map([
+  ["apps/server/src/kataSandbox/migrations.ts", SANDBOX_REMOVAL],
+  ["apps/server/src/kataSandbox/migrations.test.ts", SANDBOX_REMOVAL],
+]);
+
+export const withoutRetiredPaths = (paths: ReadonlyArray<string>): ReadonlyArray<string> =>
+  paths.filter((path) => !RETIRED_PATHS.has(path));
+
+const withoutRetiredCommandPaths = (command: CommandPlan): CommandPlan => ({
+  ...command,
+  display: command.display
+    .split(" ")
+    .filter((part) => !RETIRED_PATHS.has(part))
+    .join(" "),
+  args: withoutRetiredPaths(command.args),
+  requiredPaths: withoutRetiredPaths(command.requiredPaths),
+  ...(command.trustedPaths === undefined
+    ? {}
+    : { trustedPaths: withoutRetiredPaths(command.trustedPaths) }),
+});
+
+const assertRetirementsNameContract = (): void => {
+  const contractPaths = new Set(
+    CONTRACT_CHECKS.flatMap((check: PreservationCheck) => [
+      ...check.ownerPaths,
+      ...check.commands.flatMap((command) => [
+        ...command.requiredPaths,
+        ...(command.trustedPaths ?? []),
+      ]),
+    ]),
+  );
+  for (const id of RETIRED_CHECKS.keys()) {
+    if (!CONTRACT_CHECKS.some((check) => check.id === id))
+      throw new Error(`Retired check ${id} is not in the preservation contract.`);
+  }
+  for (const path of RETIRED_PATHS.keys()) {
+    if (!contractPaths.has(path))
+      throw new Error(`Retired path ${path} is not in the preservation contract.`);
+  }
+  for (const check of CONTRACT_CHECKS as ReadonlyArray<PreservationCheck>) {
+    if (RETIRED_CHECKS.has(check.id)) continue;
+    if (withoutRetiredPaths(check.ownerPaths).length === 0)
+      throw new Error(`Retired paths leave check ${check.id} without owner paths.`);
+    for (const command of check.commands) {
+      if (
+        command.requiredPaths.length > 0 &&
+        withoutRetiredPaths(command.requiredPaths).length === 0
+      )
+        throw new Error(`Retired paths leave a ${check.id} command without required paths.`);
+    }
+  }
+};
+assertRetirementsNameContract();
+
+export const PRESERVATION_CHECKS: ReadonlyArray<PreservationCheck> = CONTRACT_CHECKS.filter(
+  (check) => !RETIRED_CHECKS.has(check.id),
+).map((check: PreservationCheck) => ({
+  ...check,
+  ownerPaths: withoutRetiredPaths(check.ownerPaths),
+  commands: check.commands.map(withoutRetiredCommandPaths),
+}));
 
 export const CANONICAL_CHECK_IDS = PRESERVATION_CHECKS.map((check) => check.id);
