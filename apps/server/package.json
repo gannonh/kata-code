@@ -40,7 +40,6 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
-    "@kata-sh/code-client-runtime": "workspace:*",
     "@kata-sh/code-contracts": "workspace:*",
     "@kata-sh/code-shared": "workspace:*",
     "@kata-sh/code-ssh": "workspace:*",
