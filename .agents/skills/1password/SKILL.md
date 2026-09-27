@@ -61,8 +61,11 @@ test -n "${OP_SERVICE_ACCOUNT_TOKEN:-}"
 `op --version` must be beta. `op whoami` must be a service account. To list **names only**:
 
 ```sh
-op environment read "${OP_ENVIRONMENT_ID:-tlgyne6mxr5iejiwvshbxsnxde}" | awk -F= 'NF{print $1}'
+op environment read "${OP_ENVIRONMENT_ID:-tlgyne6mxr5iejiwvshbxsnxde}" |
+  node -e 'for (const k of Object.keys(require("node:util").parseEnv(require("node:fs").readFileSync(0, "utf8")))) console.log(k)'
 ```
+
+This parses stdout with `util.parseEnv`, the parser `loadRepoEnv` uses, so multiline values such as PEM keys stay hidden. Do not list names by splitting lines (`awk`, `cut`, `sed`): each continuation line of a multiline value would print. `op environment read` ignores `--format json`.
 
 Never paste that command's unfiltered stdout into chat. If `loadRepoEnv` throws, report the error class and the first stderr line `op` already sanitized, not the Environment payload.
 
