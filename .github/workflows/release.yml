@@ -706,167 +706,6 @@ jobs:
       resource_key: win32-arm64
       cli_archive: true
 
-  build_sandbox_image:
-    name: Build and verify Sandbox image
-    needs: [preflight]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' }}
-    permissions:
-      contents: read
-      packages: write
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-      VCR_ORG_ID: ${{ secrets.VCR_ORG_ID }}
-      VCR_PROJECT_ID: ${{ secrets.VCR_PROJECT_ID }}
-      VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
-      VERCEL_PROJECT_SLUG: ${{ vars.VERCEL_PROJECT_SLUG }}
-      KATACODE_SANDBOX_IMAGE_REPOSITORY: ${{ vars.KATACODE_SANDBOX_IMAGE_REPOSITORY }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.preflight.outputs.ref }}
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
-
-      # Registry retention belongs to the workflow revision, not the release
-      # ref: a stable release rebuilds an older nightly commit.
-      - name: Checkout registry retention tooling
-        if: ${{ needs.preflight.outputs.dry_run != 'true' }}
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: .release-tooling
-          sparse-checkout: |
-            /scripts/prune-sandbox-images.ts
-            /scripts/release-sandbox-image.ts
-          sparse-checkout-cone-mode: false
-
-      - name: Setup Vite+
-        uses: voidzero-dev/setup-vp@v1
-        with:
-          node-version-file: package.json
-          cache: true
-          run-install: |
-            args:
-              - --filter=@kata-sh/code-cli...
-              - --filter=@kata-sh/code-kata-sandbox-docker...
-              - --filter=@kata-sh/code-scripts...
-
-      - name: Set up cross-platform Buildx
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        if: ${{ needs.preflight.outputs.dry_run != 'true' }}
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Align package versions to release version
-        run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
-
-      - name: Refresh release lockfile
-        run: vp install --lockfile-only --ignore-scripts
-
-      - name: Build Sandbox image
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-          RELEASE_DRY_RUN: ${{ needs.preflight.outputs.dry_run }}
-        run: |
-          set -euo pipefail
-          build_output="$RUNNER_TEMP/sandbox-image-build.json"
-          if [[ "$RELEASE_DRY_RUN" == "true" ]]; then
-            node packages/kata-sandbox-docker/scripts/build-image.mjs \
-              --output-file "$build_output"
-            exit 0
-          fi
-
-          required=(VERCEL_TOKEN VCR_ORG_ID VCR_PROJECT_ID VERCEL_ORG_ID VERCEL_PROJECT_ID)
-          for name in "${required[@]}"; do
-            value="${!name:-}"
-            if [[ -z "${value//[[:space:]]/}" ]]; then
-              echo "Missing required Vercel release configuration: $name" >&2
-              exit 1
-            fi
-          done
-
-          vcr_scope="${VERCEL_TEAM_SLUG:-$VCR_ORG_ID}"
-          repository="${KATACODE_SANDBOX_IMAGE_REPOSITORY:-vcr.vercel.com/${VERCEL_TEAM_SLUG:-kata-sh}/${VERCEL_PROJECT_SLUG:-kata-code}/kata-sandbox}"
-          public_repository="ghcr.io/gannonh/kata-sandbox"
-          vp dlx vercel@59.10.0 vcr login docker \
-            --project "$VCR_PROJECT_ID" \
-            --scope "$vcr_scope" \
-            --token "$VERCEL_TOKEN" \
-            --non-interactive
-
-          # Best effort: a full registry still fails the push below.
-          release_tooling="$GITHUB_WORKSPACE/.release-tooling"
-          if ! node "$release_tooling/scripts/prune-sandbox-images.ts" \
-            --repository "$repository" \
-            --project-id "$VCR_PROJECT_ID" \
-            --team-slug "${VERCEL_TEAM_SLUG:-kata-sh}"; then
-            echo "::warning::Sandbox image pruning failed; pushing anyway."
-          fi
-
-          node packages/kata-sandbox-docker/scripts/build-image.mjs \
-            --platform linux/amd64,linux/arm64 \
-            --push \
-            --reference "$repository" \
-            --tag "$repository:$RELEASE_VERSION" \
-            --tag "$public_repository:$RELEASE_VERSION" \
-            --output-file "$build_output"
-
-          vp dlx vercel@59.10.0 vcr config kata-sandbox \
-            --project "$VCR_PROJECT_ID" \
-            --scope "$vcr_scope" \
-            --public true \
-            --token "$VERCEL_TOKEN" \
-            --non-interactive
-
-          index_digest="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).indexDigest)' "$build_output")"
-          anonymous_config="$RUNNER_TEMP/docker-anonymous"
-          mkdir -p "$anonymous_config"
-          docker --config "$anonymous_config" buildx imagetools inspect \
-            "$public_repository@$index_digest"
-
-          release_args=(
-            --version "$RELEASE_VERSION"
-            --channel "${{ needs.preflight.outputs.release_channel }}"
-            --repository "$repository"
-            --build-output "$build_output"
-            --output sandbox-image.json
-            --project-id "$VCR_PROJECT_ID"
-            --team-slug "${VERCEL_TEAM_SLUG:-kata-sh}"
-          )
-          if [[ "${{ needs.preflight.outputs.make_latest }}" == "true" ]]; then
-            release_args+=(--make-latest)
-          fi
-          node scripts/release-sandbox-image.ts "${release_args[@]}"
-
-          KATACODE_VERCEL_IMAGE_E2E=1 \
-          KATACODE_SANDBOX_IMAGE_ARTIFACT=sandbox-image.json \
-          vp test run scripts/verify-kata-sandbox-image-vercel.test.ts
-
-      - name: Upload Sandbox image metadata
-        if: ${{ needs.preflight.outputs.dry_run != 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: sandbox-image
-          path: sandbox-image.json
-          if-no-files-found: error
-          retention-days: 30
-
   # npm gets the same bytes as the GitHub Release: the launcher plus one
   # package per CLI archive. Preview publishes too, under the `preview`
   # dist-tag, which nothing resolves unless asked for by name.
@@ -884,9 +723,8 @@ jobs:
         desktop_linux_arm64,
         desktop_win_x64,
         desktop_win_arm64,
-        build_sandbox_image,
       ]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.quality.result == 'success' && needs.test.result == 'success' && needs.test_server.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' && needs.desktop_win_x64.result == 'success' && needs.desktop_win_arm64.result == 'success' && needs.build_sandbox_image.result == 'success' }}
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.quality.result == 'success' && needs.test.result == 'success' && needs.test_server.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' && needs.desktop_win_x64.result == 'success' && needs.desktop_win_arm64.result == 'success' }}
     runs-on: ubuntu-24.04 # ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -947,10 +785,9 @@ jobs:
         desktop_linux_arm64,
         desktop_win_x64,
         desktop_win_arm64,
-        build_sandbox_image,
         publish_cli,
       ]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_mac_x64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' && needs.desktop_win_x64.result == 'success' && needs.desktop_win_arm64.result == 'success' && needs.build_sandbox_image.result == 'success' && needs.publish_cli.result == 'success' }}
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_mac_x64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' && needs.desktop_win_x64.result == 'success' && needs.desktop_win_arm64.result == 'success' && needs.publish_cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -986,13 +823,6 @@ jobs:
         with:
           pattern: cli-*
           merge-multiple: true
-          path: release-assets
-
-      - name: Download Sandbox image metadata
-        if: needs.preflight.outputs.dry_run != 'true'
-        uses: actions/download-artifact@v8
-        with:
-          name: sandbox-image
           path: release-assets
 
       # Installers verify archives against this file, so it is written from the
@@ -1084,7 +914,6 @@ jobs:
             fi
             echo 'release-assets/*.tar.gz'
             echo 'release-assets/SHA256SUMS'
-            echo 'release-assets/sandbox-image.json'
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 

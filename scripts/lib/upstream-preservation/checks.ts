@@ -122,54 +122,8 @@ const CONTRACT_CHECKS = [
     ],
   },
   {
-    id: "sandbox-preview-default",
-    title: "Sandbox preview default and settings registration",
-    evidenceKind: "automated",
-    evidenceProfile: "portable",
-    ownerPaths: [
-      "apps/server/src/serverSettings.ts",
-      "apps/server/src/kataSandbox/sandboxFeature.ts",
-      "apps/web/src/components/settings/ConnectionsSettings.sandbox.test.tsx",
-      "apps/web/src/components/settings/settingsBranding.test.tsx",
-    ],
-    specRefs: ["docs/upstream/kat-3297-intake.md", "docs/upstream/kat-3297-verification.md"],
-    commands: [
-      vpTestCommand([
-        "apps/server/src/serverSettings.test.ts",
-        "apps/server/src/kataSandbox/sandboxFeature.test.ts",
-        "apps/web/src/components/settings/ConnectionsSettings.sandbox.test.tsx",
-        "apps/web/src/components/settings/settingsBranding.test.tsx",
-      ]),
-    ],
-  },
-  {
-    id: "sandbox-route-driver-registration",
-    title: "Sandbox route and provider driver registration",
-    evidenceKind: "automated",
-    evidenceProfile: "portable",
-    ownerPaths: [
-      "apps/server/src/kataSandbox",
-      "apps/server/src/server.ts",
-      "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts",
-    ],
-    specRefs: ["docs/internals/kata-sandbox.md", "docs/upstream/kat-3297-decisions.tsv"],
-    commands: [
-      {
-        ...vpTestCommand([
-          "apps/server/src/kataSandbox/sandboxFeature.test.ts",
-          "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.test.ts",
-          "apps/server/src/server.test.ts",
-        ]),
-        trustedPaths: [
-          "apps/server/src/kataSandbox/sandboxFeature.test.ts",
-          "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.test.ts",
-        ],
-      },
-    ],
-  },
-  {
     id: "provider-sandbox-environment-isolation",
-    title: "Provider and sandbox environment isolation",
+    title: "Provider environment isolation",
     evidenceKind: "automated",
     evidenceProfile: "portable",
     ownerPaths: ["apps/server/src/provider/ProviderInstanceEnvironment.ts"],
@@ -187,21 +141,16 @@ const CONTRACT_CHECKS = [
     ownerPaths: [
       "apps/server/src/persistence/Migrations.ts",
       "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
-      "apps/server/src/kataSandbox/migrations.ts",
     ],
     specRefs: ["docs/upstream/kat-3297-decisions.tsv", "docs/upstream/kat-3297-intake.md"],
     commands: [
       {
-        ...vpTestCommand([
-          "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
-          "apps/server/src/kataSandbox/migrations.test.ts",
-        ]),
+        ...vpTestCommand(["apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts"]),
         requiredPaths: [
           "apps/server/src/persistence/Migrations.ts",
           "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
-          "apps/server/src/kataSandbox/migrations.test.ts",
         ],
-        trustedPaths: ["apps/server/src/kataSandbox/migrations.test.ts"],
+        trustedPaths: [],
       },
     ],
   },
@@ -535,31 +484,13 @@ export interface RetirementTables {
   readonly unfrozenTrustedPaths: ReadonlyMap<string, Retirement>;
 }
 
-const SANDBOX_REMOVAL: Retirement = {
-  issue: "KAT-3543",
-  reason: "Kata sandboxes are removed (KAT-3544); Docker was their only driver.",
-};
-
 // CI runs the base checker, so a retirement lands here first and the code and inventory
 // entries it covers are deleted in a later PR. See docs/upstream/kat-3307-runbook.md.
+// KAT-3543 retired the sandbox checks; KAT-3544 removed them with the sandbox feature.
 export const RETIREMENTS: RetirementTables = {
-  checks: new Map([
-    ["sandbox-preview-default", SANDBOX_REMOVAL],
-    ["sandbox-route-driver-registration", SANDBOX_REMOVAL],
-  ]),
-  paths: new Map([
-    ["apps/server/src/kataSandbox/migrations.ts", SANDBOX_REMOVAL],
-    ["apps/server/src/kataSandbox/migrations.test.ts", SANDBOX_REMOVAL],
-  ]),
-  unfrozenTrustedPaths: new Map([
-    [
-      "apps/server/src/provider/ProviderInstanceEnvironment.test.ts",
-      {
-        ...SANDBOX_REMOVAL,
-        reason: "The sandbox bootstrap-token case leaves with the sandbox (KAT-3544).",
-      },
-    ],
-  ]),
+  checks: new Map(),
+  paths: new Map(),
+  unfrozenTrustedPaths: new Map(),
 };
 
 export const PRESERVATION_CONTRACT: ReadonlyArray<PreservationCheck> = CONTRACT_CHECKS;

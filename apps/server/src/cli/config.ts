@@ -148,18 +148,6 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  sandboxBootstrapToken: Config.String("KATACODE_SANDBOX_BOOTSTRAP_TOKEN").pipe(
-    Config.option,
-    Config.map(Option.getOrUndefined),
-  ),
-  sandboxesEnabled: Config.Boolean("KATACODE_SANDBOXES").pipe(
-    Config.option,
-    Config.map(Option.getOrUndefined),
-  ),
-  sandboxImageRepository: Config.String("KATACODE_SANDBOX_IMAGE_REPOSITORY").pipe(
-    Config.option,
-    Config.map(Option.getOrUndefined),
-  ),
   autoBootstrapProjectFromCwd: Config.Boolean("KATACODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD").pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
@@ -360,9 +348,6 @@ export const resolveServerConfig = (
       () => mode === "desktop",
     );
     const desktopBootstrapToken = bootstrap?.desktopBootstrapToken;
-    const sandboxBootstrapToken = env.sandboxBootstrapToken;
-    const sandboxesEnabled = env.sandboxesEnabled;
-    const sandboxImageRepository = env.sandboxImageRepository?.trim();
     const desktopTelemetryFd = bootstrap?.desktopTelemetryFd;
     const desktopTelemetryControlFd = bootstrap?.desktopTelemetryControlFd;
     const resourceMonitorPath = bootstrap?.resourceMonitorPath;
@@ -468,11 +453,6 @@ export const resolveServerConfig = (
       noBrowser,
       startupPresentation,
       desktopBootstrapToken,
-      ...(sandboxBootstrapToken === undefined ? {} : { sandboxBootstrapToken }),
-      ...(sandboxesEnabled === undefined ? {} : { sandboxesEnabled }),
-      ...(sandboxImageRepository === undefined || sandboxImageRepository.length === 0
-        ? {}
-        : { sandboxImageRepository }),
       desktopTelemetryFd,
       desktopTelemetryControlFd,
       resourceMonitorPath,

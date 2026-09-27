@@ -98,10 +98,6 @@ export class ServerConfig extends Context.Service<
     readonly noBrowser: boolean;
     readonly startupPresentation: StartupPresentation;
     readonly desktopBootstrapToken: string | undefined;
-    readonly sandboxBootstrapToken?: string | undefined;
-    /** Process override for `ServerSettings.enableSandboxes`. Unset means use the stored setting. */
-    readonly sandboxesEnabled?: boolean | undefined;
-    readonly sandboxImageRepository?: string | undefined;
     readonly desktopTelemetryFd?: number | undefined;
     readonly desktopTelemetryControlFd?: number | undefined;
     readonly resourceMonitorPath?: string | undefined;

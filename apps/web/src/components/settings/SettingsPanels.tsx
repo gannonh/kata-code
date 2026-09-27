@@ -73,7 +73,6 @@ import {
   useTheme,
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import { usePrimarySessionState } from "../../environments/primary";
 import { planScopedSettingsPatch, partitionScopedSettingsPatch } from "./scopedSettings";
 import {
   useScopedSettings,
@@ -160,9 +159,6 @@ import {
   readLastEnabledProjectGroupingMode,
   rememberEnabledProjectGroupingMode,
   resolveBackgroundActivityProfileOption,
-  foldedSectionHeadingForSearchTarget,
-  GENERAL_FOLDED_SECTION_ORDER,
-  sessionCanAdministerSettings,
 } from "./SettingsPanels.logic";
 import {
   PolicyTooltip,
@@ -611,9 +607,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
         ? ["Provider update checks"]
         : []),
-      ...(settings.enableSandboxes !== DEFAULT_UNIFIED_SETTINGS.enableSandboxes
-        ? ["Sandboxes (preview)"]
-        : []),
       ...(settings.continueThreadsAfterServerUpdate !==
       DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
         ? ["Continue threads after restarts"]
@@ -689,7 +682,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.panelAnimationDurationMs,
       settings.responseStreamingMode,
       settings.enableProviderUpdateChecks,
-      settings.enableSandboxes,
       settings.continueThreadsAfterServerUpdate,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
@@ -795,7 +787,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
-      enableSandboxes: DEFAULT_UNIFIED_SETTINGS.enableSandboxes,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
@@ -2099,9 +2090,7 @@ function LegacyFeaturesSection() {
       lastExpandedTargetRef.current = null;
       return;
     }
-    if (foldedSectionHeadingForSearchTarget(searchTargetId) !== GENERAL_FOLDED_SECTION_ORDER[1]) {
-      return;
-    }
+    if (!LEGACY_FEATURE_TARGET_IDS.has(searchTargetId)) return;
     if (lastExpandedTargetRef.current === searchTargetId) return;
     lastExpandedTargetRef.current = searchTargetId;
     setOpen(true);
@@ -2111,8 +2100,8 @@ function LegacyFeaturesSection() {
     <section id="legacy-features" ref={targetRef} tabIndex={-1} className="space-y-2.5">
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-3 sm:px-4">
-          <h2 className="text-lg font-semibold tracking-tight text-muted-foreground transition-colors group-hover:text-foreground">
-            {GENERAL_FOLDED_SECTION_ORDER[1]}
+          <h2 className="text-sm font-normal text-foreground/70 transition-colors group-hover:text-foreground">
+            Legacy features
           </h2>
           <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
         </CollapsibleTrigger>
@@ -2158,80 +2147,6 @@ function LegacyFeaturesSection() {
               }
             />
           </SettingsGroup>
-        </CollapsiblePanel>
-      </Collapsible>
-    </section>
-  );
-}
-
-function SandboxesPreviewSetting() {
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-  return (
-    <SettingsRow
-      {...searchableSetting("sandboxes-preview")}
-      description="Preview for development. Turn on Docker sandboxes for this server. Off by default. Takes effect on the next request."
-      resetAction={
-        settings.enableSandboxes !== DEFAULT_UNIFIED_SETTINGS.enableSandboxes ? (
-          <SettingResetButton
-            label="sandboxes preview"
-            onClick={() =>
-              updateSettings({
-                enableSandboxes: DEFAULT_UNIFIED_SETTINGS.enableSandboxes,
-              })
-            }
-          />
-        ) : null
-      }
-      control={
-        <Switch
-          checked={settings.enableSandboxes}
-          onCheckedChange={(checked) => updateSettings({ enableSandboxes: Boolean(checked) })}
-          aria-label="Sandboxes (preview)"
-        />
-      }
-    />
-  );
-}
-
-function ExperimentalFeaturesSection() {
-  const primarySessionState = usePrimarySessionState();
-  const canAdminister = sessionCanAdministerSettings({
-    hasDesktopBridge: Boolean(window.desktopBridge),
-    authenticated: primarySessionState.data?.authenticated === true,
-    scopes: primarySessionState.data?.scopes ?? null,
-  });
-  const [open, setOpen] = useState(false);
-  const searchTargetId = useSettingsSearchTargetId();
-  const lastExpandedTargetRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (searchTargetId === null) {
-      lastExpandedTargetRef.current = null;
-      return;
-    }
-    if (foldedSectionHeadingForSearchTarget(searchTargetId) !== GENERAL_FOLDED_SECTION_ORDER[0]) {
-      return;
-    }
-    if (lastExpandedTargetRef.current === searchTargetId) return;
-    lastExpandedTargetRef.current = searchTargetId;
-    setOpen(true);
-  }, [searchTargetId]);
-
-  if (!canAdminister) return null;
-
-  return (
-    <section className="space-y-3">
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-3 sm:px-4">
-          <h2 className="text-lg font-semibold tracking-tight text-muted-foreground transition-colors group-hover:text-foreground">
-            {GENERAL_FOLDED_SECTION_ORDER[0]}
-          </h2>
-          <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
-        </CollapsibleTrigger>
-        <CollapsiblePanel>
-          <div className="relative space-y-1 overflow-visible pt-3 text-foreground">
-            <SandboxesPreviewSetting />
-          </div>
         </CollapsiblePanel>
       </Collapsible>
     </section>
@@ -3371,7 +3286,6 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
 
-      <ExperimentalFeaturesSection />
       <LegacyFeaturesSection />
     </SettingsPageContainer>
   );

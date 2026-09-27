@@ -814,14 +814,6 @@ describe("provider enabled defaults", () => {
 });
 
 describe("ServerSettings worktree defaults", () => {
-  it("defaults sandboxes off for legacy configs", () => {
-    expect(decodeServerSettings({}).enableSandboxes).toBe(false);
-  });
-
-  it("accepts sandboxes preview updates", () => {
-    expect(decodeServerSettingsPatch({ enableSandboxes: true }).enableSandboxes).toBe(true);
-  });
-
   it("defaults the thread env mode to inherit and keeps stored values", () => {
     expect(decodeServerSettings({}).defaultThreadEnvMode).toBeNull();
     expect(decodeServerSettings({ defaultThreadEnvMode: "worktree" }).defaultThreadEnvMode).toBe(

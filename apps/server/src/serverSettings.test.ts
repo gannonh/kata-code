@@ -999,29 +999,6 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("persists a non-default enableSandboxes setting", () =>
-    Effect.gen(function* () {
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
-      const serverConfig = yield* ServerConfig.ServerConfig;
-      const fileSystem = yield* FileSystem.FileSystem;
-
-      assert.equal((yield* serverSettings.getSettings).enableSandboxes, false);
-
-      const next = yield* serverSettings.updateSettings({ enableSandboxes: true });
-      assert.equal(next.enableSandboxes, true);
-      assert.equal((yield* serverSettings.getSettings).enableSandboxes, true);
-
-      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
-      assert.equal(JSON.parse(raw).enableSandboxes, true);
-
-      yield* serverSettings.updateSettings({ enableSandboxes: false });
-      const restored = yield* fileSystem.readFileString(serverConfig.settingsPath);
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
-      assert.equal(JSON.parse(restored).enableSandboxes, undefined);
-    }).pipe(Effect.provide(makeServerSettingsLayer())),
-  );
-
   it.effect("writes non-default settings and explicit optional provider defaults to disk", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;

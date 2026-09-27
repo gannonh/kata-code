@@ -371,12 +371,12 @@ describe("scoped settings writes", () => {
   });
 
   it("keeps project restore writes when the patch also has environment-only keys", () => {
-    const mixed = { enableSandboxes: false, defaultAutoPull: true };
+    const mixed = { enableProviderUpdateChecks: false, defaultAutoPull: true };
     expect(planScopedSettingsPatch(project, environments, mixed)).toMatchObject({
       serverWrites: [],
     });
     const { projectOrClient, environmentOnly } = partitionScopedSettingsPatch(mixed);
-    expect(environmentOnly).toEqual({ enableSandboxes: false });
+    expect(environmentOnly).toEqual({ enableProviderUpdateChecks: false });
     expect(projectOrClient).toEqual({ defaultAutoPull: true });
     expect(planScopedSettingsPatch(project, environments, projectOrClient).serverWrites).toEqual([
       {
