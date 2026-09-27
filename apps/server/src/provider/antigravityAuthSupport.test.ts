@@ -108,7 +108,6 @@ describe("Antigravity process environment", () => {
         ANTIGRAVITY_HARNESS_PATH: "/release/harness",
         BROWSER: profile.browserCommand,
         PYTHONUNBUFFERED: "1",
-        ELECTRON_RUN_AS_NODE: "1",
         TMPDIR: profile.tempDirectory,
       },
     });
@@ -215,6 +214,7 @@ describe("Antigravity process environment", () => {
       baseEnv: { PATH: "C:\\Windows\\system32", TEMP: "C:\\Users\\user\\AppData\\Local\\Temp" },
     };
     const shared = buildAntigravityAcpSpawnInput(input);
+    expect(shared.env?.ELECTRON_RUN_AS_NODE).toBe("1");
     expect(shared.env?.TEMP).toBe(windowsProfile.tempDirectory);
     expect(shared.env?.TMP).toBe(windowsProfile.tempDirectory);
     const perRun = buildAntigravityAcpSpawnInput({
@@ -577,6 +577,46 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
       Effect.provideService(HostProcessIsExecutable, true),
       Effect.provideService(HostProcessExecutablePath, "/packaged/t3"),
     ),
+  );
+
+  it.effect("sets ELECTRON_RUN_AS_NODE only on the POSIX browser command", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fs.makeTempDirectoryScoped();
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      let helperCommand: ChildProcess.StandardCommand | undefined;
+      // The runtime path does not exist here, so the preflight fails after spawning.
+      const result = yield* prepareAntigravityProfile({
+        profileDirectory: path.join(directory, "profile"),
+        baseEnv: { PATH: "/usr/bin", ELECTRON_RUN_AS_NODE: "1" },
+        platform: "darwin",
+        runtimeExecutablePath: "/Applications/Kata Code.app/Contents/MacOS/Kata Code",
+      }).pipe(
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make((command) => {
+            if (ChildProcess.isStandardCommand(command)) helperCommand = command;
+            return spawner.spawn(command);
+          }),
+        ),
+        Effect.result,
+      );
+      expect(Result.isFailure(result)).toBe(true);
+      expect(helperCommand?.command).toBe("/usr/bin/env");
+      expect(helperCommand?.args).toEqual([
+        "ELECTRON_RUN_AS_NODE=1",
+        "/Applications/Kata Code.app/Contents/MacOS/Kata Code",
+        "-e",
+        expect.stringContaining(ANTIGRAVITY_AUTH_BROWSER_MARKER),
+        "--",
+        "https://example.invalid/t3-antigravity-browser-preflight",
+      ]);
+      expect(helperCommand?.options.env?.ELECTRON_RUN_AS_NODE).toBeUndefined();
+      expect(helperCommand?.options.env?.BROWSER).toBe(
+        `'/usr/bin/env' 'ELECTRON_RUN_AS_NODE=1' '/Applications/Kata Code.app/Contents/MacOS/Kata Code' '-e' '${helperCommand?.args[3]}' '--' '%s'`,
+      );
+    }),
   );
 
   it.effect("reports missing Node before creating the standalone sign-in profile", () =>
