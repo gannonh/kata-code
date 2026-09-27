@@ -21,6 +21,7 @@ import { environmentAuthenticatedAuthLayer } from "../auth/http.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as AgentAwarenessRelay from "../relay/AgentAwarenessRelay.ts";
 import { readLinearAccessToken, routineLinearOAuthSecretName } from "../routines/LinearOAuth.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import { CLOUD_LINKED_USER_ID, CLOUD_MINT_PUBLIC_KEY, RELAY_ISSUER_SECRET } from "./config.ts";
@@ -58,6 +59,7 @@ const appLayer = HttpRouter.serve(routesLayer, {
   Layer.provide(Layer.mock(ManagedEndpointRuntime.CloudManagedEndpointRuntime)({})),
   Layer.provide(Layer.mock(EnvironmentAuth.EnvironmentAuth)({})),
   Layer.provide(Layer.mock(CliTokenManager.CloudCliTokenManager)({})),
+  Layer.provide(Layer.mock(AgentAwarenessRelay.AgentAwarenessRelay)({})),
   Layer.provide(FetchHttpClient.layer),
   Layer.provideMerge(
     HttpPlatform.layer.pipe(
