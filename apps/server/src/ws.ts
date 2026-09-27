@@ -125,7 +125,6 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
-import { presentServerSettingsForClient } from "./kataSandbox/sandboxFeature.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -582,7 +581,6 @@ const makeWsRpcLayer = (
       const providerInstallation = yield* makeProviderInstallation();
       const serverUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
-      const sandboxesEnabledOverride = config.sandboxesEnabled;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -1930,9 +1928,8 @@ const makeWsRpcLayer = (
           const providers = options.usageLimitsCommand
             ? withUsageLimitsCommands(currentProviders, yield* usageLimitSources.current)
             : currentProviders;
-          const settings = presentServerSettingsForClient(
+          const settings = ServerSettings.redactServerSettingsForClient(
             yield* serverSettings.getSettings,
-            sandboxesEnabledOverride,
           );
           const environment = yield* serverEnvironment.getDescriptor;
           const auth = yield* serverAuth.getDescriptor();
@@ -2932,9 +2929,7 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.serverGetSettings,
             serverSettings.getSettings.pipe(
-              Effect.map((settings) =>
-                presentServerSettingsForClient(settings, sandboxesEnabledOverride),
-              ),
+              Effect.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
             ),
             {
               "rpc.aggregate": "server",
@@ -2953,7 +2948,7 @@ const makeWsRpcLayer = (
                 ...patch,
                 ...(deviceHosts ? { deviceHosts } : {}),
               });
-              return presentServerSettingsForClient(settings, sandboxesEnabledOverride);
+              return ServerSettings.redactServerSettingsForClient(settings);
             }),
             {
               "rpc.aggregate": "server",
@@ -4015,9 +4010,7 @@ const makeWsRpcLayer = (
                     )
                   : Stream.empty;
               const settingsUpdates = serverSettings.streamChanges.pipe(
-                Stream.map((settings) =>
-                  presentServerSettingsForClient(settings, sandboxesEnabledOverride),
-                ),
+                Stream.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
                 Stream.map((settings) => ({
                   version: 1 as const,
                   type: "settingsUpdated" as const,

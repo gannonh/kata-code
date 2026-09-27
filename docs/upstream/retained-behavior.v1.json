@@ -64,42 +64,9 @@
       }
     },
     {
-      "id": "sandbox-preview-default",
-      "title": "Sandbox preview default and settings registration",
-      "retainedOutcome": "Sandbox preview remains registered in settings while disabled by default and available through the explicit Kata override.",
-      "ownerPaths": [
-        "apps/server/src/serverSettings.ts",
-        "apps/server/src/kataSandbox/sandboxFeature.ts",
-        "apps/web/src/components/settings/ConnectionsSettings.sandbox.test.tsx",
-        "apps/web/src/components/settings/settingsBranding.test.tsx"
-      ],
-      "specRefs": ["docs/upstream/kat-3297-intake.md", "docs/upstream/kat-3297-verification.md"],
-      "evidence": {
-        "kind": "automated",
-        "profile": "portable",
-        "verification": "sandbox-preview-default"
-      }
-    },
-    {
-      "id": "sandbox-route-driver-registration",
-      "title": "Sandbox route and provider driver registration",
-      "retainedOutcome": "Sandbox routes and provider instance drivers remain registered together without enabling the default preview.",
-      "ownerPaths": [
-        "apps/server/src/kataSandbox",
-        "apps/server/src/server.ts",
-        "apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts"
-      ],
-      "specRefs": ["docs/internals/kata-sandbox.md", "docs/upstream/kat-3297-decisions.tsv"],
-      "evidence": {
-        "kind": "automated",
-        "profile": "portable",
-        "verification": "sandbox-route-driver-registration"
-      }
-    },
-    {
       "id": "provider-sandbox-environment-isolation",
-      "title": "Provider and sandbox environment isolation",
-      "retainedOutcome": "Sandbox bootstrap credentials are stripped before provider launch and provider home configuration remains isolated.",
+      "title": "Provider environment isolation",
+      "retainedOutcome": "Provider instance environments override inherited values and preserve empty strings, and provider home paths such as CODEX_HOME and CLAUDE_CONFIG_DIR expand before launch.",
       "ownerPaths": ["apps/server/src/provider/ProviderInstanceEnvironment.ts"],
       "specRefs": [
         "docs/upstream/kat-3297-decisions.tsv",
@@ -117,8 +84,7 @@
       "retainedOutcome": "Applied Kata migration IDs remain stable and incoming upstream operations run once at unoccupied IDs.",
       "ownerPaths": [
         "apps/server/src/persistence/Migrations.ts",
-        "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
-        "apps/server/src/kataSandbox/migrations.ts"
+        "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts"
       ],
       "specRefs": ["docs/upstream/kat-3297-decisions.tsv", "docs/upstream/kat-3297-intake.md"],
       "evidence": {

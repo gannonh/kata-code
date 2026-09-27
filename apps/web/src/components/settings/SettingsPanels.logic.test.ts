@@ -16,7 +16,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   backgroundActivitySharedPolicySettings,
   buildProviderInstanceUpdatePatch,
-  EXPERIMENTAL_FEATURE_TARGET_IDS,
   foldedSectionHeadingForSearchTarget,
   formatDiagnosticsDescription,
   GENERAL_FOLDED_SECTION_ORDER,
@@ -302,13 +301,8 @@ describe("getChangedBrowserSettingLabels", () => {
 });
 
 describe("general folded sections", () => {
-  it("orders Experimental above Legacy features", () => {
-    expect(GENERAL_FOLDED_SECTION_ORDER).toEqual(["Experimental", "Legacy features"]);
-  });
-
-  it("maps a sandboxes preview search jump to Experimental", () => {
-    expect(foldedSectionHeadingForSearchTarget("sandboxes-preview")).toBe("Experimental");
-    expect(EXPERIMENTAL_FEATURE_TARGET_IDS.has("sandboxes-preview")).toBe(true);
+  it("folds only Legacy features", () => {
+    expect(GENERAL_FOLDED_SECTION_ORDER).toEqual(["Legacy features"]);
   });
 
   it("leaves everyday general rows unfolded", () => {
@@ -325,20 +319,11 @@ describe("general folded sections", () => {
     );
   });
 
-  it("keeps the sandboxes row inside Experimental, above Legacy", () => {
-    const experimentalFn = generalPanelSource.indexOf("function ExperimentalFeaturesSection");
-    const row = generalPanelSource.indexOf("<SandboxesPreviewSetting />");
+  it("mounts Legacy features after the everyday general rows", () => {
     const everydayPanel = generalPanelSource.indexOf("export function GeneralSettingsPanel");
-    const mountExperimental = generalPanelSource.indexOf("<ExperimentalFeaturesSection />");
     const mountLegacy = generalPanelSource.indexOf("<LegacyFeaturesSection />");
-    expect(experimentalFn).toBeGreaterThan(-1);
-    expect(row).toBeGreaterThan(experimentalFn);
-    expect(row).toBeLessThan(everydayPanel);
-    expect(generalPanelSource.slice(everydayPanel, mountExperimental)).not.toContain(
-      "<SandboxesPreviewSetting />",
-    );
-    expect(mountExperimental).toBeGreaterThan(-1);
-    expect(mountExperimental).toBeLessThan(mountLegacy);
+    expect(mountLegacy).toBeGreaterThan(everydayPanel);
+    expect(generalPanelSource).not.toContain("ExperimentalFeaturesSection");
   });
 });
 
