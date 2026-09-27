@@ -66,7 +66,7 @@ Identity mapping applies only to lines this merge adds. Ten auto-merged or new f
 - `docs/operations/observability.md`: a `KATACODE_OTLP_*_URL` still wins over `OTEL_<SIGNAL>_EXPORTER=none` for its signal.
 - `AgentAwarenessRelay.ts` and its test: comments name `katacode connect publish`, the Kata command.
 
-Existing test fixtures that use "T3 Code" as a project name stay, as they did before this range.
+Upstream's new accessibility-label cases in `Sidebar.logic.test.ts` (#13491) use "T3 Code" as a project name. That is test data, not product copy, and the branding check passes, so the cases stay as upstream wrote them.
 
 ## Conflict resolutions
 
@@ -75,13 +75,13 @@ Existing test fixtures that use "T3 Code" as a project name stay, as they did be
 - Scope-only conflicts: `environment-cache-store.ts`, `threadListV2.ts`, `Sidebar.tsx`, `Sidebar.logic.test.ts`, `queuedMessageStore.ts`, `UsagePage.tsx`, `threadSort.test.ts`, and `usageMerge.test.ts` take upstream's imports under Kata scope.
 - `apps/server/package.json`: upstream's node-pty `^1.2.0-beta.15` beside Kata's `oauth4webapi`.
 - `apps/server/src/cloud/http.ts`: Kata's relay-config writes stay inside the `Effect.gen` whose failure rolls back the managed endpoint. Upstream's `awarenessRelay.requestCatchUp()` runs inside it, after the cloud mint key, in upstream's order. It only offers to a queue and cannot fail. Both the `AgentAwarenessRelay` and `LinearOAuth` imports stay.
-- `ProviderCommandReactor.ts`: Kata's `workspaceRoot` beside upstream's `sessionTitle`. The provider session title is now omitted unless the thread was renamed by hand. Routine threads keep their Kata thread title; only the OpenCode or ACP session title changes, as upstream intends for every thread.
+- `ProviderCommandReactor.ts`: Kata's `workspaceRoot` beside upstream's `sessionTitle`. The provider session title is now omitted unless the thread was renamed by hand. Only OpenCode reads the session title (`OpenCodeAdapter.ts`). Routine threads keep their Kata thread title, but an OpenCode routine run now generates its own session title, which Kata discards (KAT-3534).
 - `server.test.ts`: upstream's merged layer with the `AgentAwarenessRelay` mock, plus Kata's `getStatus` on the managed endpoint runtime mock.
   Upstream's new test "wakes the agent awareness relay when this server links or changes publishing" merged cleanly but posted a relay config without the manual relay endpoint Kata requires, so it received 400. It now sends `manualRelayEndpoint`, like every other Kata relay-config test.
 - `UsageService.ts`: Kata's custom-endpoint guard, then upstream's early return when no Cursor login is saved. The guard's result carries an error, so it is still reported.
 - `AppSidebarLayout.tsx`: Kata's `SidebarControl`, which has no sidebar visibility or stage backdrop hooks, with upstream's `usagePageOpen` shortcut context.
 - `scripts/build-desktop-artifact.ts`: Kata keeps two WSL archive shapes, the retained source tree and the Linux CLI release archive (KAT-3297). Upstream's rule that node-pty may load either `build/Release/pty.node` or `prebuilds/linux-<arch>/pty.node` applies to the release archive branch, which now requires `katacode`, `client`, `node_modules`, and one of the two node-pty binaries.
-- `pnpm-lock.yaml`: regenerated from the merged manifests with `vp install`. It adds node-pty 1.2.0-beta.15, jsdom 30.1.1 for web tests, the `@exodus/bytes>@noble/hashes` override, and the nitro-markdown patch hash.
+- `pnpm-lock.yaml`: regenerated from the merged manifests with `vp install`. It adds node-pty 1.2.0-beta.15, jsdom for web tests, the `@exodus/bytes>@noble/hashes` override, and the nitro-markdown patch hash. Regeneration resolved newer test-only packages than upstream's lock (jsdom 30.1.1 instead of 30.1.0, html-encoding-sniffer 7.0.0, w3c-xmlserializer 6.0.0); the new jsdom tests pass.
 
 ## Clean merges and new files
 
@@ -118,3 +118,5 @@ The base `server.test.ts` does not provide `AgentAwarenessRelay`, which the clou
 ## Host limits
 
 Local verification runs on a macOS arm64 Mac mini inside a Kata Code agent shell with `ELECTRON_RUN_AS_NODE` unset (KAT-3452). The Xcode license is accepted on this host (KAT-3496 comment 95c2f41b), so the mobile native regression tests compile. Windows and Android are parked (KAT-3513), so the Windows WSL packaging change is verified by the portable tests only.
+
+The full server suite passed 5832 tests and failed one: `sshDeviceScript.test.ts` "reuses its own healthy helpers and stops only its own runtime" timed out after 120 s. It times out identically on unmodified main `22e495d98`, and the range does not touch `apps/server/src/device/`. The investigation is KAT-3533, and Linux CI is the authoritative run.
