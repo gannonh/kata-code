@@ -1,6 +1,6 @@
 # Verified history and gotchas
 
-These observations were checked against Kata main `0c2aa608219f35ae1254092fa81a25ff26aac6d3` on September 10, 2026. The integration records were checked against `origin/main` `719891cd2b75610d5f07441bcd21b1b191d1e7bf` on September 25, 2026. The workflow-reference lesson was checked against squash `e96c74aa48e7ae5b56b70db9b7a62096dc0df0d5` on September 15, 2026. Resolve current paths and issue states before applying them. Repository documents are the detailed evidence; this file preserves lessons that change integration decisions.
+These observations were checked against Kata main `0c2aa608219f35ae1254092fa81a25ff26aac6d3` on September 10, 2026. The integration records were checked against `origin/main` `7e3c82657708e6a217ce61641c8054f48e5afa66` on September 27, 2026. The workflow-reference lesson was checked against squash `e96c74aa48e7ae5b56b70db9b7a62096dc0df0d5` on September 15, 2026. Resolve current paths and issue states before applying them. Repository documents are the detailed evidence; this file preserves lessons that change integration decisions.
 
 ## Upstream integrations
 
