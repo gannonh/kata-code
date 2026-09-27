@@ -2710,19 +2710,20 @@ export function ConnectionsSettings() {
     </div>
   );
   const renderRemoteModeBody = () => (
-    <div className="space-y-4">
+    <form
+      className="space-y-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void handleAddSavedBackend();
+      }}
+    >
       {renderRemoteFields()}
       {savedBackendError ? <p className="text-xs text-destructive">{savedBackendError}</p> : null}
-      <Button
-        variant="outline"
-        className="w-full"
-        disabled={isAddingSavedBackend}
-        onClick={() => void handleAddSavedBackend()}
-      >
+      <Button type="submit" variant="outline" className="w-full" disabled={isAddingSavedBackend}>
         <PlusIcon className="size-3.5" />
         {isAddingSavedBackend ? "Adding…" : "Add environment"}
       </Button>
-    </div>
+    </form>
   );
   const renderSshFields = () => (
     <div className="space-y-4">
