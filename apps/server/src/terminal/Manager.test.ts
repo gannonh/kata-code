@@ -220,6 +220,7 @@ interface CreateManagerOptions {
     readonly hasRunningSubprocess: boolean;
     readonly childCommand: string | null;
     readonly processIds: ReadonlyArray<number>;
+    readonly shellForkPids: ReadonlyArray<number>;
   }>;
   processTable?: Effect.Effect<
     ReadonlyArray<{ readonly pid: number; readonly ppid: number; readonly name: string }>,
@@ -298,6 +299,34 @@ const createManager = (
       };
     }),
   );
+
+// Answers `ps -o pid=,pgid=,tpgid= -p <pids>` from a fixed table.
+const processGroupRunner = (
+  groups: ReadonlyMap<number, { readonly pgid: number; readonly tpgid: number }>,
+  calls: Array<string> = [],
+): ProcessRunner.ProcessRunner["Service"] => ({
+  runBytes: () => Effect.die("unused binary process runner"),
+  run: (input) =>
+    Effect.sync(() => {
+      calls.push(input.args.join(" "));
+      const pids = (input.args.at(-1) ?? "").split(",").map(Number);
+      return {
+        stdout: pids
+          .flatMap((pid) => {
+            const group = groups.get(pid);
+            return group ? [`${pid} ${group.pgid} ${group.tpgid}`] : [];
+          })
+          .join("\n"),
+        stderr: "",
+        code: ChildProcessSpawner.ExitCode(0),
+        timedOut: false,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+        stdoutInvalidUtf8: false,
+        stderrInvalidUtf8: false,
+      };
+    }),
+});
 
 const withHostPlatform = (platform: NodeJS.Platform) =>
   Layer.succeed(HostProcessPlatform, platform);
@@ -1016,7 +1045,8 @@ it.layer(
         readonly hasRunningSubprocess: boolean;
         readonly childCommand: string | null;
         readonly processIds: ReadonlyArray<number>;
-      } = { hasRunningSubprocess: false, childCommand: null, processIds: [] };
+        readonly shellForkPids: ReadonlyArray<number>;
+      } = { hasRunningSubprocess: false, childCommand: null, processIds: [], shellForkPids: [] };
       const { manager, getEvents } = yield* createManager(5, {
         subprocessInspector: () => Effect.succeed(inspect),
         subprocessPollIntervalMs: 20,
@@ -1025,7 +1055,12 @@ it.layer(
       yield* manager.open(openInput());
       expect((yield* getEvents).some((event) => event.type === "activity")).toBe(false);
 
-      inspect = { hasRunningSubprocess: true, childCommand: "vim", processIds: [100, 101] };
+      inspect = {
+        hasRunningSubprocess: true,
+        childCommand: "vim",
+        processIds: [100, 101],
+        shellForkPids: [],
+      };
       yield* waitFor(
         Effect.map(getEvents, (events) =>
           events.some(
@@ -1038,7 +1073,12 @@ it.layer(
         "1200 millis",
       );
 
-      inspect = { hasRunningSubprocess: false, childCommand: null, processIds: [] };
+      inspect = {
+        hasRunningSubprocess: false,
+        childCommand: null,
+        processIds: [],
+        shellForkPids: [],
+      };
       yield* waitFor(
         Effect.map(getEvents, (events) =>
           events.some(
@@ -1063,6 +1103,7 @@ it.layer(
             hasRunningSubprocess: false,
             childCommand: null,
             processIds: [],
+            shellForkPids: [],
           });
         },
         subprocessPollIntervalMs: 20,
@@ -1248,7 +1289,18 @@ it.layer(
           { pid: 301, ppid: 300, name: "sleep" },
           { pid: 9003, ppid: 1, name: "zsh" },
         ]),
-      }).pipe(Effect.provide(withHostPlatform("linux")));
+      }).pipe(
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          processGroupRunner(
+            new Map([
+              [9000, { pgid: 9000, tpgid: 9000 }],
+              [100, { pgid: 100, tpgid: 9000 }],
+            ]),
+          ),
+        ),
+        Effect.provide(withHostPlatform("linux")),
+      );
       yield* manager.open(openInput({ terminalId: "idle" }));
       yield* manager.open(openInput({ terminalId: "dev-server" }));
       yield* manager.open(openInput({ terminalId: "subshell" }));
@@ -1265,6 +1317,45 @@ it.layer(
     }),
   );
 
+  it.effect("keeps a terminal whose shell fork leads the foreground process group", () =>
+    Effect.gen(function* () {
+      const psCalls: Array<string> = [];
+      // The prompt helper sits in a background group;
+      // `bash -c 'while read x; do :; done'` owns the terminal's foreground.
+      const processRunner = processGroupRunner(
+        new Map([
+          [9000, { pgid: 9000, tpgid: 9000 }],
+          [100, { pgid: 100, tpgid: 9000 }],
+          [9001, { pgid: 9001, tpgid: 200 }],
+          [200, { pgid: 200, tpgid: 200 }],
+        ]),
+        psCalls,
+      );
+      const { manager, ptyAdapter } = yield* createManager(5, {
+        subprocessPollIntervalMs: 60_000,
+        processTable: Effect.succeed([
+          { pid: 9000, ppid: 1, name: "bash" },
+          { pid: 100, ppid: 9000, name: "bash" },
+          { pid: 9001, ppid: 1, name: "bash" },
+          { pid: 200, ppid: 9001, name: "bash" },
+        ]),
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+        Effect.provide(withHostPlatform("darwin")),
+      );
+      yield* manager.open(openInput({ terminalId: "prompt-helper" }));
+      yield* manager.open(openInput({ terminalId: "same-shell-script" }));
+
+      yield* manager.closeIdle({ threadId: "thread-1" });
+
+      expect(ptyAdapter.processes.map((process) => process.killed)).toEqual([true, false]);
+      expect(psCalls).toEqual([
+        "-o pid=,pgid=,tpgid= -p 9000,100",
+        "-o pid=,pgid=,tpgid= -p 9001,200",
+      ]);
+    }),
+  );
+
   it.effect("keeps terminals that get input or output while closeIdle checks them", () =>
     Effect.gen(function* () {
       const ptyAdapter = new FakePtyAdapter();
@@ -1275,7 +1366,12 @@ it.layer(
         subprocessPollIntervalMs: 60_000,
         subprocessInspector: (pid) =>
           duringCheck(pid).pipe(
-            Effect.as({ hasRunningSubprocess: false, childCommand: null, processIds: [] }),
+            Effect.as({
+              hasRunningSubprocess: false,
+              childCommand: null,
+              processIds: [],
+              shellForkPids: [],
+            }),
           ),
       });
       yield* manager.open(openInput({ terminalId: "typed" }));

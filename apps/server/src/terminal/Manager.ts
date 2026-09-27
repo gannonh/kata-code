@@ -233,6 +233,8 @@ interface TerminalSubprocessInspectResult {
   readonly hasRunningSubprocess: boolean;
   readonly childCommand: string | null;
   readonly processIds: ReadonlyArray<number>;
+  /** Childless copies of the shell that `hasRunningSubprocess` ignored. */
+  readonly shellForkPids: ReadonlyArray<number>;
 }
 
 interface TerminalSubprocessInspector {
@@ -710,14 +712,19 @@ function deriveSubprocessInspectResult(
   const shellName = commandName(terminalPid);
   // Async prompt themes fork the shell into a helper that waits with no
   // children of its own. That copy is not a command the user started.
-  const childPid = (snapshot.childrenByParent.get(terminalPid) ?? []).find(
-    (pid) =>
-      shellName === null ||
-      commandName(pid) !== shellName ||
-      (snapshot.childrenByParent.get(pid)?.length ?? 0) > 0,
-  );
+  const isShellFork = (pid: number) =>
+    shellName !== null &&
+    commandName(pid) === shellName &&
+    (snapshot.childrenByParent.get(pid)?.length ?? 0) === 0;
+  const children = snapshot.childrenByParent.get(terminalPid) ?? [];
+  const childPid = children.find((pid) => !isShellFork(pid));
   if (childPid === undefined) {
-    return { hasRunningSubprocess: false, childCommand: null, processIds: [] };
+    return {
+      hasRunningSubprocess: false,
+      childCommand: null,
+      processIds: [],
+      shellForkPids: children,
+    };
   }
   const processIds = new Set<number>([terminalPid]);
   const pending = [terminalPid];
@@ -735,7 +742,20 @@ function deriveSubprocessInspectResult(
     hasRunningSubprocess: true,
     childCommand: normalized ? truncateTerminalWireLabel(normalized) : null,
     processIds: [...processIds],
+    shellForkPids: [],
   };
+}
+
+function parsePosixProcessGroups(
+  stdout: string,
+): ReadonlyMap<number, { readonly pgid: number; readonly tpgid: number }> {
+  const groups = new Map<number, { readonly pgid: number; readonly tpgid: number }>();
+  for (const line of stdout.split(/\r?\n/g)) {
+    const match = /^\s*(\d+)\s+(\d+)\s+(-?\d+)\s*$/.exec(line);
+    if (!match) continue;
+    groups.set(Number(match[1]), { pgid: Number(match[2]), tpgid: Number(match[3]) });
+  }
+  return groups;
 }
 
 const POSIX_PS_ABSOLUTE_PATHS = ["/bin/ps", "/usr/bin/ps"] as const;
@@ -1481,10 +1501,9 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   // One process-table snapshot per poll tick, shared across every terminal.
   // Per-terminal `pgrep`/`ps` calls multiply spawn load by terminal count and
   // can exhaust the PID space on hosts with many sessions (#6332).
+  const posixPsCommand = platform === "win32" ? "ps" : yield* resolvePosixPsCommand();
   const fallbackProcessTableSnapshot = (
-    platform === "win32"
-      ? windowsProcessTableSnapshot()
-      : posixProcessTableSnapshot(yield* resolvePosixPsCommand())
+    platform === "win32" ? windowsProcessTableSnapshot() : posixProcessTableSnapshot(posixPsCommand)
   ).pipe(Effect.provideService(ProcessRunner.ProcessRunner, processRunner));
   const fetchProcessTableSnapshot: Effect.Effect<
     {
@@ -3068,6 +3087,54 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       }),
     );
 
+  // A prompt helper forks the shell into a background process group. A
+  // same-name command the user started, such as `bash script.sh` sitting in
+  // a builtin `read` loop, leads the terminal's foreground group instead.
+  const hasForegroundShellFork = (
+    shellPid: number,
+    shellForkPids: ReadonlyArray<number>,
+  ): Effect.Effect<boolean, TerminalSubprocessCheckError> =>
+    platform === "win32" || shellForkPids.length === 0
+      ? Effect.succeed(false)
+      : processRunner
+          .run({
+            command: posixPsCommand,
+            args: ["-o", "pid=,pgid=,tpgid=", "-p", [shellPid, ...shellForkPids].join(",")],
+            timeout: "1 second",
+            maxOutputBytes: 65_536,
+            outputMode: "truncate",
+            timeoutBehavior: "timedOutResult",
+          })
+          .pipe(
+            Effect.mapError((cause) => new TerminalSubprocessCheckError({ cause, command: "ps" })),
+            Effect.flatMap((result) => {
+              // ps exits 1 when a listed fork has already exited; the rows it
+              // printed still hold.
+              if (
+                result.timedOut ||
+                result.stdoutTruncated ||
+                result.code === null ||
+                result.code > 1
+              ) {
+                return Effect.fail(
+                  new TerminalSubprocessCheckError({
+                    command: "ps",
+                    exitCode: result.code,
+                    timedOut: result.timedOut,
+                    stdoutTruncated: result.stdoutTruncated,
+                  }),
+                );
+              }
+              const groups = parsePosixProcessGroups(result.stdout);
+              const foreground = groups.get(shellPid)?.tpgid;
+              return Effect.succeed(
+                foreground !== undefined &&
+                  foreground !== groups.get(shellPid)?.pgid &&
+                  shellForkPids.some((pid) => groups.get(pid)?.pgid === foreground),
+              );
+            }),
+          );
+
   const closeIdle: TerminalManager["Service"]["closeIdle"] = (input) =>
     withThreadLock(
       input.threadId,
@@ -3095,8 +3162,12 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           (session) =>
             inspector(session.pid).pipe(
               Effect.flatMap((result) =>
-                result.hasRunningSubprocess ||
-                activityMark(session) !== marks.get(session.terminalId)
+                result.hasRunningSubprocess
+                  ? Effect.succeed(true)
+                  : hasForegroundShellFork(session.pid, result.shellForkPids),
+              ),
+              Effect.flatMap((busy) =>
+                busy || activityMark(session) !== marks.get(session.terminalId)
                   ? Effect.void
                   : closeSession(input.threadId, session.terminalId, false),
               ),
