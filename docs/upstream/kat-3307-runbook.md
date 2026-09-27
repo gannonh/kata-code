@@ -51,6 +51,52 @@ The checker also requires `HEAD` to resolve to `candidate` and rejects every
 non-ignored working-tree change. Run it from a clean checkout of the exact
 candidate commit.
 
+## Retire a check or path
+
+Because CI runs the base checker, a PR cannot remove a check, remove an owner
+path, or edit a trusted assertion and still pass: the base contract still
+requires it. Change the contract in two PRs instead. Both are tracked on a
+Linear issue. The issue owner records the decision there, and each PR merges
+only from Merging.
+
+1. Add the entry to `RETIREMENTS` in
+   `scripts/lib/upstream-preservation/checks.ts`. Each entry names its issue
+   and reason. There are three kinds:
+   - a retired check (`checks`), which no longer runs;
+   - a retired path (`paths`), which leaves every check's owner, required, and
+     trusted paths and its command arguments;
+   - an unfrozen trusted path (`unfrozenTrustedPaths`), which is still
+     required and still run, but whose bytes may change. Unfreezing a path
+     lifts its byte check in every active check that trusts it.
+
+   Leave the code and the inventory unchanged. The base checker accepts this
+   PR because the inventory still matches its contract. After it lands, the
+   new checker applies the entries and accepts an inventory that still lists
+   the retired checks and paths.
+
+2. Once step 1 is on `main`, change the code and the inventory in a second PR.
+   Its base checker already applies the entries.
+
+`applyRetirements` rejects tables that do not fit the contract:
+
+- a retired ID or path that is not in the contract;
+- an unfrozen path that is not an active trusted path;
+- a retirement that would leave a check without owner paths, or a command
+  without required paths or without its path arguments.
+
+An active inventory entry may list only the retired paths its own contract
+entry had.
+
+Clean up in the step 2 PR:
+
+- Remove each retired check or path from both the contract and `RETIREMENTS`.
+  Removing only one of them either fails at load or turns the check back on.
+- Remove each unfrozen entry from `RETIREMENTS` only, and keep the path in the
+  contract. That freezes the file again at its new bytes. While a path is
+  unfrozen, any PR can rewrite it without a changed-outcome report, so the
+  unfrozen window must end with the PR that needed it. KAT-3543 retired the sandbox checks
+  this way before KAT-3544 removed the sandbox feature.
+
 ## Review the full delta
 
 Before running the command, review every path in the complete `base..candidate`

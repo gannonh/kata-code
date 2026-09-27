@@ -6,7 +6,13 @@ import * as NodePath from "node:path";
 
 import * as Schema from "effect/Schema";
 
-import { PRESERVATION_CHECKS } from "./checks.ts";
+import {
+  PRESERVATION_CHECKS,
+  PRESERVATION_CONTRACT,
+  RETIRED_CHECKS,
+  RETIREMENTS,
+  withoutRetiredPaths,
+} from "./checks.ts";
 import { matchesOwnerPath, parseNameStatusDiff, runGit } from "../upstream-preservation-refs.ts";
 import {
   decodeOrThrow,
@@ -80,9 +86,10 @@ export function validateInventory(
 ): InventoryFile {
   assertNoForbiddenInventoryKeys(value, "inventory");
   const inventory = decodeOrThrow(decodeInventory, value, "Retained behavior inventory");
-  if (inventory.entries.length !== PRESERVATION_CHECKS.length) {
+  const activeEntries = inventory.entries.filter((entry) => !RETIRED_CHECKS.has(entry.id));
+  if (activeEntries.length !== PRESERVATION_CHECKS.length) {
     throw new Error(
-      `Inventory must contain exactly ${PRESERVATION_CHECKS.length} entries; found ${inventory.entries.length}.`,
+      `Inventory must contain exactly ${PRESERVATION_CHECKS.length} entries; found ${activeEntries.length}.`,
     );
   }
 
@@ -91,6 +98,9 @@ export function validateInventory(
     if (seen.has(entry.id))
       throw new Error(`Inventory contains duplicate check id ${JSON.stringify(entry.id)}.`);
     seen.add(entry.id);
+  }
+  for (const entry of activeEntries) {
+    const ownerPaths = withoutRetiredPaths(entry.ownerPaths);
     const check = PRESERVATION_CHECKS.find((candidate) => candidate.id === entry.id);
     if (check === undefined)
       throw new Error(`Inventory contains unknown check id ${JSON.stringify(entry.id)}.`);
@@ -107,14 +117,23 @@ export function validateInventory(
         `Inventory evidence kind/profile for ${entry.id} does not match the code contract.`,
       );
     }
-    if (!sameStrings(entry.ownerPaths, check.ownerPaths)) {
+    const contractOwners =
+      PRESERVATION_CONTRACT.find((candidate) => candidate.id === entry.id)?.ownerPaths ?? [];
+    const foreignRetired = entry.ownerPaths.filter(
+      (path) => RETIREMENTS.paths.has(path) && !contractOwners.includes(path),
+    );
+    if (
+      !sameStrings(ownerPaths, check.ownerPaths) ||
+      foreignRetired.length > 0 ||
+      new Set(entry.ownerPaths).size !== entry.ownerPaths.length
+    ) {
       throw new Error(`Inventory owner paths for ${entry.id} do not match the code contract.`);
     }
     if (!sameStrings(entry.specRefs, check.specRefs)) {
       throw new Error(`Inventory spec references for ${entry.id} do not match the code contract.`);
     }
     if (
-      entry.ownerPaths.length === 0 ||
+      ownerPaths.length === 0 ||
       entry.specRefs.length === 0 ||
       entry.retainedOutcome.trim() === ""
     ) {
@@ -122,7 +141,7 @@ export function validateInventory(
     }
     validateConcreteText(entry.title, `Inventory title for ${entry.id}`);
     validateConcreteText(entry.retainedOutcome, `Inventory retained outcome for ${entry.id}`);
-    for (const relativePath of entry.ownerPaths) {
+    for (const relativePath of ownerPaths) {
       if (!NodeFS.existsSync(NodePath.resolve(repositoryRoot, relativePath))) {
         throw new Error(`Inventory owner path does not exist: ${relativePath}`);
       }
@@ -211,7 +230,7 @@ const inventoryEntryFingerprint = (entry: InventoryEntry): string =>
     id: entry.id,
     title: entry.title,
     retainedOutcome: entry.retainedOutcome,
-    ownerPaths: entry.ownerPaths,
+    ownerPaths: withoutRetiredPaths(entry.ownerPaths),
     specRefs: entry.specRefs,
     evidence: entry.evidence,
   });
@@ -235,7 +254,12 @@ export function changedInventoryOutcomeDetails(
       return [];
     }
     const paths = sorted([
-      ...new Set([...(baseEntry?.ownerPaths ?? []), ...(candidateEntry?.ownerPaths ?? [])]),
+      ...new Set(
+        withoutRetiredPaths([
+          ...(baseEntry?.ownerPaths ?? []),
+          ...(candidateEntry?.ownerPaths ?? []),
+        ]),
+      ),
     ]);
     return paths.length === 0 ? [] : [{ id, paths }];
   });
