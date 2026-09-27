@@ -92,6 +92,7 @@ import {
 } from "three";
 import { disposeDeviceModel } from "./modelScene.ts";
 import { createPhoneViewer } from "./phoneViewer.ts";
+import { sceneDigest } from "./sceneDigest.test-util.ts";
 import {
   ANDROID_PHONE_SHAPE,
   IOS_TABLET_SHAPE,
@@ -312,6 +313,63 @@ it("keeps the fold body through a rotated cover frame and learns the inner shape
   viewer.frameUpdated();
   draw(20);
   expect(state.frames.at(-1)!.phone).toBe(landscape);
+  viewer.dispose();
+});
+
+it("pins what the Android fold viewer draws through hinge turns, rotation and orbit", () => {
+  const openProfile = resolveDeviceShape({ platform: "android", portraitAspect: 0.96 });
+  const { viewer, draw, source, state, onFramingAspect } = fixture(openProfile);
+  const drawn: string[] = [];
+  const record = (time: number) => {
+    draw(time);
+    const frame = state.frames.at(-1)!;
+    drawn.push(
+      [
+        sceneDigest(frame.phone!),
+        frame.displayAngle!.toFixed(4),
+        frame
+          .rotation!.toArray()
+          .map((value) => value.toFixed(4))
+          .join(","),
+        frame.cameraZ.toFixed(4),
+      ].join(" "),
+    );
+  };
+  source.width = 2076;
+  source.height = 2152;
+  viewer.setScreen({ width: 2076, height: 2152, orientation: "portrait" }, openProfile);
+  viewer.frameUpdated();
+  viewer.setFoldAngle(180);
+  record(0);
+  viewer.setFoldAngle(90);
+  record(425);
+  record(900);
+  viewer.setFoldAngle(0);
+  record(2000);
+  source.width = 1080;
+  source.height = 2424;
+  viewer.setScreen({ width: 1080, height: 2424, orientation: "landscape_left" }, openProfile);
+  viewer.frameUpdated();
+  record(2100);
+  viewer.orbit(0.1, 0.05);
+  record(2200);
+  viewer.setFoldAngle(null);
+  record(4000);
+  expect(drawn).toEqual([
+    "27:75290375 0.0000 0.0000,0.0000,0.0000,1.0000 7.4290",
+    "27:7fbc2399 0.0000 0.0000,0.0000,0.0000,1.0000 7.4574",
+    "27:fba12286 0.0000 0.0000,0.0000,0.0000,1.0000 7.3002",
+    "27:76d56d18 0.0000 0.0000,0.0000,0.0000,1.0000 5.4394",
+    "27:76d56d18 0.0000 0.0000,0.0000,0.0000,1.0000 4.4604",
+    "27:ebdd216e 0.0000 0.0097,0.0111,0.0000,0.9999 4.4604",
+    "13:5b378e36 -1.5708 0.0259,0.0296,0.0000,0.9992 8.2510",
+  ]);
+  expect(onFramingAspect.mock.calls.map(([aspect]) => (aspect as number).toFixed(4))).toEqual([
+    "0.4901",
+    "0.9667",
+    "0.9655",
+    "2.0987",
+  ]);
   viewer.dispose();
 });
 
