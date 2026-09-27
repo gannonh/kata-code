@@ -73,7 +73,6 @@ import {
   useTheme,
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import { usePrimarySessionState } from "../../environments/primary";
 import { planScopedSettingsPatch, partitionScopedSettingsPatch } from "./scopedSettings";
 import {
   useScopedSettings,
@@ -160,9 +159,6 @@ import {
   readLastEnabledProjectGroupingMode,
   rememberEnabledProjectGroupingMode,
   resolveBackgroundActivityProfileOption,
-  foldedSectionHeadingForSearchTarget,
-  GENERAL_FOLDED_SECTION_ORDER,
-  sessionCanAdministerSettings,
 } from "./SettingsPanels.logic";
 import {
   PolicyTooltip,
@@ -2094,9 +2090,7 @@ function LegacyFeaturesSection() {
       lastExpandedTargetRef.current = null;
       return;
     }
-    if (foldedSectionHeadingForSearchTarget(searchTargetId) !== GENERAL_FOLDED_SECTION_ORDER[0]) {
-      return;
-    }
+    if (!LEGACY_FEATURE_TARGET_IDS.has(searchTargetId)) return;
     if (lastExpandedTargetRef.current === searchTargetId) return;
     lastExpandedTargetRef.current = searchTargetId;
     setOpen(true);
@@ -2106,8 +2100,8 @@ function LegacyFeaturesSection() {
     <section id="legacy-features" ref={targetRef} tabIndex={-1} className="space-y-2.5">
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="group flex min-h-8 w-full items-center gap-2 px-3 sm:px-4">
-          <h2 className="text-lg font-semibold tracking-tight text-muted-foreground transition-colors group-hover:text-foreground">
-            {GENERAL_FOLDED_SECTION_ORDER[0]}
+          <h2 className="text-sm font-normal text-foreground/70 transition-colors group-hover:text-foreground">
+            Legacy features
           </h2>
           <ChevronRightIcon className="size-4 text-muted-foreground transition-transform duration-200 group-data-panel-open:rotate-90" />
         </CollapsibleTrigger>

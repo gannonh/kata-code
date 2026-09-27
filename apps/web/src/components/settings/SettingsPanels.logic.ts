@@ -1,15 +1,13 @@
-import {
-  AuthAccessWriteScope,
-  AuthAdministrativeScopes,
-  type BackgroundActivityProfile,
-  type BackgroundActivitySettings,
-  type ProviderDriverKind,
-  type ProviderInstanceConfig,
-  type PreviewViewportSetting,
-  type ProviderInstanceId,
-  type ServerSettings,
-  type SidebarProjectGroupingMode,
-  type UnifiedSettings,
+import type {
+  BackgroundActivityProfile,
+  BackgroundActivitySettings,
+  ProviderDriverKind,
+  ProviderInstanceConfig,
+  PreviewViewportSetting,
+  ProviderInstanceId,
+  ServerSettings,
+  SidebarProjectGroupingMode,
+  UnifiedSettings,
 } from "@kata-sh/code-contracts";
 import { DEFAULT_UNIFIED_SETTINGS } from "@kata-sh/code-contracts/settings";
 import {
@@ -344,39 +342,4 @@ export function backgroundActivityOverrideSettings(
       overrides: nextOverrides as BackgroundActivitySettings["overrides"],
     },
   };
-}
-
-export const GENERAL_FOLDED_SECTION_ORDER = ["Legacy features"] as const;
-
-export const LEGACY_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set([
-  "legacy-plan-mode",
-  "legacy-token-streaming",
-  "legacy-sidebar",
-]);
-
-const FOLDED_SECTION_TARGET_IDS = [
-  { heading: "Legacy features", ids: LEGACY_FEATURE_TARGET_IDS },
-] as const satisfies ReadonlyArray<{
-  heading: (typeof GENERAL_FOLDED_SECTION_ORDER)[number];
-  ids: ReadonlySet<string>;
-}>;
-
-export function foldedSectionHeadingForSearchTarget(targetId: string): string | null {
-  for (const section of FOLDED_SECTION_TARGET_IDS) {
-    if (section.ids.has(targetId)) return section.heading;
-  }
-  return null;
-}
-
-export function sessionCanAdministerSettings(input: {
-  readonly hasDesktopBridge: boolean;
-  readonly authenticated: boolean;
-  readonly scopes: ReadonlyArray<string> | null;
-}): boolean {
-  const scopes = input.hasDesktopBridge
-    ? AuthAdministrativeScopes
-    : input.authenticated
-      ? input.scopes
-      : null;
-  return scopes?.includes(AuthAccessWriteScope) ?? false;
 }

@@ -2929,7 +2929,7 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.serverGetSettings,
             serverSettings.getSettings.pipe(
-              Effect.map((settings) => ServerSettings.redactServerSettingsForClient(settings)),
+              Effect.map(ServerSettings.redactServerSettingsForClient),
             ),
             {
               "rpc.aggregate": "server",

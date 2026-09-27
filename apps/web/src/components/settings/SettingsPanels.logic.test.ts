@@ -1,9 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off - Reads SettingsPanels.tsx to assert Experimental placement.
-import * as NodeFS from "node:fs";
-import * as NodePath from "node:path";
-import * as NodeURL from "node:url";
 import {
-  AuthAccessWriteScope,
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
   ProviderDriverKind,
@@ -16,23 +11,14 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   backgroundActivitySharedPolicySettings,
   buildProviderInstanceUpdatePatch,
-  foldedSectionHeadingForSearchTarget,
   formatDiagnosticsDescription,
-  GENERAL_FOLDED_SECTION_ORDER,
   getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
   hasChangedBackgroundActivitySettings,
   isProjectGroupingEnabled,
-  LEGACY_FEATURE_TARGET_IDS,
   projectGroupingModeFromToggle,
   resolveBackgroundActivityProfileOption,
-  sessionCanAdministerSettings,
 } from "./SettingsPanels.logic";
-
-const generalPanelSource = NodeFS.readFileSync(
-  NodePath.join(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "SettingsPanels.tsx"),
-  "utf8",
-);
 
 describe("typography settings restore", () => {
   it("detects family and size changes by font row", () => {
@@ -297,68 +283,5 @@ describe("getChangedBrowserSettingLabels", () => {
       "Open links in",
       "Floating preview",
     ]);
-  });
-});
-
-describe("general folded sections", () => {
-  it("folds only Legacy features", () => {
-    expect(GENERAL_FOLDED_SECTION_ORDER).toEqual(["Legacy features"]);
-  });
-
-  it("leaves everyday general rows unfolded", () => {
-    expect(foldedSectionHeadingForSearchTarget("project-grouping")).toBeNull();
-    expect(foldedSectionHeadingForSearchTarget("provider-update-checks")).toBeNull();
-  });
-
-  it("maps legacy search jumps to Legacy features", () => {
-    expect(foldedSectionHeadingForSearchTarget("legacy-plan-mode")).toBe("Legacy features");
-    expect(foldedSectionHeadingForSearchTarget("legacy-token-streaming")).toBe("Legacy features");
-    expect(foldedSectionHeadingForSearchTarget("legacy-sidebar")).toBe("Legacy features");
-    expect(LEGACY_FEATURE_TARGET_IDS).toEqual(
-      new Set(["legacy-plan-mode", "legacy-token-streaming", "legacy-sidebar"]),
-    );
-  });
-
-  it("mounts Legacy features after the everyday general rows", () => {
-    const everydayPanel = generalPanelSource.indexOf("export function GeneralSettingsPanel");
-    const mountLegacy = generalPanelSource.indexOf("<LegacyFeaturesSection />");
-    expect(mountLegacy).toBeGreaterThan(everydayPanel);
-    expect(generalPanelSource).not.toContain("ExperimentalFeaturesSection");
-  });
-});
-
-describe("sessionCanAdministerSettings", () => {
-  it("treats a desktop bridge session as administrative", () => {
-    expect(
-      sessionCanAdministerSettings({
-        hasDesktopBridge: true,
-        authenticated: false,
-        scopes: null,
-      }),
-    ).toBe(true);
-  });
-
-  it("requires access:write on a browser session", () => {
-    expect(
-      sessionCanAdministerSettings({
-        hasDesktopBridge: false,
-        authenticated: true,
-        scopes: [AuthAccessWriteScope],
-      }),
-    ).toBe(true);
-    expect(
-      sessionCanAdministerSettings({
-        hasDesktopBridge: false,
-        authenticated: true,
-        scopes: [],
-      }),
-    ).toBe(false);
-    expect(
-      sessionCanAdministerSettings({
-        hasDesktopBridge: false,
-        authenticated: false,
-        scopes: [AuthAccessWriteScope],
-      }),
-    ).toBe(false);
   });
 });

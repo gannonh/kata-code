@@ -191,7 +191,7 @@ The release workflow deploys the hosted web project, currently `katacode-web`, w
 have access to it.
 
 GitHub Actions secrets are the release source of truth. A local `.vercel/project.json` link does not
-configure the release job. Local `E2E_VERCEL_*` variables are also outside the release workflow.
+configure the release job.
 
 ## Hosted web app release deployment
 
