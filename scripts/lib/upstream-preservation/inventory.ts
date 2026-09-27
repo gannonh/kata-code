@@ -6,7 +6,13 @@ import * as NodePath from "node:path";
 
 import * as Schema from "effect/Schema";
 
-import { PRESERVATION_CHECKS, RETIRED_CHECKS, withoutRetiredPaths } from "./checks.ts";
+import {
+  PRESERVATION_CHECKS,
+  PRESERVATION_CONTRACT,
+  RETIRED_CHECKS,
+  RETIREMENTS,
+  withoutRetiredPaths,
+} from "./checks.ts";
 import { matchesOwnerPath, parseNameStatusDiff, runGit } from "../upstream-preservation-refs.ts";
 import {
   decodeOrThrow,
@@ -111,7 +117,12 @@ export function validateInventory(
         `Inventory evidence kind/profile for ${entry.id} does not match the code contract.`,
       );
     }
-    if (!sameStrings(ownerPaths, check.ownerPaths)) {
+    const contractOwners =
+      PRESERVATION_CONTRACT.find((candidate) => candidate.id === entry.id)?.ownerPaths ?? [];
+    const foreignRetired = entry.ownerPaths.filter(
+      (path) => RETIREMENTS.paths.has(path) && !contractOwners.includes(path),
+    );
+    if (!sameStrings(ownerPaths, check.ownerPaths) || foreignRetired.length > 0) {
       throw new Error(`Inventory owner paths for ${entry.id} do not match the code contract.`);
     }
     if (!sameStrings(entry.specRefs, check.specRefs)) {

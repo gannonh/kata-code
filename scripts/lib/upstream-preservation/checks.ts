@@ -526,43 +526,57 @@ export interface Retirement {
   readonly reason: string;
 }
 
+export interface RetirementTables {
+  // A retired check does not run, and the inventory may still list it.
+  readonly checks: ReadonlyMap<string, Retirement>;
+  // A retired path leaves every check's owner, required, and trusted paths and its arguments.
+  readonly paths: ReadonlyMap<string, Retirement>;
+  // An unfrozen trusted path is still required and run, but its bytes may change.
+  readonly unfrozenTrustedPaths: ReadonlyMap<string, Retirement>;
+}
+
 const SANDBOX_REMOVAL: Retirement = {
   issue: "KAT-3543",
   reason: "Kata sandboxes are removed (KAT-3544); Docker was their only driver.",
 };
 
-// A retired check does not run, and the inventory may still list it. A retired path leaves
-// every check's owner, required, and trusted paths. Both let a retirement land before the
-// code and inventory entries it covers are deleted, because CI runs the base checker.
-export const RETIRED_CHECKS: ReadonlyMap<string, Retirement> = new Map([
-  ["sandbox-preview-default", SANDBOX_REMOVAL],
-  ["sandbox-route-driver-registration", SANDBOX_REMOVAL],
-]);
+// CI runs the base checker, so a retirement lands here first and the code and inventory
+// entries it covers are deleted in a later PR. See docs/upstream/kat-3307-runbook.md.
+export const RETIREMENTS: RetirementTables = {
+  checks: new Map([
+    ["sandbox-preview-default", SANDBOX_REMOVAL],
+    ["sandbox-route-driver-registration", SANDBOX_REMOVAL],
+  ]),
+  paths: new Map([
+    ["apps/server/src/kataSandbox/migrations.ts", SANDBOX_REMOVAL],
+    ["apps/server/src/kataSandbox/migrations.test.ts", SANDBOX_REMOVAL],
+  ]),
+  unfrozenTrustedPaths: new Map([
+    [
+      "apps/server/src/provider/ProviderInstanceEnvironment.test.ts",
+      {
+        ...SANDBOX_REMOVAL,
+        reason: "The sandbox bootstrap-token case leaves with the sandbox (KAT-3544).",
+      },
+    ],
+  ]),
+};
 
-export const RETIRED_PATHS: ReadonlyMap<string, Retirement> = new Map([
-  ["apps/server/src/kataSandbox/migrations.ts", SANDBOX_REMOVAL],
-  ["apps/server/src/kataSandbox/migrations.test.ts", SANDBOX_REMOVAL],
-]);
+export const PRESERVATION_CONTRACT: ReadonlyArray<PreservationCheck> = CONTRACT_CHECKS;
 
-export const withoutRetiredPaths = (paths: ReadonlyArray<string>): ReadonlyArray<string> =>
-  paths.filter((path) => !RETIRED_PATHS.has(path));
+const commandPathArgs = (command: CommandPlan): ReadonlyArray<string> =>
+  command.args.filter(
+    (arg) => command.requiredPaths.includes(arg) || (command.trustedPaths ?? []).includes(arg),
+  );
 
-const withoutRetiredCommandPaths = (command: CommandPlan): CommandPlan => ({
-  ...command,
-  display: command.display
-    .split(" ")
-    .filter((part) => !RETIRED_PATHS.has(part))
-    .join(" "),
-  args: withoutRetiredPaths(command.args),
-  requiredPaths: withoutRetiredPaths(command.requiredPaths),
-  ...(command.trustedPaths === undefined
-    ? {}
-    : { trustedPaths: withoutRetiredPaths(command.trustedPaths) }),
-});
-
-const assertRetirementsNameContract = (): void => {
+// Validates the tables against the contract and returns the checks that still run.
+export function applyRetirements(
+  contract: ReadonlyArray<PreservationCheck>,
+  tables: RetirementTables,
+): ReadonlyArray<PreservationCheck> {
+  const keep = (paths: ReadonlyArray<string>) => paths.filter((path) => !tables.paths.has(path));
   const contractPaths = new Set(
-    CONTRACT_CHECKS.flatMap((check: PreservationCheck) => [
+    contract.flatMap((check) => [
       ...check.ownerPaths,
       ...check.commands.flatMap((command) => [
         ...command.requiredPaths,
@@ -570,35 +584,59 @@ const assertRetirementsNameContract = (): void => {
       ]),
     ]),
   );
-  for (const id of RETIRED_CHECKS.keys()) {
-    if (!CONTRACT_CHECKS.some((check) => check.id === id))
+  for (const id of tables.checks.keys()) {
+    if (!contract.some((check) => check.id === id))
       throw new Error(`Retired check ${id} is not in the preservation contract.`);
   }
-  for (const path of RETIRED_PATHS.keys()) {
+  for (const path of tables.paths.keys()) {
     if (!contractPaths.has(path))
       throw new Error(`Retired path ${path} is not in the preservation contract.`);
   }
-  for (const check of CONTRACT_CHECKS as ReadonlyArray<PreservationCheck>) {
-    if (RETIRED_CHECKS.has(check.id)) continue;
-    if (withoutRetiredPaths(check.ownerPaths).length === 0)
-      throw new Error(`Retired paths leave check ${check.id} without owner paths.`);
-    for (const command of check.commands) {
-      if (
-        command.requiredPaths.length > 0 &&
-        withoutRetiredPaths(command.requiredPaths).length === 0
-      )
-        throw new Error(`Retired paths leave a ${check.id} command without required paths.`);
-    }
+  const active = contract.filter((check) => !tables.checks.has(check.id));
+  for (const path of tables.unfrozenTrustedPaths.keys()) {
+    const trusted = active.some((check) =>
+      check.commands.some((command) => keep(command.trustedPaths ?? []).includes(path)),
+    );
+    if (!trusted) throw new Error(`Unfrozen path ${path} is not an active trusted path.`);
   }
-};
-assertRetirementsNameContract();
+  return active.map((check) => {
+    if (keep(check.ownerPaths).length === 0)
+      throw new Error(`Retired paths leave check ${check.id} without owner paths.`);
+    return {
+      ...check,
+      ownerPaths: keep(check.ownerPaths),
+      commands: check.commands.map((command) => {
+        if (command.requiredPaths.length > 0 && keep(command.requiredPaths).length === 0)
+          throw new Error(
+            `Retired paths leave check ${check.id} with a command that has no required paths.`,
+          );
+        if (commandPathArgs(command).length > 0 && keep(commandPathArgs(command)).length === 0)
+          throw new Error(
+            `Retired paths leave check ${check.id} with a command that has no path arguments.`,
+          );
+        const trustedPaths = keep(command.trustedPaths ?? []).filter(
+          (path) => !tables.unfrozenTrustedPaths.has(path),
+        );
+        return {
+          ...command,
+          display: command.display
+            .split(" ")
+            .filter((part) => !tables.paths.has(part))
+            .join(" "),
+          args: keep(command.args),
+          requiredPaths: keep(command.requiredPaths),
+          ...(command.trustedPaths === undefined ? {} : { trustedPaths }),
+        };
+      }),
+    };
+  });
+}
 
-export const PRESERVATION_CHECKS: ReadonlyArray<PreservationCheck> = CONTRACT_CHECKS.filter(
-  (check) => !RETIRED_CHECKS.has(check.id),
-).map((check: PreservationCheck) => ({
-  ...check,
-  ownerPaths: withoutRetiredPaths(check.ownerPaths),
-  commands: check.commands.map(withoutRetiredCommandPaths),
-}));
+export const withoutRetiredPaths = (paths: ReadonlyArray<string>): ReadonlyArray<string> =>
+  paths.filter((path) => !RETIREMENTS.paths.has(path));
+
+export const RETIRED_CHECKS = RETIREMENTS.checks;
+
+export const PRESERVATION_CHECKS = applyRetirements(CONTRACT_CHECKS, RETIREMENTS);
 
 export const CANONICAL_CHECK_IDS = PRESERVATION_CHECKS.map((check) => check.id);

@@ -22,10 +22,14 @@ import {
 
 export {
   PRESERVATION_CHECKS,
+  PRESERVATION_CONTRACT,
+  RETIREMENTS,
+  applyRetirements,
   type CommandPlan,
   type EvidenceKind,
   type EvidenceProfile,
   type PreservationCheck,
+  type RetirementTables,
 } from "./upstream-preservation/checks.ts";
 export {
   INVENTORY_RELATIVE_PATH,

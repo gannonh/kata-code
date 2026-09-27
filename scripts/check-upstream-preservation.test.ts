@@ -18,6 +18,11 @@ import {
   validateEvidenceBinding,
   runPreservation,
   PRESERVATION_CHECKS,
+  PRESERVATION_CONTRACT,
+  RETIREMENTS,
+  applyRetirements,
+  type PreservationCheck,
+  type RetirementTables,
   validateIntegrationRecord,
   validateInventory,
   validateManualEvidence,
@@ -1020,19 +1025,18 @@ describe("upstream preservation CLI", () => {
   });
 
   describe("retired sandbox checks (KAT-3543)", () => {
-    const retiredIds = ["sandbox-preview-default", "sandbox-route-driver-registration"];
-    const retiredPaths = [
+    const retiredIds = new Set(["sandbox-preview-default", "sandbox-route-driver-registration"]);
+    const retiredPaths = new Set([
       "apps/server/src/kataSandbox/migrations.ts",
       "apps/server/src/kataSandbox/migrations.test.ts",
-    ];
+    ]);
+    const providerTest = "apps/server/src/provider/ProviderInstanceEnvironment.test.ts";
     const inventoryPath = (root: string) =>
       NodePath.join(root, "docs/upstream/retained-behavior.v1.json");
-    const rewriteInventory = (
-      root: string,
-      update: (entries: Array<{ id: string; ownerPaths: Array<string> }>) => void,
-    ) => {
+    type Entry = { id: string; ownerPaths: Array<string>; retainedOutcome: string };
+    const rewriteInventory = (root: string, update: (entries: Array<Entry>) => void) => {
       const inventory = JSON.parse(NodeFS.readFileSync(inventoryPath(root), "utf8")) as {
-        entries: Array<{ id: string; ownerPaths: Array<string> }>;
+        entries: Array<Entry>;
       };
       update(inventory.entries);
       NodeFS.writeFileSync(inventoryPath(root), `${JSON.stringify(inventory, null, 2)}\n`);
@@ -1050,7 +1054,7 @@ describe("upstream preservation CLI", () => {
           );
         }
         for (const entry of entries) {
-          entry.ownerPaths = entry.ownerPaths.filter((path) => !retiredPaths.includes(path));
+          entry.ownerPaths = entry.ownerPaths.filter((path) => !retiredPaths.has(path));
         }
       });
     };
@@ -1072,9 +1076,10 @@ describe("upstream preservation CLI", () => {
       return { report, executed };
     };
 
-    it("runs neither retired check and no retired path", () => {
-      expect(PRESERVATION_CHECKS.map((check) => check.id)).not.toContain(retiredIds[0]);
-      expect(PRESERVATION_CHECKS.map((check) => check.id)).not.toContain(retiredIds[1]);
+    it("runs neither retired check, no retired path, and no freeze on the unfrozen test", () => {
+      expect(PRESERVATION_CHECKS.length).toBe(30);
+      const ids = PRESERVATION_CHECKS.map((check) => check.id);
+      expect(ids.filter((id) => retiredIds.has(id))).toEqual([]);
       const contractPaths = PRESERVATION_CHECKS.flatMap((check) => [
         ...check.ownerPaths,
         ...check.commands.flatMap((command) => [
@@ -1083,7 +1088,12 @@ describe("upstream preservation CLI", () => {
           ...(command.trustedPaths ?? []),
         ]),
       ]);
-      expect(contractPaths.filter((path) => retiredPaths.includes(path))).toEqual([]);
+      expect(contractPaths.filter((path) => retiredPaths.has(path))).toEqual([]);
+      const provider = PRESERVATION_CHECKS.find(
+        (check) => check.id === "provider-sandbox-environment-isolation",
+      );
+      expect(provider?.commands[0]?.requiredPaths).toEqual([providerTest]);
+      expect(provider?.commands[0]?.trustedPaths).toEqual([]);
     });
 
     it("accepts an inventory that still lists the retired checks and paths", () => {
@@ -1091,18 +1101,22 @@ describe("upstream preservation CLI", () => {
         const { report, executed } = runCandidate(temporaryRoot, candidateSha);
         expect(report.lines).toContain("INVENTORY status=PASS");
         expect(report.lines).toContain("CHECK id=migration-identity status=PASS");
-        expect(report.lines.filter((line) => retiredIds.some((id) => line.includes(id)))).toEqual(
-          [],
-        );
+        expect(
+          report.lines.filter((line) => [...retiredIds].some((id) => line.includes(id))),
+        ).toEqual([]);
         expect(executed).toContain(
           "vp test run apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
         );
       }, false);
     });
 
-    it("passes a candidate that deletes the retired checks, paths, and sandbox code", () => {
+    it("passes a candidate that deletes the sandbox and its bootstrap-token test case", () => {
       withRetainedRegressionWorktree((temporaryRoot, _candidateSha, commitFixture) => {
         removeSandbox(temporaryRoot);
+        NodeFS.appendFileSync(
+          NodePath.join(temporaryRoot, providerTest),
+          "\n// Sandbox bootstrap-token case removed.\n",
+        );
         const { report } = runCandidate(temporaryRoot, commitFixture());
         expect(report.lines).toContain("INVENTORY status=PASS");
         expect(report.lines).toContain("CHECK id=migration-identity status=PASS");
@@ -1124,7 +1138,7 @@ describe("upstream preservation CLI", () => {
         });
         const { report } = runCandidate(temporaryRoot, commitFixture());
         expect(report.lines).toContain(
-          `INVENTORY status=FAIL detail=Inventory must contain exactly ${PRESERVATION_CHECKS.length} entries; found ${PRESERVATION_CHECKS.length - 1}.`,
+          "INVENTORY status=FAIL detail=Inventory must contain exactly 30 entries; found 29.",
         );
       }, false);
     });
@@ -1144,6 +1158,152 @@ describe("upstream preservation CLI", () => {
           "INVENTORY status=FAIL detail=Inventory owner paths for migration-identity do not match the code contract.",
         );
       }, false);
+    });
+
+    it("rejects a retired path listed on an entry whose contract never had it", () => {
+      withRetainedRegressionWorktree((temporaryRoot, _candidateSha, commitFixture) => {
+        rewriteInventory(temporaryRoot, (entries) => {
+          const entry = entries.find((candidate) => candidate.id === "state-isolation");
+          if (entry === undefined) throw new Error("state-isolation entry is missing.");
+          entry.ownerPaths.push("apps/server/src/kataSandbox/migrations.ts");
+        });
+        const { report } = runCandidate(temporaryRoot, commitFixture());
+        expect(report.lines).toContain(
+          "INVENTORY status=FAIL detail=Inventory owner paths for state-isolation do not match the code contract.",
+        );
+      }, false);
+    });
+
+    it("ignores retired owner paths in the outcome diff but still reports a real edit", () => {
+      const inventory = JSON.parse(
+        NodeFS.readFileSync(
+          NodePath.join(repositoryRoot, "docs/upstream/retained-behavior.v1.json"),
+          "utf8",
+        ),
+      ) as { entries: Array<InventoryEntry> };
+      const withoutRetired = inventory.entries.map((entry) => ({
+        ...entry,
+        ownerPaths: entry.ownerPaths.filter((path) => !retiredPaths.has(path)),
+      }));
+      expect(changedInventoryOutcomeDetails(inventory.entries, withoutRetired)).toEqual([]);
+      const edited = withoutRetired.map((entry) =>
+        entry.id === "migration-identity"
+          ? { ...entry, retainedOutcome: `${entry.retainedOutcome} Edited.` }
+          : entry,
+      );
+      expect(changedInventoryOutcomeDetails(inventory.entries, edited)).toEqual([
+        {
+          id: "migration-identity",
+          paths: [
+            "apps/server/src/persistence/Migrations.ts",
+            "apps/server/src/persistence/Migrations/KataUpstreamUpgrade.test.ts",
+          ],
+        },
+      ]);
+    });
+
+    describe("retirement table validation", () => {
+      const command = (
+        paths: ReadonlyArray<string>,
+        extraRequired: ReadonlyArray<string> = [],
+      ) => ({
+        display: `run ${paths.join(" ")}`,
+        executable: "node",
+        args: [...paths],
+        requiredPaths: [...paths, ...extraRequired],
+        trustedPaths: [...paths],
+      });
+      const contract: ReadonlyArray<PreservationCheck> = [
+        {
+          id: "alpha",
+          title: "Alpha",
+          evidenceKind: "automated",
+          evidenceProfile: "portable",
+          ownerPaths: ["src/alpha.ts", "src/shared.ts"],
+          specRefs: ["docs/alpha.md"],
+          commands: [command(["src/alpha.test.ts"], ["src/alpha-config.json"])],
+        },
+        {
+          id: "beta",
+          title: "Beta",
+          evidenceKind: "automated",
+          evidenceProfile: "portable",
+          ownerPaths: ["src/beta.ts"],
+          specRefs: ["docs/beta.md"],
+          commands: [command(["src/beta.test.ts"])],
+        },
+      ];
+      const tables = (overrides: Partial<RetirementTables>): RetirementTables => ({
+        checks: new Map(),
+        paths: new Map(),
+        unfrozenTrustedPaths: new Map(),
+        ...overrides,
+      });
+      const why = { issue: "KAT-0000", reason: "Test fixture." };
+
+      it("applies retired checks, retired paths, and unfrozen trusted paths", () => {
+        const checks = applyRetirements(
+          contract,
+          tables({
+            checks: new Map([["beta", why]]),
+            paths: new Map([["src/shared.ts", why]]),
+            unfrozenTrustedPaths: new Map([["src/alpha.test.ts", why]]),
+          }),
+        );
+        expect(checks.map((check) => check.id)).toEqual(["alpha"]);
+        expect(checks[0]?.ownerPaths).toEqual(["src/alpha.ts"]);
+        expect(checks[0]?.commands[0]?.requiredPaths).toEqual([
+          "src/alpha.test.ts",
+          "src/alpha-config.json",
+        ]);
+        expect(checks[0]?.commands[0]?.trustedPaths).toEqual([]);
+      });
+
+      it("rejects a retired check that is not in the contract", () => {
+        expect(() =>
+          applyRetirements(contract, tables({ checks: new Map([["gamma", why]]) })),
+        ).toThrow("Retired check gamma is not in the preservation contract.");
+      });
+
+      it("rejects a retired path that is not in the contract", () => {
+        expect(() =>
+          applyRetirements(contract, tables({ paths: new Map([["src/missing.ts", why]]) })),
+        ).toThrow("Retired path src/missing.ts is not in the preservation contract.");
+      });
+
+      it("rejects an unfrozen path that is not an active trusted path", () => {
+        expect(() =>
+          applyRetirements(
+            contract,
+            tables({
+              checks: new Map([["beta", why]]),
+              unfrozenTrustedPaths: new Map([["src/beta.test.ts", why]]),
+            }),
+          ),
+        ).toThrow("Unfrozen path src/beta.test.ts is not an active trusted path.");
+      });
+
+      it("rejects a retirement that leaves a check without owner paths", () => {
+        expect(() =>
+          applyRetirements(contract, tables({ paths: new Map([["src/beta.ts", why]]) })),
+        ).toThrow("Retired paths leave check beta without owner paths.");
+      });
+
+      it("rejects a retirement that leaves a command without required paths", () => {
+        expect(() =>
+          applyRetirements(contract, tables({ paths: new Map([["src/beta.test.ts", why]]) })),
+        ).toThrow("Retired paths leave check beta with a command that has no required paths.");
+      });
+
+      it("rejects a retirement that leaves a command without path arguments", () => {
+        expect(() =>
+          applyRetirements(contract, tables({ paths: new Map([["src/alpha.test.ts", why]]) })),
+        ).toThrow("Retired paths leave check alpha with a command that has no path arguments.");
+      });
+
+      it("accepts the live retirement table against the live contract", () => {
+        expect(applyRetirements(PRESERVATION_CONTRACT, RETIREMENTS)).toEqual(PRESERVATION_CHECKS);
+      });
     });
   });
 

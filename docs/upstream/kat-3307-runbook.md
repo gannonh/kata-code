@@ -53,24 +53,43 @@ candidate commit.
 
 ## Retire a check or path
 
-Because CI runs the base checker, a PR cannot remove a check or an owner path
-and pass: the base contract still requires it. Retire it in two PRs instead.
+Because CI runs the base checker, a PR cannot remove a check, remove an owner
+path, or edit a trusted assertion and still pass: the base contract still
+requires it. Change the contract in two PRs instead. Both are tracked on a
+Linear issue. The issue owner records the decision there, and each PR merges
+only from Merging.
 
-1. Add the check ID to `RETIRED_CHECKS`, or the path to `RETIRED_PATHS`, in
-   `scripts/lib/upstream-preservation/checks.ts`. Each entry names its Linear
-   issue and reason. Leave the code and the inventory unchanged. The base
-   checker accepts this PR because the inventory still matches its contract.
-   After it lands, the new checker skips the retired check, removes retired
-   paths from owner, required, and trusted paths, and accepts an inventory that
-   still lists them.
-2. Once step 1 is on `main`, delete the retired code and inventory entries in a
-   second PR. Its base checker already treats them as retired.
+1. Add the entry to `RETIREMENTS` in
+   `scripts/lib/upstream-preservation/checks.ts`. Each entry names its issue
+   and reason. There are three kinds:
+   - a retired check (`checks`), which no longer runs;
+   - a retired path (`paths`), which leaves every check's owner, required, and
+     trusted paths and its command arguments;
+   - an unfrozen trusted path (`unfrozenTrustedPaths`), which is still
+     required and still run, but whose bytes may change.
 
-A retirement changes a retained outcome, so it needs a Linear issue that records
-the human decision. The checker rejects a retired ID or path that is not in
-the contract, and a retirement that would leave a check without owner paths or
-a command without required paths. KAT-3543 retired the sandbox checks this way
-before KAT-3544 removed the sandbox feature.
+   Leave the code and the inventory unchanged. The base checker accepts this
+   PR because the inventory still matches its contract. After it lands, the
+   new checker applies the entries and accepts an inventory that still lists
+   the retired checks and paths.
+
+2. Once step 1 is on `main`, change the code and the inventory in a second PR.
+   Its base checker already applies the entries.
+
+`applyRetirements` rejects tables that do not fit the contract:
+
+- a retired ID or path that is not in the contract;
+- an unfrozen path that is not an active trusted path;
+- a retirement that would leave a check without owner paths, or a command
+  without required paths or without its path arguments.
+
+An active inventory entry may list only the retired paths its own contract
+entry had.
+
+To clean up after step 2, remove each retired check or path from both the
+contract and `RETIREMENTS` in the same PR. Removing only one of them either
+fails at load or turns the check back on. KAT-3543 retired the sandbox checks
+this way before KAT-3544 removed the sandbox feature.
 
 ## Review the full delta
 
