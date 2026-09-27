@@ -2091,3 +2091,78 @@ describe("signed APNs registration metadata", () => {
     }
   }
 });
+
+describe("agent-activity pushes per build", () => {
+  const waiting: RelayAgentActivityState = { ...state, phase: "waiting_for_input" };
+  const builds = [
+    {
+      build: "TestFlight/App Store",
+      bundle_id: "com.katacode.app",
+      aps_environment: "production",
+      url: "https://api.push.apple.com/3/device/build-token",
+    },
+    {
+      build: "development",
+      bundle_id: "com.katacode.dev",
+      aps_environment: "sandbox",
+      url: "https://api.sandbox.push.apple.com/3/device/build-token",
+    },
+  ] as const;
+
+  for (const build of builds) {
+    it.effect(
+      `delivers to the ${build.build} build's gateway while the relay default is sandbox`,
+      () => {
+        const attempts: DeliveryAttempts.DeliveryAttemptInput[] = [];
+        const queuedJobs: SignedApnsDeliveryJob[] = [];
+        const requests: HttpClientRequest.HttpClientRequest[] = [];
+        const device: LiveActivities.TargetRow = {
+          ...target,
+          bundle_id: build.bundle_id,
+          aps_environment: build.aps_environment,
+          push_token: "build-token",
+          push_to_start_token: null,
+          activity_push_token: null,
+          remote_started_at: null,
+        };
+
+        return Effect.gen(function* () {
+          const deliveries = yield* ApnsDeliveries.ApnsDeliveries;
+          yield* deliveries.sendForTarget({
+            target: device,
+            aggregate: {
+              ...aggregate,
+              activities: [
+                { ...aggregate.activities[0]!, phase: "waiting_for_input", status: "Input" },
+              ],
+            },
+            nowMs: 5_000,
+          });
+          expect(queuedJobs.map((job) => job.payload.kind)).toEqual(["push_notification"]);
+
+          const result = yield* deliveries.processSignedJob(queuedJobs[0]!);
+
+          expect(result.ok).toBe(true);
+          expect(requests.map((request) => request.url)).toEqual([build.url]);
+          expect(requests[0]?.headers["apns-topic"]).toBe(build.bundle_id);
+          expect(requests[0]?.headers["apns-push-type"]).toBe("alert");
+        }).pipe(
+          Effect.provide(
+            makeLayer({
+              attempts,
+              queuedJobs,
+              currentTargets: [device],
+              activityStates: [waiting],
+              config: signingConfig,
+              execute: (request) =>
+                Effect.sync(() => {
+                  requests.push(request);
+                  return HttpClientResponse.fromWeb(request, new Response("", { status: 200 }));
+                }),
+            }),
+          ),
+        );
+      },
+    );
+  }
+});
