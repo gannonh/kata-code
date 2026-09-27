@@ -3289,6 +3289,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             cloudUserId: "user_123",
             environmentCredential: "t3env_test_credential",
             cloudMintPublicKey: cloudKeyPair.publicKey,
+            endpoint: manualRelayEndpoint,
             endpointRuntime: null,
           }),
         },
