@@ -2,6 +2,7 @@ import type { ExpoConfig } from "expo/config";
 
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
+import { clerkIosAssociatedDomains } from "./iosAssociatedDomains.ts";
 
 type AppVariant = "development" | "preview" | "production";
 
@@ -71,7 +72,6 @@ const VARIANT_CONFIG = {
     scheme: "katacode-dev",
     iosBundleIdentifier: "com.katacode.dev",
     androidPackage: "com.katacode.dev",
-    relyingParty: "clerk.t3.codes",
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
@@ -79,7 +79,6 @@ const VARIANT_CONFIG = {
     scheme: "katacode-preview",
     iosBundleIdentifier: "com.katacode.preview",
     androidPackage: "com.katacode.preview",
-    relyingParty: "clerk.t3.codes",
     assets: PREVIEW_ASSETS,
   },
   production: {
@@ -87,7 +86,6 @@ const VARIANT_CONFIG = {
     scheme: "katacode",
     iosBundleIdentifier: "com.katacode.app",
     androidPackage: "com.katacode.app",
-    relyingParty: "clerk.t3.codes",
     assets: RELEASE_ASSETS,
   },
 } as const;
@@ -239,10 +237,7 @@ const config: ExpoConfig = {
     // does not fall back to a personal team (which cannot sign app groups,
     // Sign in with Apple, or push notification entitlements).
     appleTeamId: "ZBZKKWF95G",
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
+    associatedDomains: clerkIosAssociatedDomains(repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY),
     entitlements: {
       "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
     },
