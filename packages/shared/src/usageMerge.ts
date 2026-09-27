@@ -132,6 +132,19 @@ function bucketsForSource(summary: UsageSummary, source: UsageSource): readonly 
   );
 }
 
+/**
+ * Legacy summaries omit `sourcePath`, so buckets from a provider with several
+ * roots cannot be assigned to any one of them.
+ */
+function hasUnattributedBuckets(summary: UsageSummary, provider: UsageProviderKind): boolean {
+  return (
+    summary.sources.filter((entry) => entry.fingerprint.provider === provider).length > 1 &&
+    summary.buckets.some(
+      (bucket) => bucket.provider === provider && bucket.sourcePath === undefined,
+    )
+  );
+}
+
 function bucketKey(bucket: UsageBucket): string {
   return JSON.stringify([bucket.day, bucket.hourStart ?? null, bucket.provider, bucket.model]);
 }
@@ -196,7 +209,9 @@ function claimSources(environments: readonly EnvironmentUsage[]): {
       const owner = ownerScanByFingerprint.get(key);
       if (
         owner?.source.status !== "ok" ||
-        Date.parse(environment.summary.readAt) <= Date.parse(owner.environment.summary.readAt)
+        Date.parse(environment.summary.readAt) <= Date.parse(owner.environment.summary.readAt) ||
+        // Every cell may already be counted under an unattributed bucket.
+        hasUnattributedBuckets(owner.environment.summary, source.fingerprint.provider)
       ) {
         continue;
       }
