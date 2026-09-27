@@ -150,6 +150,12 @@ The `production` GitHub environment must define these Actions variables:
 - `APNS_KEY_ID`
 - `APNS_BUNDLE_ID`
 
+`APNS_ENVIRONMENT` and `APNS_BUNDLE_ID` are fallbacks. Each iOS install registers its own bundle id
+and APNs environment (development builds register `sandbox`; TestFlight and App Store builds register
+`production`), and the relay sends each push to that install's gateway. The fallbacks apply only to
+registrations from app builds that predate those fields. The APNs key named by `APNS_KEY_ID` must be
+enabled for both Sandbox and Production in the Apple Developer portal.
+
 The `production` GitHub environment must define these Actions secrets:
 
 - `CLERK_SECRET_KEY`
