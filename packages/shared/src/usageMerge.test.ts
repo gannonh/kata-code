@@ -296,6 +296,46 @@ describe("mergeUsage", () => {
     }
   });
 
+  it("adds no partial cells when a legacy multi-root complete scan cannot attribute its buckets", () => {
+    const rootA = { provider: "claude" as const, hostId: "mac", homePath: "/home/theo/.claude" };
+    const rootB = {
+      provider: "claude" as const,
+      hostId: "mac",
+      homePath: "/home/theo/.config/claude",
+    };
+    const complete = environment(
+      "old",
+      summary(
+        [bucket(), bucket({ day: "2026-08-08" as UsageDay })],
+        [rootA, rootB],
+        USAGE_MERGE_COMPATIBLE_SINCE,
+      ),
+    );
+    const partialSummary = summary(
+      [
+        bucket({ sourcePath: rootA.homePath }),
+        bucket({ day: "2026-08-08" as UsageDay, sourcePath: rootA.homePath }),
+      ],
+      [rootA],
+    );
+    const partial = environment("new", {
+      ...partialSummary,
+      readAt: "2026-08-08T01:00:00.000Z",
+      sources: partialSummary.sources.map((entry) => ({ ...entry, status: "partial" as const })),
+    });
+
+    for (const ordered of [
+      [complete, partial],
+      [partial, complete],
+    ]) {
+      const merged = mergeUsage(ordered, USAGE_CONTRACT_VERSION);
+      expect(merged.costUsd).toBe(20);
+      expect(merged.totalTokens).toBe(2320);
+      expect(merged.records).toBe(10);
+      expect(merged.contributingEnvironments).toEqual(["old"]);
+    }
+  });
+
   it("retains a complete cell when a larger partial cell may have skipped old records", () => {
     const source = { provider: "claude" as const, hostId: "mac", homePath: "/home/theo/.claude" };
     const complete = environment("old", summary([bucket()], [source]));
