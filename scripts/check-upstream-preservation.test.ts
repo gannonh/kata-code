@@ -1174,6 +1174,20 @@ describe("upstream preservation CLI", () => {
       }, false);
     });
 
+    it("rejects an entry that lists an owner path twice", () => {
+      withRetainedRegressionWorktree((temporaryRoot, _candidateSha, commitFixture) => {
+        rewriteInventory(temporaryRoot, (entries) => {
+          const entry = entries.find((candidate) => candidate.id === "migration-identity");
+          if (entry === undefined) throw new Error("migration-identity entry is missing.");
+          entry.ownerPaths.push("apps/server/src/kataSandbox/migrations.ts");
+        });
+        const { report } = runCandidate(temporaryRoot, commitFixture());
+        expect(report.lines).toContain(
+          "INVENTORY status=FAIL detail=Inventory owner paths for migration-identity do not match the code contract.",
+        );
+      }, false);
+    });
+
     it("ignores retired owner paths in the outcome diff but still reports a real edit", () => {
       const inventory = JSON.parse(
         NodeFS.readFileSync(
@@ -1301,8 +1315,25 @@ describe("upstream preservation CLI", () => {
         ).toThrow("Retired paths leave check alpha with a command that has no path arguments.");
       });
 
-      it("accepts the live retirement table against the live contract", () => {
-        expect(applyRetirements(PRESERVATION_CONTRACT, RETIREMENTS)).toEqual(PRESERVATION_CHECKS);
+      it("holds exactly the sandbox retirements from KAT-3543", () => {
+        expect([...RETIREMENTS.checks.keys()]).toEqual([
+          "sandbox-preview-default",
+          "sandbox-route-driver-registration",
+        ]);
+        expect([...RETIREMENTS.paths.keys()]).toEqual([
+          "apps/server/src/kataSandbox/migrations.ts",
+          "apps/server/src/kataSandbox/migrations.test.ts",
+        ]);
+        expect([...RETIREMENTS.unfrozenTrustedPaths.keys()]).toEqual([
+          "apps/server/src/provider/ProviderInstanceEnvironment.test.ts",
+        ]);
+        const issues = [
+          ...RETIREMENTS.checks.values(),
+          ...RETIREMENTS.paths.values(),
+          ...RETIREMENTS.unfrozenTrustedPaths.values(),
+        ].map((retirement) => retirement.issue);
+        expect(new Set(issues)).toEqual(new Set(["KAT-3543"]));
+        expect(PRESERVATION_CONTRACT.length).toBe(32);
       });
     });
   });

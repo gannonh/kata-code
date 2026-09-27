@@ -66,7 +66,8 @@ only from Merging.
    - a retired path (`paths`), which leaves every check's owner, required, and
      trusted paths and its command arguments;
    - an unfrozen trusted path (`unfrozenTrustedPaths`), which is still
-     required and still run, but whose bytes may change.
+     required and still run, but whose bytes may change. Unfreezing a path
+     lifts its byte check in every active check that trusts it.
 
    Leave the code and the inventory unchanged. The base checker accepts this
    PR because the inventory still matches its contract. After it lands, the
@@ -86,10 +87,15 @@ only from Merging.
 An active inventory entry may list only the retired paths its own contract
 entry had.
 
-To clean up after step 2, remove each retired check or path from both the
-contract and `RETIREMENTS` in the same PR. Removing only one of them either
-fails at load or turns the check back on. KAT-3543 retired the sandbox checks
-this way before KAT-3544 removed the sandbox feature.
+Clean up in the step 2 PR:
+
+- Remove each retired check or path from both the contract and `RETIREMENTS`.
+  Removing only one of them either fails at load or turns the check back on.
+- Remove each unfrozen entry from `RETIREMENTS` only, and keep the path in the
+  contract. That freezes the file again at its new bytes. While a path is
+  unfrozen, any PR can rewrite it without a changed-outcome report, so the
+  unfrozen window must end with the PR that needed it. KAT-3543 retired the sandbox checks
+  this way before KAT-3544 removed the sandbox feature.
 
 ## Review the full delta
 

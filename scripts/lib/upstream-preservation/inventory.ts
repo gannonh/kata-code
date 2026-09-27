@@ -122,7 +122,11 @@ export function validateInventory(
     const foreignRetired = entry.ownerPaths.filter(
       (path) => RETIREMENTS.paths.has(path) && !contractOwners.includes(path),
     );
-    if (!sameStrings(ownerPaths, check.ownerPaths) || foreignRetired.length > 0) {
+    if (
+      !sameStrings(ownerPaths, check.ownerPaths) ||
+      foreignRetired.length > 0 ||
+      new Set(entry.ownerPaths).size !== entry.ownerPaths.length
+    ) {
       throw new Error(`Inventory owner paths for ${entry.id} do not match the code contract.`);
     }
     if (!sameStrings(entry.specRefs, check.specRefs)) {
