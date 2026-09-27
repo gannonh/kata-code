@@ -46,37 +46,43 @@ function makeFakeDb(input: {
 }
 
 describe("ManagedTunnelLimits", () => {
-  it.effect("allows provisioning below the default limit", () => {
+  it.effect("allows the 10th managed tunnel when 9 are in use", () => {
     const fakeDb = makeFakeDb({
-      countRows: Effect.succeed([
-        { activeTunnels: ManagedTunnelLimits.DEFAULT_MANAGED_TUNNEL_LIMIT - 1 },
-      ]),
+      countRows: Effect.succeed([{ activeTunnels: 9 }]),
     });
 
     return Effect.gen(function* () {
       const limits = yield* ManagedTunnelLimits.ManagedTunnelLimits;
-      yield* limits.ensureCapacity({ userId: "user-1", environmentId: "environment-1" });
+      const result = yield* limits.ensureCapacity({
+        userId: "user-1",
+        environmentId: "environment-10",
+      });
+
+      expect(result).toBeUndefined();
     }).pipe(Effect.provide(layerWithDb(fakeDb)));
   });
 
-  it.effect("rejects provisioning at the default limit of 3", () => {
+  it.effect("rejects the 11th managed tunnel with an error naming the limit of 10", () => {
     const fakeDb = makeFakeDb({
-      countRows: Effect.succeed([{ activeTunnels: 3 }]),
+      countRows: Effect.succeed([{ activeTunnels: 10 }]),
     });
 
     return Effect.gen(function* () {
       const limits = yield* ManagedTunnelLimits.ManagedTunnelLimits;
       const error = yield* Effect.flip(
-        limits.ensureCapacity({ userId: "user-1", environmentId: "environment-1" }),
+        limits.ensureCapacity({ userId: "user-1", environmentId: "environment-11" }),
       );
 
       expect(error).toMatchObject({
         _tag: "ManagedTunnelLimitExceeded",
         userId: "user-1",
-        environmentId: "environment-1",
-        maxTunnels: 3,
-        activeTunnels: 3,
+        environmentId: "environment-11",
+        maxTunnels: 10,
+        activeTunnels: 10,
       });
+      expect(error.message).toBe(
+        "Managed tunnel limit reached for user 'user-1': 10 of 10 tunnels in use",
+      );
     }).pipe(Effect.provide(layerWithDb(fakeDb)));
   });
 
@@ -88,14 +94,19 @@ describe("ManagedTunnelLimits", () => {
 
     return Effect.gen(function* () {
       const limits = yield* ManagedTunnelLimits.ManagedTunnelLimits;
-      yield* limits.ensureCapacity({ userId: "user-1", environmentId: "environment-1" });
+      const result = yield* limits.ensureCapacity({
+        userId: "user-1",
+        environmentId: "environment-1",
+      });
+
+      expect(result).toBeUndefined();
     }).pipe(Effect.provide(layerWithDb(fakeDb)));
   });
 
   it.effect("honors a per-user override below the default", () => {
     const fakeDb = makeFakeDb({
-      overrideRows: Effect.succeed([{ maxTunnels: 1 }]),
-      countRows: Effect.succeed([{ activeTunnels: 1 }]),
+      overrideRows: Effect.succeed([{ maxTunnels: 3 }]),
+      countRows: Effect.succeed([{ activeTunnels: 3 }]),
     });
 
     return Effect.gen(function* () {
@@ -106,8 +117,8 @@ describe("ManagedTunnelLimits", () => {
 
       expect(error).toMatchObject({
         _tag: "ManagedTunnelLimitExceeded",
-        maxTunnels: 1,
-        activeTunnels: 1,
+        maxTunnels: 3,
+        activeTunnels: 3,
       });
     }).pipe(Effect.provide(layerWithDb(fakeDb)));
   });
