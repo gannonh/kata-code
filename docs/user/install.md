@@ -5,6 +5,9 @@ desktop, web, or mobile app. Set up the machine where the agents will work first
 
 ## Requirements
 
+Kata Code runs on macOS and Linux. The mobile app runs on iOS. Windows and
+Android builds are paused; see [supported platforms](../operations/supported-platforms.md).
+
 You need an installed, authenticated provider before starting a thread. You can
 launch Kata Code and configure providers afterwards.
 
@@ -12,12 +15,6 @@ launch Kata Code and configure providers afterwards.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gannonh/kata-code/main/scripts/install.sh | sh
-```
-
-On Windows, in PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/gannonh/kata-code/main/scripts/install.ps1 | iex
 ```
 
 This puts `katacode` in `~/.local/bin`. If your shell reports `command not found`
@@ -57,13 +54,6 @@ update it with `git pull` and a rebuild.
 
 Download a release from [GitHub Releases](https://github.com/gannonh/kata-code/releases),
 or run `npx @kata-sh/code-cli@latest`. Kata native package-manager packages are not published.
-
-### Windows Subsystem for Linux
-
-Choose a WSL distro in **Settings → Connections** to run agents and projects
-there. Install the provider CLIs inside that distro. Kata Code installs its own
-server runtime there automatically; the first launch after an app update can
-take longer.
 
 ### Open a project from a terminal
 

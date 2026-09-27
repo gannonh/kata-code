@@ -173,6 +173,23 @@ describe("release-asset-names / renderReleaseBody", () => {
     assert.ok(body.includes("| Debian (.deb) | — | — |"));
     assert.ok(body.includes("| Installer (.exe) | [Download]"));
   });
+
+  it("tells Windows users builds are paused when a release has no Windows installer", () => {
+    const body = renderReleaseBody({
+      version: VERSION,
+      tag: "v1.2.3",
+      repository: "gannonh/kata-code",
+      fileNames: ["Kata-Code-macOS-Apple-Silicon.dmg", "Kata-Code-Linux-x64.AppImage"],
+    });
+
+    assert.ok(
+      body.includes(
+        "### Windows\n\nWindows builds are paused. Existing Windows installs keep working but receive no updates. Kata Code supports macOS, Linux, and iOS.\n",
+      ),
+    );
+    assert.notInclude(body, "Installer (.exe)");
+    assert.notInclude(body, ".exe");
+  });
 });
 
 describe("release-asset-names / buildInstallerRenameRules", () => {

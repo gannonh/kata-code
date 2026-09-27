@@ -97,6 +97,36 @@ Clean up in the step 2 PR:
   unfrozen window must end with the PR that needed it. KAT-3543 retired the sandbox checks
   this way before KAT-3544 removed the sandbox feature.
 
+## Unsupported platform paths
+
+Kata ships macOS, Linux, and iOS only
+([supported platforms](../operations/supported-platforms.md)). Paths that exist
+only for a parked platform carry no retained Kata outcome. Take upstream changes
+to them as they are: record `TAKE` with the rationale `unsupported platform`,
+without a Kata behavior review, a disposition beyond that line, or live
+verification. When a conflict mixes a parked-platform branch with shared code,
+review only the shared code. A path that an active check in
+`scripts/lib/upstream-preservation/checks.ts` owns stays under that check.
+
+Each parked platform has one entry below.
+
+### Windows
+
+Parked by KAT-3514.
+
+- `scripts/install.ps1`
+- `apps/desktop/src/wsl/**`, `apps/desktop/src/ipc/methods/wsl*.ts`
+- `apps/desktop/src/electron/WindowsForeground*.ts`
+- `apps/desktop/src/snapShot/WindowsCaptureFeedback*.ts`
+- `apps/web/src/wslPaths*.ts`, `apps/web/src/state/desktopWslState*.ts`
+- Steps in `.github/workflows/release-desktop.yml` gated on `inputs.platform == 'win'`
+- `platform === "win"` / `win32` branches in `scripts/build-cli-archive.ts`,
+  `scripts/build-desktop-artifact.ts`, and `scripts/build-npm-platform-packages.ts`
+- Upstream Windows release jobs in `.github/workflows/release.yml`: keep them out
+  and update `.github/disabled/release-windows.yml` instead
+- `win32-*` keys in `CLI_ARCHIVE_PLATFORM_KEYS` (`packages/shared/src/cliRelease.ts`):
+  keep them out while Windows is parked
+
 ## Review the full delta
 
 Before running the command, review every path in the complete `base..candidate`

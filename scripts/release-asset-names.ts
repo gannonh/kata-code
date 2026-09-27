@@ -158,11 +158,21 @@ export function renderReleaseBody(input: {
     "",
     "### Windows",
     "",
-    "| | x64 | arm64 |",
-    "|---|---|---|",
-    `| Installer (.exe) | ${link(input.repository, input.tag, windowsX64Exe)} | ${link(input.repository, input.tag, windowsArm64Exe)} |`,
-    "",
-    "> AppImage, `.deb`, and Windows `.exe` installs do not support in-app auto-updates; macOS and the auto-update manifests below do.",
+    // Windows releases are parked (docs/operations/supported-platforms.md);
+    // the table returns on its own once a release carries a Windows installer.
+    ...(windowsX64Exe || windowsArm64Exe
+      ? [
+          "| | x64 | arm64 |",
+          "|---|---|---|",
+          `| Installer (.exe) | ${link(input.repository, input.tag, windowsX64Exe)} | ${link(input.repository, input.tag, windowsArm64Exe)} |`,
+          "",
+          "> AppImage, `.deb`, and Windows `.exe` installs do not support in-app auto-updates; macOS and the auto-update manifests below do.",
+        ]
+      : [
+          "Windows builds are paused. Existing Windows installs keep working but receive no updates. Kata Code supports macOS, Linux, and iOS.",
+          "",
+          "> AppImage and `.deb` installs do not support in-app auto-updates; macOS and the auto-update manifests below do.",
+        ]),
     "",
     "All release assets, including auto-update metadata, are attached below.",
   ];

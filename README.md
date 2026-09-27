@@ -6,6 +6,8 @@ Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCod
 
 ## Installation
 
+Kata Code runs on macOS and Linux, and its mobile app runs on iOS. Windows and Android builds are paused; see [supported platforms](./docs/operations/supported-platforms.md).
+
 > [!WARNING]
 > Kata Code currently supports Codex, Claude, Cursor, Grok Build, OpenCode, and Antigravity. Install and authenticate at least one provider before use:
 >
@@ -20,12 +22,6 @@ Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCod
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gannonh/kata-code/main/scripts/install.sh | sh
-```
-
-On Windows, in PowerShell:
-
-```powershell
-irm https://raw.githubusercontent.com/gannonh/kata-code/main/scripts/install.ps1 | iex
 ```
 
 Then run `katacode` to start the server and open the local web app. `katacode service install` keeps it running in the background, `katacode update` moves to a newer release, and `katacode --help` has the full reference.
@@ -59,16 +55,8 @@ Building from source? Start at [docs/internals/overview.md](./docs/internals/ove
 
 Kata Code uses Vite+ so you'll need to install the global `vp` command-line tool.
 
-#### macOS / Linux
-
 ```bash
 curl -fsSL https://vite.plus | bash
-```
-
-#### Windows
-
-```bash
-irm https://vite.plus/ps1 | iex
 ```
 
 Checkout their getting started guide for more information: https://viteplus.dev/guide/

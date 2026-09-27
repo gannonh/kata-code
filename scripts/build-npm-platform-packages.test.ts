@@ -45,13 +45,15 @@ const run = Effect.fn("test.run")(function* (
 });
 
 /** A tar.gz laid out like build-cli-archive.ts writes, with a stub CLI that echoes its args. */
-const makeFakeArchives = Effect.fn("test.makeFakeArchives")(function* () {
+const makeFakeArchives = Effect.fn("test.makeFakeArchives")(function* (
+  keys: ReadonlyArray<string> = KEYS,
+) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const root = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-npm-packages-test-" });
   const archivesDir = path.join(root, "archives");
   yield* fs.makeDirectory(archivesDir);
-  for (const key of KEYS) {
+  for (const key of keys) {
     const stem = `katacode-${VERSION}-${key}`;
     const stage = path.join(root, "stage", key);
     const contentDir = path.join(stage, stem);
@@ -96,11 +98,37 @@ it.layer(NodeServices.layer)("build-npm-platform-packages", (it) => {
         allowMissing: false,
       }).pipe(Effect.flip);
       assert.instanceOf(error, NpmPackagesArchivesMissingError);
-      assert.deepStrictEqual((error as NpmPackagesArchivesMissingError).missing, [
-        "linux-arm64",
-        "win32-arm64",
-        "win32-x64",
-      ]);
+      assert.deepStrictEqual((error as NpmPackagesArchivesMissingError).missing, ["linux-arm64"]);
+    }),
+  );
+
+  it.effect("publishes macOS and Linux packages only, with no Windows optional dependency", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const fixture = yield* makeFakeArchives(["darwin-arm64", "linux-arm64", "linux-x64"]);
+      const outputs = yield* buildNpmPlatformPackages({
+        ...fixture,
+        version: VERSION,
+        allowMissing: false,
+      });
+      assert.deepStrictEqual(
+        outputs.map((output) => output.name),
+        [
+          "@kata-sh/code-cli-darwin-arm64",
+          "@kata-sh/code-cli-linux-arm64",
+          "@kata-sh/code-cli-linux-x64",
+          "@kata-sh/code-cli",
+        ],
+      );
+      const launcherManifest = yield* decodeManifest(
+        yield* fs.readFileString(path.join(fixture.outputDir, "@kata-sh/code-cli/package.json")),
+      );
+      assert.deepStrictEqual(launcherManifest.optionalDependencies, {
+        "@kata-sh/code-cli-darwin-arm64": VERSION,
+        "@kata-sh/code-cli-linux-arm64": VERSION,
+        "@kata-sh/code-cli-linux-x64": VERSION,
+      });
     }),
   );
 
@@ -255,7 +283,10 @@ it.layer(NodeServices.layer)("build-npm-platform-packages", (it) => {
       });
       assert.equal(unsupported.exitCode, 1);
       assert.include(unsupported.stderr, "linux-x64");
-      assert.include(unsupported.stderr, "win32-arm64");
+      assert.include(
+        unsupported.stderr,
+        "Supported platforms: darwin-arm64, linux-arm64, linux-x64.",
+      );
       assert.include(unsupported.stderr, "https://github.com/gannonh/kata-code/releases");
     }),
   );
