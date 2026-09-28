@@ -55,13 +55,14 @@ Upstream edited no trusted assertion file. No `ci.yml` allowlist line changes.
 
 ## Changed retained outcomes
 
-The checker reports three changed retained outcomes, all owned by `FORK.md` alone:
+Against base `b20ae10a9` (see "Main sync"), the checker reports four changed retained outcomes:
 
-| Check                                | Changed owner | Disposition                                                  |
-| ------------------------------------ | ------------- | ------------------------------------------------------------ |
-| `product-identity-release-ownership` | `FORK.md`     | TAKE: pin advances to `d15210cd3`; identity tables unchanged |
-| `connect-wire-identity`              | `FORK.md`     | TAKE: same pin-only edit                                     |
-| `state-isolation`                    | `FORK.md`     | TAKE: same pin-only edit                                     |
+| Check                                | Changed owner                                          | Disposition                                                                                        |
+| ------------------------------------ | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `product-identity-release-ownership` | `FORK.md`                                              | TAKE: pin advances to `d15210cd3`; identity tables unchanged                                       |
+| `connect-wire-identity`              | `FORK.md`                                              | TAKE: same pin-only edit                                                                           |
+| `state-isolation`                    | `FORK.md`                                              | TAKE: same pin-only edit                                                                           |
+| `connect-early-access-waitlist`      | `apps/web/src/components/onboarding/WelcomeWizard.tsx` | TAKE: upstream #13935 changes only the import-finish flow; the early-access controls are unchanged |
 
 ## Independent review
 
@@ -74,3 +75,11 @@ An independent Opus review covered all 7 upstream paths three-way and the 6 path
 ## Pin consumers
 
 `FORK.md`, both upstream-tip literals in `.github/workflows/ci.yml`, `docs/upstream/kat-3307-runbook.md`, and the live-tree `currentUpstreamSha` in `scripts/check-upstream-preservation.test.ts` advance to `d15210cd3`. `baselineUpstreamSha` stays at its historical pin, and the original root stays `6a687ee43`.
+
+## Main sync
+
+After the PR reached Human Review, `origin/main` advanced seven commits from `fc798afd2` to `b20ae10a9645264619c77f206d262724cece8816`. Gannon asked for the branch to be brought up to date, and merge commit `6fe5783310fd55f1993cff4fad2099c8f902b0c5` (parents `a2da339e4` and `b20ae10a9`) does that. The Kata base for verification is now `b20ae10a9`.
+
+- One conflict, in `scripts/check-upstream-preservation.test.ts`. Main (KAT-3512) moved the historical baseline to `d62d138f6` at its own pin `ab099178a`, and this branch moved the live-tree `currentUpstreamSha` to `d15210cd3`. The merge keeps both. `baselineUpstreamSha` stays `ab099178a` because that is `d62d138f6`'s own `FORK.md` pin.
+- `WelcomeWizard.tsx`, `ci.yml`, and the runbook auto-merged. Main's wizard change is the KAT-3512 early-access request in `ConnectAccountOption`, which does not overlap the #13935 import-finish hunks. Main's `ci.yml` change parks Kotlin inputs in the native-change filter; both upstream-tip literals stay `d15210cd3`.
+- Main's inventory now makes `WelcomeWizard.tsx` an owner of `connect-early-access-waitlist` (KAT-3512), so that check joins the changed outcomes above. KAT-3515 retired `mobile-android-asset-live-evidence`, so two waived live checks remain: `human-device-provider-evidence` and `icon-composer-live-evidence`.
