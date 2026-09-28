@@ -603,9 +603,10 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
         Effect.result,
       );
       expect(Result.isFailure(result)).toBe(true);
-      expect(helperCommand?.command).toBe("/usr/bin/env");
+      expect(helperCommand?.command).toBe("/bin/sh");
       expect(helperCommand?.args).toEqual([
-        "ELECTRON_RUN_AS_NODE=1",
+        "-c",
+        'ELECTRON_RUN_AS_NODE=1 exec "$0" "$@"',
         "/Applications/Kata Code.app/Contents/MacOS/Kata Code",
         "-e",
         expect.stringContaining(ANTIGRAVITY_AUTH_BROWSER_MARKER),
@@ -614,9 +615,30 @@ it.layer(NodeServices.layer)("Antigravity profile preparation", (it) => {
       ]);
       expect(helperCommand?.options.env?.ELECTRON_RUN_AS_NODE).toBeUndefined();
       expect(helperCommand?.options.env?.BROWSER).toBe(
-        `'/usr/bin/env' 'ELECTRON_RUN_AS_NODE=1' '/Applications/Kata Code.app/Contents/MacOS/Kata Code' '-e' '${helperCommand?.args[3]}' '--' '%s'`,
+        `'/bin/sh' '-c' 'ELECTRON_RUN_AS_NODE=1 exec "$0" "$@"' '/Applications/Kata Code.app/Contents/MacOS/Kata Code' '-e' '${helperCommand?.args[4]}' '--' '%s'`,
       );
     }),
+  );
+
+  it.effect.skipIf(!symlinksSupported)(
+    "runs the browser helper from a runtime path that contains an equals sign",
+    () =>
+      Effect.gen(function* () {
+        // Windows runs the runtime directly, without the POSIX shell wrapper.
+        if ((yield* HostProcessPlatform) === "win32") return;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const directory = yield* fs.makeTempDirectoryScoped();
+        const runtimeDirectory = path.join(directory, "node=v22");
+        yield* fs.makeDirectory(runtimeDirectory);
+        const runtimeExecutablePath = path.join(runtimeDirectory, "node");
+        yield* fs.symlink(process.execPath, runtimeExecutablePath);
+        const profile = yield* prepareAntigravityProfile({
+          profileDirectory: path.join(directory, "profile"),
+          runtimeExecutablePath,
+        });
+        expect(yield* fs.exists(profile.acpDirectory)).toBe(true);
+      }),
   );
 
   it.effect("reports missing Node before creating the standalone sign-in profile", () =>

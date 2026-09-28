@@ -338,10 +338,13 @@ export const prepareAntigravityProfile = Effect.fn("prepareAntigravityProfile")(
   const helperExecutable =
     platform === "win32" ? runtimeExecutablePath.replaceAll("\\", "/") : runtimeExecutablePath;
   // Inside the desktop app the runtime is the Electron executable, which runs
-  // `-e` only with ELECTRON_RUN_AS_NODE set.
-  const helperProgram = platform === "win32" ? helperExecutable : "/usr/bin/env";
+  // `-e` only with ELECTRON_RUN_AS_NODE set. The shell takes the runtime path
+  // as $0, so a path containing `=` is never read as an assignment.
+  const helperProgram = platform === "win32" ? helperExecutable : "/bin/sh";
   const helperArguments = [
-    ...(platform === "win32" ? [] : ["ELECTRON_RUN_AS_NODE=1", helperExecutable]),
+    ...(platform === "win32"
+      ? []
+      : ["-c", 'ELECTRON_RUN_AS_NODE=1 exec "$0" "$@"', helperExecutable]),
     "-e",
     browserHelperSource,
     "--",
