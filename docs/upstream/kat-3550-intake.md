@@ -36,7 +36,7 @@ The only new `@t3tools/*` import is in the new `apps/web/src/components/onboardi
 
 ## Conflict resolutions
 
-None. `git merge-tree --write-tree fc798afd2 d15210cd3` and the actual merge both reported no conflicts.
+None. `git merge-tree --write-tree fc798afd2 d15210cd3` and the actual merge both reported no conflicts. The merge commit `9c623b03f` is not the bare automatic merge: it also carries the scope rename of the new test's import. Its tree differs from the merge-tree result (`e14f54047`) only in that one line of `WelcomeWizard.test.tsx`.
 
 ## Clean merges and new files
 
@@ -52,6 +52,24 @@ No retained owner in the Sprite CLI, process byte APIs, credential cleanup, prov
 ## Trusted assertions
 
 Upstream edited no trusted assertion file. No `ci.yml` allowlist line changes.
+
+## Changed retained outcomes
+
+The checker reports three changed retained outcomes, all owned by `FORK.md` alone:
+
+| Check                                | Changed owner | Disposition                                                  |
+| ------------------------------------ | ------------- | ------------------------------------------------------------ |
+| `product-identity-release-ownership` | `FORK.md`     | TAKE: pin advances to `d15210cd3`; identity tables unchanged |
+| `connect-wire-identity`              | `FORK.md`     | TAKE: same pin-only edit                                     |
+| `state-isolation`                    | `FORK.md`     | TAKE: same pin-only edit                                     |
+
+## Independent review
+
+An independent Opus review covered all 7 upstream paths three-way and the 6 paths in the pin commit. It found no blocker and no defect introduced by the merge. It asked for the changed-outcome table above and the note about the merge commit's tree. Its upstream-behavior follow-ups:
+
+- A slow Claude Stop holds up other threads' commands for up to 3 s, because `ProviderCommandReactor` runs one serial worker for every thread. Filed as KAT-3551.
+- If the interrupt wait is itself interrupted, `settleInterruptedTurn` leaves a stale `Deferred` on the session context. It is harmless: the next `completeTurn` resolves it with no waiter, and the next Stop replaces it. No action.
+- If `completeOnboarding` succeeds but both navigations reject, the wizard shows "Could not finish setup" although the settings saved. Both navigations must fail, so this is improbable. No action.
 
 ## Pin consumers
 
