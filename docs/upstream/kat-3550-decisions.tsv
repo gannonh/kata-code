@@ -1,0 +1,11 @@
+ts	phase	decision	why	evidence	result
+2026-09-28T07:01:00Z	intake	TAKE frozen range ab099178a7b7f9728843e90fc95ed90bb61d710d..d15210cd3da79f9a1a495a6309d912d76362a046	The target is 4 commits ahead and the previous pin is its ancestor	KAT-3550 Linear intake; git merge-base --is-ancestor ab099178a d15210cd3	new run
+2026-09-28T07:01:30Z	reconcile	KAT-3532 reconciled: landed, accepted, lesson filed	PR #288 landed as merge 19d1e84be; KAT-3545 (#289) repaired main CI; lesson filed as KAT-3546 (Backlog)	KAT-3532 comment 2babd1c8; ci.yml push run 36368077871 success on fc798afd2	previous run reconciled
+2026-09-28T07:02:00Z	git	SKIP squash-recovery anchor	ab099178a is an ancestor of base fc798afd2 because PR #288 landed as a merge	git merge-base --is-ancestor ab099178a fc798afd2; git merge-base --all fc798afd2 d15210cd3 = ab099178a	no anchor
+2026-09-28T07:03:00Z	git	TAKE three-way merge of d15210cd3	Normal merge preserves Kata main and upstream ancestry	git merge --no-ff --no-commit d15210cd3 = 9c623b03f	no conflicts, matching the merge-tree census
+2026-09-28T07:03:30Z	imports	TAKE new WelcomeWizard.test.tsx under @kata-sh/code-contracts	The only new @t3tools import in the range	apps/web/src/components/onboarding/WelcomeWizard.test.tsx	adapted
+2026-09-28T07:04:00Z	web	TAKE onboarding continues after an incomplete history import (#13935)	Kata edits in WelcomeWizard.tsx are branding only and do not overlap	WelcomeWizard.tsx; routes/welcome.tsx; vp test run src/components/onboarding	Kata branding kept
+2026-09-28T07:04:30Z	provider	TAKE Claude graceful interrupt before close (#13999)	SDK interrupt with a 3 s grace; no process, environment, or credential change	ClaudeAdapter.ts; ClaudeAdapter.test.ts 143 passed	taken
+2026-09-28T07:05:00Z	web	TAKE Usage unpriced-records popover (#13991)	Uses Kata Popover and InlineButton APIs that exist on base	UsagePage.tsx	taken
+2026-09-28T07:05:30Z	relay	TAKE deletion of infra/relay/src/dbConfig.test.ts (#13932)	The test restated a constant; Kata never edited it	vp test run in infra/relay: 39 files, 448 tests	taken
+2026-09-28T07:06:00Z	pins	Advance FORK.md, both ci.yml tip literals, kat-3307-runbook.md, and live-tree currentUpstreamSha to d15210cd3	Pin consumers must agree; baselineUpstreamSha stays at its historical pin; root stays 6a687ee43	git grep ab099178 outside historical intake records	pins agree
