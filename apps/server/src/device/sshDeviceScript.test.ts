@@ -69,6 +69,89 @@ describe("remote helper lifecycle", () => {
     await Promise.all([...homes].map(removeHome));
   });
 
+  const probeIos = async (xcodebuild: string, xcrun: string) => {
+    const home = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-xcode-probe-"));
+    homes.add(home);
+    const bin = NodePath.join(home, "bin");
+    await NodeFSP.mkdir(bin);
+    await NodeFSP.writeFile(NodePath.join(bin, "xcodebuild"), xcodebuild, { mode: 0o755 });
+    await NodeFSP.writeFile(NodePath.join(bin, "xcrun"), xcrun, { mode: 0o755 });
+    await NodeFSP.writeFile(
+      NodePath.join(bin, "first-launch"),
+      "#!/bin/sh\nwhile :; do sleep 1; done\n",
+      { mode: 0o755 },
+    );
+    const file = NodePath.join(home, "probe.cjs");
+    await NodeFSP.writeFile(
+      file,
+      remoteDeviceScript("one", "probe").replace(
+        "const xcodeTimeout = 30000;",
+        "const xcodeTimeout = 1000;",
+      ),
+    );
+    const started = Date.now();
+    const result = await exec(process.execPath, [file], {
+      env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
+    });
+    const elapsed = Date.now() - started;
+    const leftover = await exec("pgrep", ["-f", NodePath.join(bin, "first-launch")]).then(
+      ({ stdout }) => stdout.trim(),
+      () => "",
+    );
+    const ios = JSON.parse(result.stdout).platforms.find(
+      (platform: { platform: string }) => platform.platform === "ios",
+    );
+    return { ios, elapsed, leftover, bin };
+  };
+
+  it.effect("reports iOS unavailable without calling simctl when Xcode needs first launch", () =>
+    Effect.gen(function* () {
+      if ((yield* HostProcessPlatform) !== "darwin") return;
+      yield* Effect.promise(async () => {
+        const { ios, elapsed, leftover } = await probeIos(
+          '#!/bin/sh\n[ "$1" = -checkFirstLaunchStatus ] && exit 69\nexit 0\n',
+          '#!/bin/sh\n"$(dirname "$0")/first-launch" &\nexec sleep 600\n',
+        );
+        expect(ios).toEqual({
+          platform: "ios",
+          available: false,
+          reason:
+            "Xcode has not finished its first launch. Run sudo xcodebuild -runFirstLaunch on the device host.",
+        });
+        expect(elapsed).toBeLessThan(5000);
+        expect(leftover).toBe("");
+      });
+    }),
+  );
+
+  it.effect("kills the whole process group of a timed-out simctl call", () =>
+    Effect.gen(function* () {
+      if ((yield* HostProcessPlatform) !== "darwin") return;
+      yield* Effect.promise(async () => {
+        const { ios, leftover } = await probeIos(
+          "#!/bin/sh\nexit 0\n",
+          '#!/bin/sh\n"$(dirname "$0")/first-launch" &\nexec sleep 600\n',
+        );
+        expect(ios).toEqual({
+          platform: "ios",
+          available: false,
+          reason: "iOS needs macOS with Xcode and working xcrun simctl.",
+        });
+        expect(leftover).toBe("");
+      });
+    }),
+  );
+
+  it.effect("reports iOS available when first launch is complete and simctl works", () =>
+    Effect.gen(function* () {
+      if ((yield* HostProcessPlatform) !== "darwin") return;
+      yield* Effect.promise(async () => {
+        const { ios } = await probeIos("#!/bin/sh\nexit 0\n", "#!/bin/sh\nexit 0\n");
+        expect(ios).toEqual({ platform: "ios", available: true });
+      });
+    }),
+  );
+
   it.effect("reuses its own healthy helpers and stops only its own runtime", () =>
     Effect.gen(function* () {
       if ((yield* HostProcessPlatform) === "win32") return;
@@ -80,6 +163,9 @@ describe("remote helper lifecycle", () => {
         await NodeFSP.writeFile(NodePath.join(bin, "adb"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
         // The real xcrun can block for its 30 s timeout, e.g. when Xcode still needs its first launch.
         await NodeFSP.writeFile(NodePath.join(bin, "xcrun"), "#!/bin/sh\nexit 0\n", {
+          mode: 0o755,
+        });
+        await NodeFSP.writeFile(NodePath.join(bin, "xcodebuild"), "#!/bin/sh\nexit 0\n", {
           mode: 0o755,
         });
         const root = NodePath.join(home, ".t3/device");

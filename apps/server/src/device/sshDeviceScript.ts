@@ -39,6 +39,14 @@ const { spawn, spawnSync } = require('node:child_process');
 const root = path.join(os.homedir(), '.t3', 'device');
 const state = path.join(root, 'hosts', owner);
 const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', timeout: 30000, ...options });
+const xcodeTimeout = 30000;
+// simctl can start xcodebuild children that outlive a killed wrapper, so a timeout kills the whole process group.
+const runXcodeTool = (command, args) => new Promise(resolve => {
+  const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+  const timer = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, xcodeTimeout);
+  child.once('error', () => { clearTimeout(timer); resolve(null); });
+  child.once('exit', status => { clearTimeout(timer); resolve(status); });
+});
 const read = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
 const write = (file, value) => { const tmp = file + '.' + process.pid; fs.writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 }); fs.renameSync(tmp, file); };
 const toolVersions = (name, requiredVersion, entry, record) => {
@@ -133,10 +141,13 @@ async function install(name, version, entry) {
   }
 }
 (async () => {
-  const ios = process.platform === 'darwin' && run('xcrun', ['simctl', 'help']).status === 0;
+  // Exit 69 means Xcode still needs its first launch, which simctl would start and block on.
+  const needsFirstLaunch = process.platform === 'darwin' && await runXcodeTool('xcodebuild', ['-checkFirstLaunchStatus']) === 69;
+  const ios = process.platform === 'darwin' && !needsFirstLaunch && await runXcodeTool('xcrun', ['simctl', 'help']) === 0;
   const android = run('adb', ['version']).status === 0;
+  const iosReason = needsFirstLaunch ? 'Xcode has not finished its first launch. Run sudo xcodebuild -runFirstLaunch on the device host.' : 'iOS needs macOS with Xcode and working xcrun simctl.';
   const platforms = [
-    { platform: 'ios', available: ios, ...(!ios ? { reason: 'iOS needs macOS with Xcode and working xcrun simctl.' } : {}) },
+    { platform: 'ios', available: ios, ...(!ios ? { reason: iosReason } : {}) },
     { platform: 'android', available: android, ...(!android ? { reason: 'Android SDK missing. Set ANDROID_HOME or put adb on the SSH PATH.' } : {}) },
   ];
   if (mode === 'probe') {
