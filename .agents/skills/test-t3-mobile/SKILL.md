@@ -1,46 +1,41 @@
 ---
 name: test-t3-mobile
-description: Launch and test Kata Code Mobile on an iOS Simulator or Android Emulator against disposable local T3 environments, including Metro and dev-client reuse, native rebuild decisions, per-client pairing, seeded projects, semantic UI control, and screenshots. Use after mobile UI or native changes, when reproducing phone or tablet behavior, pairing an emulator to isolated state, or verifying mobile behavior on macOS, Linux, or Windows.
+description: Launch and test Kata Code Mobile on an iOS Simulator against disposable local T3 environments, including Metro and dev-client reuse, native rebuild decisions, per-client pairing, seeded projects, semantic UI control, and screenshots. Use after mobile UI or native changes, when reproducing phone or tablet behavior, pairing a simulator to isolated state, or verifying mobile behavior on macOS.
 ---
 
 # Test T3 Mobile
 
 Run one focused, end-to-end mobile verification pass against disposable T3 state. Use the sibling [`test-t3-app`](../test-t3-app/SKILL.md) skill as the detailed reference for pairing-token semantics and SQLite fixtures.
 
-Command examples use POSIX shell syntax. On Windows, use PowerShell equivalents: set variables with `$env:NAME = "value"`, use an explicit temporary directory from `[System.IO.Path]::GetTempPath()`, and run multiline examples on one line or with PowerShell backticks. Use `$env:ANDROID_HOME\platform-tools\adb.exe` when `adb` is not already on `PATH`.
+Command examples use POSIX shell syntax.
 
 ## Select a viable platform
 
-Inspect the host and the affected code before launching processes:
+Kata Code Mobile ships on iOS only. Android is parked (see `docs/operations/supported-platforms.md`), so do not build or verify on an Android Emulator.
 
-- On macOS with Xcode, prefer one representative iOS Simulator when the change is cross-platform.
-- On macOS, Linux, or Windows with the Android SDK, use one Android Emulator when Android is the affected surface or iOS tooling is unavailable.
-- When the change is platform-specific, test that platform. When neither platform is viable, report the missing SDK or emulator prerequisite rather than claiming verification. A missing development client is a build step, not a blocker.
-
-Do not treat unavailable iOS tooling as a blocker when Android is a valid representative target.
+Use one representative iOS Simulator on macOS with Xcode. When iOS tooling is unavailable, report the missing Xcode or simulator prerequisite rather than claiming verification. A missing development client is a build step, not a blocker.
 
 ## Ensure a compatible native client
 
 Authorized mobile verification includes building and installing a development client. A missing, stale, or unknown native client is not a reason to skip verification or leave a PR in draft. Build and install it, then continue. Respect an explicit user instruction not to rebuild; otherwise do not ask for separate permission.
 
-Run this from the checkout being tested, on the machine that hosts the selected simulator or emulator. Select and boot one explicit iOS UDID or Android emulator serial first:
+Run this from the checkout being tested, on the machine that hosts the selected simulator. Select and boot one explicit iOS UDID first:
 
 - App: `Kata Code Dev`
-- Bundle/package identifier: `com.katacode.dev`
+- Bundle identifier: `com.katacode.dev`
 - URL scheme: `katacode-dev`
 
 ```bash
 node scripts/mobile-native-client.ts ensure ios <simulator-udid>
-node scripts/mobile-native-client.ts ensure android <emulator-serial>
 ```
 
 `ensure` compares the checkout's local Expo development fingerprint and the installed app's binary contents against the last successful build record. It reuses a matching client; otherwise it runs a clean prebuild, builds and installs the development app, and records the successful result. It does not start Metro. Start Metro below after it succeeds. On hosts with an `agent-job` requirement, run the entire `ensure` command through that queue.
 
 For a read-only decision, use `check` in place of `ensure`. Exit 0 means compatible, 2 means build required, and 1 means an operational error. An app installed outside this helper is initially unknown and gets rebuilt once. Records are local to the simulator host under `~/.cache/katacode/native-clients` and work across checkouts. Do not copy records between machines or write them manually.
 
-A JavaScript-only diff, bundle identifier, app version, or recent install date does not prove native compatibility. Always check the whole checkout. Expo fingerprints are computed locally with `APP_VARIANT=development`; no EAS credentials or cloud build are required. Generated `ios/` and `android/` directories are excluded by `.fingerprintignore`, so edit native source modules or config plugins rather than generated output.
+A JavaScript-only diff, bundle identifier, app version, or recent install date does not prove native compatibility. Always check the whole checkout. Expo fingerprints are computed locally with `APP_VARIANT=development`; no EAS credentials or cloud build are required. Generated `ios/` directories are excluded by `.fingerprintignore`, so edit native source modules or config plugins rather than generated output.
 
-The development identity is `Kata Code Dev`, bundle/package `com.katacode.dev`, scheme `katacode-dev`. If a build fails, investigate the build error and fix the local prerequisites. Report the concrete failure if it cannot be resolved, not “no compatible client.”
+The development identity is `Kata Code Dev`, bundle `com.katacode.dev`, scheme `katacode-dev`. If a build fails, investigate the build error and fix the local prerequisites. Report the concrete failure if it cannot be resolved, not “no compatible client.”
 
 ## Start one disposable T3 environment
 
@@ -71,7 +66,6 @@ node apps/server/src/bin.ts serve \
 Use these client origins:
 
 - iOS Simulator: `http://127.0.0.1:<server-port>`
-- Android Emulator: `http://10.0.2.2:<server-port>`
 - Physical device: bind the backend to `0.0.0.0` and use the host's reachable LAN origin
 
 Enter the complete `http://` origin to make the test transport explicit. Bare IP addresses default to HTTP, while bare hostnames default to HTTPS. When testing web and mobile together, run `vp run dev --home-dir <base-dir> --host 127.0.0.1` instead and do not launch a second backend over the same base directory.
@@ -92,8 +86,6 @@ Run Metro from `apps/mobile`.
      --lan \
      --port <metro-port>
    ```
-
-   In PowerShell, set `$env:APP_VARIANT = "development"` first and then run the `vp exec expo start ...` command without the leading assignment.
 
 4. Open the exact development-client URL for the selected device and confirm the loaded bundle belongs to this worktree and Metro port.
 
@@ -116,20 +108,7 @@ xcrun simctl openurl <simulator-udid> <printed-dev-client-url>
 
 Accept the iOS confirmation prompt and dismiss the developer menu when it obscures the app.
 
-### Android launch
-
-Use the emulator serial already checked by `ensure`:
-
-```bash
-adb -s <emulator-serial> shell pm path com.katacode.dev
-adb -s <emulator-serial> reverse tcp:<metro-port> tcp:<metro-port>
-adb -s <emulator-serial> shell am start -W \
-  -a android.intent.action.VIEW \
-  -d '<printed-dev-client-url>' \
-  com.katacode.dev
-```
-
-Do not start, stop, erase, or reconfigure an emulator owned by another task. Track and later stop only processes owned by this test.
+Do not start, stop, erase, or reconfigure a simulator owned by another task. Track and later stop only processes owned by this test.
 
 ## Pair each client once
 
@@ -138,12 +117,9 @@ Use the bundled helper from the repository root. It issues a fresh credential ag
 ```bash
 .agents/skills/test-t3-mobile/scripts/pair-client.sh \
   ios <simulator-udid> <server-port> <base-dir>
-
-.agents/skills/test-t3-mobile/scripts/pair-client.sh \
-  android <emulator-serial> <server-port> <base-dir>
 ```
 
-Run only the command for the selected platform. The helper uses `http://127.0.0.1:<server-port>` for iOS and `http://10.0.2.2:<server-port>` for Android. Pass a fifth argument only when testing a non-development URL scheme.
+The helper uses `http://127.0.0.1:<server-port>` for iOS. Pass a fifth argument only when testing a non-development URL scheme.
 
 The helper opens this registered route:
 
@@ -157,19 +133,11 @@ Do not enter pairing hosts or tokens through simulator keyboard automation. Xcod
 
 Verify the expected seeded projects appear before exercising the affected flow.
 
-Pairing credentials are secret, short-lived, and single-use. Create a different credential for every simulator, emulator, physical device, or browser. If an attempt fails, issue a new credential rather than retrying the old one. Do not expose tokens in screenshots, commits, or final responses.
+Pairing credentials are secret, short-lived, and single-use. Create a different credential for every simulator, physical device, or browser. If an attempt fails, issue a new credential rather than retrying the old one. Do not expose tokens in screenshots, commits, or final responses.
 
 ## Drive and observe the affected flow
 
-### iOS
-
 Use `snapshot_ui` and current element references from XcodeBuildMCP for taps and typing.
-
-### Android
-
-Prefer semantic Android automation exposed by the current agent host. Otherwise inspect the current hierarchy with `adb shell uiautomator dump`, target stable resource IDs, content descriptions, text, or bounds, and use scoped `adb shell input` actions. Refresh the hierarchy after navigation. Capture the final state with `adb exec-out screencap -p`.
-
-Use a browser-compatible Android mirror when the host already provides one; otherwise return focused emulator screenshots as evidence.
 
 ## Verify and clean up
 
@@ -178,9 +146,8 @@ Exercise only the affected flow on one representative device unless the change s
 1. Confirm the app connected to the intended disposable environment instead of merely rendering an empty disconnected state.
 2. Capture the relevant final state.
 3. Remove the disposable environment from Kata Code Dev.
-4. Remove any `adb reverse` rule created for this test with `adb -s <emulator-serial> reverse --remove tcp:<metro-port>`.
-5. Stop only the Metro, backend, emulator, and log processes started by this test.
-6. Remove only base directories and temporary Git repositories deliberately created for this test. Preserve them when they contain useful reproduction evidence.
+4. Stop only the Metro, backend, simulator, and log processes started by this test.
+5. Remove only base directories and temporary Git repositories deliberately created for this test. Preserve them when they contain useful reproduction evidence.
 
 Keep local verification focused. Do not turn this workflow into a full repository test run.
 
@@ -192,5 +159,3 @@ Keep local verification focused. Do not turn this workflow into a full repositor
 - **The pairing form opens but does not connect:** confirm the deep link uses the existing `connections/new` route, includes `autoConnect=1`, and carries a freshly minted encoded `pairingUrl`.
 - **Pairing text changes case or punctuation:** do not retry semantic typing. Use `scripts/pair-client.sh`; the simulator keyboard layout and HID input path are not reliable for credentials.
 - **iOS semantic actions fail:** set explicit XcodeBuildMCP defaults and refresh with `snapshot_ui`.
-- **Android cannot reach Metro:** verify `adb reverse` for the exact Metro port and relaunch the development-client URL.
-- **Android cannot reach the backend:** use `10.0.2.2`, not `127.0.0.1`, for the Android Emulator.

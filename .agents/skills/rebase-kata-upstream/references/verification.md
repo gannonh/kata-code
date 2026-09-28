@@ -22,7 +22,7 @@ Read and use the available project verification skills:
 
 - `.agents/skills/verify-katacode/SKILL.md` for a disposable web stack and captured observations.
 - `.agents/skills/test-t3-app/SKILL.md` for current pairing mechanics when an older recipe disagrees with runtime behavior.
-- `.agents/skills/test-t3-mobile/SKILL.md` for a compatible device or simulator, including Android when the changed behavior is Android-specific.
+- `.agents/skills/test-t3-mobile/SKILL.md` for an iOS Simulator. Android is parked, so Android-only changes need no device verification.
 
 Obtain a fresh token for each client. Keep credentials out of screenshots and durable logs. Never run migrations against user state. Pairing, landing, Settings connections/search, preview gating, and a real provider interaction need evidence where the inventory requires it. Exercise native desktop/mobile and macOS Icon Composer where required; a browser screenshot cannot prove those results.
 
@@ -34,10 +34,12 @@ The September 10 baseline records 29 portable passes and three manual checks as 
 
 Gannon Hall waives three live checks on every integration run (KAT-3471, 2026-09-25, after the same per-run waiver on KAT-3454): `human-device-provider-evidence`, `icon-composer-live-evidence`, and `mobile-android-asset-live-evidence`. The waiver takes effect only when the owning Linear issue's AC states it; the routine prompt carries that clause. Without it in the AC, missing live evidence blocks advancement as above.
 
+Since KAT-3515 parked Android, the checker retires `mobile-android-asset-live-evidence`. It no longer reports that check and rejects it in `manual-evidence.json`, so the steps below apply to the other two waived checks only.
+
 With the clause present:
 
-- Record the three checks as `NOT RUN` in `manual-evidence.json` and in the issue comment. Do not produce or claim live evidence that was not observed.
-- Advance to Human Review when every other gate passes and the only open `HUMAN_REVIEW_ACCEPTANCE` items are those three checks. The checker has no waiver mode and still prints `HUMAN_REVIEW_ACCEPTANCE status=FAIL`. Quote that output; never report it as `PASS`.
+- Record the waived checks as `NOT RUN` in `manual-evidence.json` and in the issue comment. Do not produce or claim live evidence that was not observed.
+- Advance to Human Review when every other gate passes and the only open `HUMAN_REVIEW_ACCEPTANCE` items are the waived checks. The checker has no waiver mode and still prints `HUMAN_REVIEW_ACCEPTANCE status=FAIL`. Quote that output; never report it as `PASS`.
 - The waiver does not cover an automated `FAIL`, a new line in the `ci.yml` trusted-assertion allowlist, or a changed retained outcome. Each still needs a per-run human decision recorded on the issue.
 - Run the agent-observable web check anyway (`verify-katacode`) and attach its evidence; it is not a substitute for the waived checks.
 

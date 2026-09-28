@@ -142,6 +142,25 @@ Parked by KAT-3514.
 - `win32-*` keys in `CLI_ARCHIVE_PLATFORM_KEYS` (`packages/shared/src/cliRelease.ts`):
   keep them out while Windows is parked
 
+### Android
+
+Parked by KAT-3515. `RETIREMENTS` in `scripts/lib/upstream-preservation/checks.ts`
+retires `mobile-android-asset-live-evidence`, `mobile-android-fab-inset`, and the
+Material You theme paths, so no active check owns these paths.
+
+- `apps/mobile/modules/*/android/**`, and `*.kt` / `*.kts` under `apps/mobile/`
+- `apps/mobile/plugins/withAndroid*.cjs`
+- `apps/mobile/src/**/*.android.ts`, `apps/mobile/src/**/*.android.tsx`
+- `apps/mobile/src/features/home/android-home-fab-layout*.ts`
+- `apps/mobile/src/lib/materialYouTheme.ts`, `apps/mobile/src/lib/materialYouTheme.test.ts`
+- `apps/mobile/assets/android-*.png`
+- `apps/mobile/detekt.yml`, `apps/mobile/.editorconfig`
+- `docs/operations/android-notifications.md`
+- Android hunks in `apps/mobile/app.config.ts`: keep `platforms: ["ios"]` and no
+  `withAndroid*` plugin entries
+- Android build scripts in `apps/mobile/package.json` and `android` fields in
+  `apps/mobile/eas.json`: keep them out while Android is parked
+
 ## Review the full delta
 
 Before running the command, review every path in the complete `base..candidate`
