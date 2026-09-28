@@ -249,9 +249,10 @@ function antigravityEnvironment(
     AGY_ACP_FORCE_FILE_STORAGE: "1",
     BROWSER: profile.browserCommand,
     PYTHONUNBUFFERED: "1",
-    ELECTRON_RUN_AS_NODE: "1",
+    // POSIX browser commands set ELECTRON_RUN_AS_NODE themselves, so commands
+    // the agent runs do not start Electron apps as Node.
     ...(profile.platform === "win32"
-      ? { TEMP: tempDirectory, TMP: tempDirectory }
+      ? { ELECTRON_RUN_AS_NODE: "1", TEMP: tempDirectory, TMP: tempDirectory }
       : { TMPDIR: tempDirectory }),
   };
 }
@@ -336,8 +337,21 @@ export const prepareAntigravityProfile = Effect.fn("prepareAntigravityProfile")(
     ));
   const helperExecutable =
     platform === "win32" ? runtimeExecutablePath.replaceAll("\\", "/") : runtimeExecutablePath;
-  const browserArguments = [helperExecutable, "-e", browserHelperSource, "--", "%s"];
-  const browserCommand = browserArguments.map(quoteBrowserArgument).join(" ");
+  // Inside the desktop app the runtime is the Electron executable, which runs
+  // `-e` only with ELECTRON_RUN_AS_NODE set. The shell takes the runtime path
+  // as $0, so a path containing `=` is never read as an assignment.
+  const helperProgram = platform === "win32" ? helperExecutable : "/bin/sh";
+  const helperArguments = [
+    ...(platform === "win32"
+      ? []
+      : ["-c", 'ELECTRON_RUN_AS_NODE=1 exec "$0" "$@"', helperExecutable]),
+    "-e",
+    browserHelperSource,
+    "--",
+  ];
+  const browserCommand = [helperProgram, ...helperArguments, "%s"]
+    .map(quoteBrowserArgument)
+    .join(" ");
   if (
     browserCommand.includes(platform === "win32" ? ";" : ":") ||
     helperExecutable.includes("\r") ||
@@ -364,7 +378,7 @@ export const prepareAntigravityProfile = Effect.fn("prepareAntigravityProfile")(
   const environment = antigravityEnvironment(profile, input.baseEnv ?? process.env, auth);
   yield* Effect.gen(function* () {
     const child = yield* spawner.spawn(
-      ChildProcess.make(helperExecutable, ["-e", browserHelperSource, "--", browserPreflightUrl], {
+      ChildProcess.make(helperProgram, [...helperArguments, browserPreflightUrl], {
         env: environment,
         extendEnv: false,
         shell: false,
