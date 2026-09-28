@@ -159,6 +159,19 @@ it("plans only scenes supported by each selected device", () => {
   );
 });
 
+it("captures only iOS devices by default while Android is parked", () => {
+  assert.deepStrictEqual(
+    planShowcaseCaptures(config, parseShowcaseCliArgs([])).map((capture) => capture.device.id),
+    ["phone"],
+  );
+  assert.deepStrictEqual(
+    planShowcaseCaptures(config, parseShowcaseCliArgs(["--device", "pixel"])).map(
+      (capture) => capture.device.id,
+    ),
+    ["pixel"],
+  );
+});
+
 it("expands both appearances into independent upload-ready directories", () => {
   const options = parseShowcaseCliArgs(["--device", "phone", "--appearance", "both"]);
   const captures = planShowcaseCaptures(config, options);

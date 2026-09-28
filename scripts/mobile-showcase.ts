@@ -377,8 +377,16 @@ export function planShowcaseCaptures(
   config: ShowcaseConfig,
   options: Pick<CliOptions, "platforms" | "deviceIds" | "scenes" | "appearances" | "themes">,
 ): ReadonlyArray<ShowcaseCapture> {
+  // Android is parked (docs/operations/supported-platforms.md): capture it only when a
+  // --platform or --device flag asks for it.
+  const selectedByDefault = (device: ShowcaseDevice) =>
+    device.platform === "ios" || options.deviceIds.size > 0;
   const captures = config.devices
-    .filter((device) => options.platforms.size === 0 || options.platforms.has(device.platform))
+    .filter((device) =>
+      options.platforms.size === 0
+        ? selectedByDefault(device)
+        : options.platforms.has(device.platform),
+    )
     .filter((device) => options.deviceIds.size === 0 || options.deviceIds.has(device.id))
     .flatMap((device) => {
       const appearances =

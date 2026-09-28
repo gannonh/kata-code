@@ -51,9 +51,11 @@ shared across every checkout. The readiness check only verifies that the port is
 verify process ownership. Concurrent screenshot harnesses in different worktrees can therefore
 collide or attach to the wrong Metro process.
 
-Every configured device defaults to dark appearance and the `t3-code` palette, so plain
-`pnpm screenshots:mobile` produces 35 dark PNGs. Pass `--appearance light`, `--appearance dark`, or
-`--appearance both` to override the configured appearance; `both` produces 70 PNGs.
+Every configured device defaults to dark appearance and the `t3-code` palette. Android is parked
+([supported platforms](./supported-platforms.md#android)), so plain `pnpm screenshots:mobile`
+captures the iOS devices only and produces 17 dark PNGs. Android devices are captured only with
+`--platform android` or `--device <id>`. Pass `--appearance light`, `--appearance dark`, or
+`--appearance both` to override the configured appearance; `both` produces 34 PNGs.
 
 Pass `--theme <id>` (repeatable) or `--theme all` to capture the app's other palettes: `t3-code`,
 `t3-chat`, `grove`, `ocean`, `ember`, and `iris`. The runner hands the palette to the app as a launch
