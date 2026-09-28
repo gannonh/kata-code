@@ -405,7 +405,11 @@ export const make = Effect.gen(function* () {
     );
     if (fetched === null) return manifest;
 
-    manifest = fetched;
+    // Same rule as the disk load: a release can ship an edit the remote copy
+    // has not received yet, so an older fetch must not replace the bundle.
+    if (manifestUpdatedAtMs(fetched) >= manifestUpdatedAtMs(BUNDLED_MODEL_MANIFEST)) {
+      manifest = fetched;
+    }
     fetchedAtMs = now;
     yield* encodeManifestCache({ fetchedAtMs: now, manifest: fetched }).pipe(
       Effect.flatMap((serialized) => fileSystem.writeFileString(cachePath, serialized)),
