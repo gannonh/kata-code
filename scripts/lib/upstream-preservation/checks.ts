@@ -523,15 +523,7 @@ export const RETIREMENTS: RetirementTables = {
 // CI runs the base checker against the candidate inventory, so a new check lands here first:
 // it runs from the PR that adds it, and the inventory may omit it until a later PR adds its
 // entry and removes it from this table. See docs/upstream/kat-3307-runbook.md.
-export const PENDING_INVENTORY_CHECKS: ReadonlyMap<string, Retirement> = new Map([
-  [
-    "connect-early-access-waitlist",
-    {
-      issue: "KAT-3512",
-      reason: "Kata keeps the Connect early-access waitlist that upstream removed at GA.",
-    },
-  ],
-]);
+export const PENDING_INVENTORY_CHECKS: ReadonlyMap<string, Retirement> = new Map();
 
 export const PRESERVATION_CONTRACT: ReadonlyArray<PreservationCheck> = CONTRACT_CHECKS;
 

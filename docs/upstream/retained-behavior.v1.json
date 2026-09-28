@@ -394,6 +394,31 @@
       }
     },
     {
+      "id": "connect-early-access-waitlist",
+      "title": "Kata Code Connect early-access waitlist",
+      "retainedOutcome": "Signed-out web, desktop, and mobile users request Kata Code Connect early access through the Clerk waitlist, with a separate sign-in path for approved users; the mobile settings/waitlist deep link opens the early-access request screen. Upstream T3 removed its waitlist at GA (60af905e70); Kata keeps it.",
+      "ownerPaths": [
+        "apps/web/src/components/clerk/earlyAccess.ts",
+        "apps/web/src/components/clerk/useT3ConnectAuthPrompt.tsx",
+        "apps/web/src/components/clerk/T3ConnectSidebarSignIn.tsx",
+        "apps/web/src/components/clerk/BrowserManagedAuthShell.tsx",
+        "apps/web/src/components/clerk/ElectronManagedAuthShell.tsx",
+        "apps/web/src/components/onboarding/WelcomeWizard.tsx",
+        "apps/mobile/src/features/cloud/cloudWaitlistJoin.ts",
+        "apps/mobile/src/features/cloud/CloudWaitlistEnrollment.tsx",
+        "apps/mobile/src/features/settings/SettingsWaitlistRouteScreen.tsx",
+        "apps/mobile/src/features/settings/SettingsRouteScreen.tsx",
+        "apps/mobile/src/features/settings/SettingsNotificationsRouteScreen.tsx",
+        "apps/mobile/src/Stack.tsx"
+      ],
+      "specRefs": ["docs/operations/connect-setup.md"],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "connect-early-access-waitlist"
+      }
+    },
+    {
       "id": "icon-composer-live-evidence",
       "title": "macOS Icon Composer output",
       "retainedOutcome": "Icon Composer output is inspected on macOS and remains Kata artwork with the required dimensions and safe area.",

@@ -39,10 +39,11 @@ const currentSha = "251a6bcb5cfad04999a6bdd4c7dbb5bb4c983ff9";
 const upstreamSha = "12391bd0d38eef6655b7a9f8945d0cb5febadc2b";
 // withHistoricalBaselineWorktree checks out baselineCandidateSha and runs today's
 // checker against that tree. Pass that commit's FORK.md pin (baselineUpstreamSha),
-// not the live pin. currentSha stays historical because withRetainedRegressionWorktree
+// not the live pin. The candidate must contain every inventory owner path, so it moves
+// forward when a check is added (KAT-3512 merge). currentSha stays historical because withRetainedRegressionWorktree
 // copies today's checker over that checkout and needs a tree difference to commit.
-const baselineCandidateSha = "00406934429021e47d3cb60e16491febb46742b4";
-const baselineUpstreamSha = "c14f6015bfe479d313355cb234af1a5c16dbb15f";
+const baselineCandidateSha = "d62d138f6ab43eec6da1b45a9582a7f757ffda10";
+const baselineUpstreamSha = "ab099178a7b7f9728843e90fc95ed90bb61d710d";
 const currentUpstreamSha = "ab099178a7b7f9728843e90fc95ed90bb61d710d";
 const upstreamBaseSha = "6a687ee43bf222672ab8d3f4c0bab3d8d174f79f";
 
@@ -189,6 +190,32 @@ const withRetainedRegressionWorktree = <A>(
         NodePath.join(temporaryRoot, relativePath),
       );
     }
+    // Checks added after currentSha own files that checkout lacks; carry today's copies.
+    const addedContractPaths = [
+      ...new Set(
+        PRESERVATION_CONTRACT.flatMap((check) => [
+          ...check.ownerPaths,
+          ...check.commands.flatMap((command) => [
+            ...command.requiredPaths,
+            ...(command.trustedPaths ?? []),
+          ]),
+        ]),
+      ),
+    ].filter(
+      (relativePath) =>
+        !NodeFS.existsSync(NodePath.join(temporaryRoot, relativePath)) &&
+        NodeFS.existsSync(NodePath.join(repositoryRoot, relativePath)),
+    );
+    for (const relativePath of addedContractPaths) {
+      NodeFS.mkdirSync(NodePath.dirname(NodePath.join(temporaryRoot, relativePath)), {
+        recursive: true,
+      });
+      NodeFS.cpSync(
+        NodePath.join(repositoryRoot, relativePath),
+        NodePath.join(temporaryRoot, relativePath),
+        { recursive: true },
+      );
+    }
     linkWorkspaceDependencies(temporaryRoot);
 
     if (mutateRetainedSource) {
@@ -225,6 +252,7 @@ const withRetainedRegressionWorktree = <A>(
           "apps/desktop/src/app/DesktopStatePaths.ts",
           "apps/desktop/src/app/DesktopStatePaths.test.ts",
           "apps/desktop/src/app/DesktopEnvironment.test.ts",
+          ...addedContractPaths,
         ],
         { cwd: temporaryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
       );
@@ -416,14 +444,8 @@ describe("upstream preservation CLI", () => {
           { cwd: repositoryRoot, encoding: "utf8" },
         );
 
-        // A check added after the historical candidate cannot pass there; every
-        // check that predates it must.
-        const failedChecks = result.stdout
-          .split("\n")
-          .filter((line) => /^CHECK id=\S+ status=FAIL/.test(line))
-          .map((line) => line.split(" ")[1]);
-        expect(failedChecks).toEqual(["id=connect-early-access-waitlist"]);
-        expect(result.status).toBe(1);
+        expect(result.stdout).not.toContain("status=FAIL");
+        expect(result.status).toBe(0);
         expect(result.stdout).toContain(
           `UPSTREAM_PRESERVATION mode=baseline candidate=${baselineCandidateSha} base=${baselineCandidateSha}`,
         );
@@ -475,37 +497,22 @@ describe("upstream preservation CLI", () => {
     ).toThrow("exactly");
   });
 
-  it("accepts an inventory with or without a pending check entry", () => {
+  it("requires the early-access inventory entry once its check is no longer pending", () => {
     const inventory = JSON.parse(
       NodeFS.readFileSync(
         NodePath.join(repositoryRoot, "docs/upstream/retained-behavior.v1.json"),
         "utf8",
       ),
     ) as { entries: Array<{ id: string }> };
-    const pending = PRESERVATION_CONTRACT.find(
-      (check) => check.id === "connect-early-access-waitlist",
-    )!;
-    const pendingEntry = {
-      id: pending.id,
-      title: pending.title,
-      retainedOutcome: "Signed-out users request Kata Code Connect early access.",
-      ownerPaths: [...pending.ownerPaths],
-      specRefs: [...pending.specRefs],
-      evidence: { kind: "automated", profile: "portable", verification: pending.id },
-    };
-    const withoutPending = inventory.entries.filter((entry) => entry.id !== pending.id);
+    const withoutEntry = inventory.entries.filter(
+      (entry) => entry.id !== "connect-early-access-waitlist",
+    );
 
-    expect([...PENDING_INVENTORY_CHECKS.keys()]).toEqual(["connect-early-access-waitlist"]);
-    expect(
-      validateInventory({ ...inventory, entries: withoutPending }, repositoryRoot).entries,
-    ).toHaveLength(30);
-    expect(
-      validateInventory(
-        { ...inventory, entries: [...withoutPending, pendingEntry] },
-        repositoryRoot,
-      ).entries,
-    ).toHaveLength(31);
-    expect(PRESERVATION_CHECKS.map((check) => check.id)).toContain(pending.id);
+    expect(PENDING_INVENTORY_CHECKS.size).toBe(0);
+    expect(validateInventory(inventory, repositoryRoot).entries).toHaveLength(31);
+    expect(() =>
+      validateInventory({ ...inventory, entries: withoutEntry }, repositoryRoot),
+    ).toThrow("Inventory must contain exactly 31 entries; found 30.");
   });
 
   it("rejects skip metadata added to the inventory", () => {

@@ -108,7 +108,10 @@ check lands in two PRs:
    lands the new check runs on every candidate.
 2. Once step 1 is on `main`, add the inventory entry and remove the ID from
    `PENDING_INVENTORY_CHECKS` in a second PR. The base checker accepts the
-   inventory with or without a pending entry.
+   inventory with or without a pending entry. The checker tests run today's
+   inventory against older commits, so the same PR moves `baselineCandidateSha`
+   in `scripts/check-upstream-preservation.test.ts` to a commit that has the new
+   owner paths.
 
 KAT-3512 added `connect-early-access-waitlist` this way.
 
