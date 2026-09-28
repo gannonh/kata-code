@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalFetchInEffect:off preferSchemaOverJson:off - verifies generated remote scripts using real shell and Node processes.
+// @effect-diagnostics nodeBuiltinImport:off globalFetchInEffect:off preferSchemaOverJson:off globalDate:off - verifies generated remote scripts using real shell and Node processes.
 import * as Effect from "effect/Effect";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { afterEach, describe, expect, it } from "@effect/vitest";
