@@ -92,6 +92,7 @@ import { UsageRouteScreen } from "./features/usage/UsageRouteScreen";
 import { SettingsAboutRouteScreen } from "./features/settings/SettingsAboutRouteScreen";
 import { SettingsNotificationsRouteScreen } from "./features/settings/SettingsNotificationsRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
+import { SettingsWaitlistRouteScreen } from "./features/settings/SettingsWaitlistRouteScreen";
 import { SettingsThreadsRouteScreen } from "./features/settings/SettingsThreadsRouteScreen";
 import { SettingsEnvironmentFilterProvider } from "./features/settings/settings-environment-filter";
 import { ShowcaseCaptureCoordinator } from "./features/showcase/ShowcaseCaptureCoordinator";
@@ -186,6 +187,15 @@ const SettingsContentStack = createNativeStackNavigator({
       linking: "",
       options: {
         title: "Settings",
+      },
+    }),
+    // Kata fork delta (KAT-3512): Kata Code Connect is invite-gated, so the
+    // `settings/waitlist` deep link opens the early-access request screen.
+    SettingsWaitlist: createNativeStackScreen({
+      screen: SettingsWaitlistRouteScreen,
+      linking: "waitlist",
+      options: {
+        title: "Early access",
       },
     }),
     SettingsEnvironments: createNativeStackScreen({
@@ -345,11 +355,6 @@ const SettingsSheetStack = createNativeStackNavigator({
     SettingsAuth: createNativeStackScreen({
       screen: SettingsAuthRouteScreen,
       linking: "auth",
-    }),
-    SettingsWaitlist: createNativeStackScreen({
-      // Keep the old deep link working after the Connect GA launch.
-      screen: SettingsAuthRouteScreen,
-      linking: "waitlist",
     }),
   },
 });

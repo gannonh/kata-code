@@ -451,6 +451,28 @@ const CONTRACT_CHECKS = [
     ],
   },
   {
+    id: "connect-early-access-waitlist",
+    title: "Kata Code Connect early-access waitlist",
+    evidenceKind: "automated",
+    evidenceProfile: "portable",
+    ownerPaths: [
+      "apps/web/src/components/clerk/earlyAccess.ts",
+      "apps/web/src/components/clerk/useT3ConnectAuthPrompt.tsx",
+      "apps/web/src/components/clerk/T3ConnectSidebarSignIn.tsx",
+      "apps/mobile/src/features/cloud/cloudWaitlistJoin.ts",
+      "apps/mobile/src/features/cloud/CloudWaitlistEnrollment.tsx",
+      "apps/mobile/src/features/settings/SettingsWaitlistRouteScreen.tsx",
+      "apps/mobile/src/Stack.tsx",
+    ],
+    specRefs: ["docs/operations/connect-setup.md"],
+    commands: [
+      vpTestCommand([
+        "apps/web/src/components/clerk/earlyAccess.test.tsx",
+        "apps/mobile/src/features/cloud/cloudWaitlistJoin.test.ts",
+      ]),
+    ],
+  },
+  {
     id: "icon-composer-live-evidence",
     title: "macOS Icon Composer output",
     evidenceKind: "manual",
@@ -492,6 +514,19 @@ export const RETIREMENTS: RetirementTables = {
   paths: new Map(),
   unfrozenTrustedPaths: new Map(),
 };
+
+// CI runs the base checker against the candidate inventory, so a new check lands here first:
+// it runs from the PR that adds it, and the inventory may omit it until a later PR adds its
+// entry and removes it from this table. See docs/upstream/kat-3307-runbook.md.
+export const PENDING_INVENTORY_CHECKS: ReadonlyMap<string, Retirement> = new Map([
+  [
+    "connect-early-access-waitlist",
+    {
+      issue: "KAT-3512",
+      reason: "Kata keeps the Connect early-access waitlist that upstream removed at GA.",
+    },
+  ],
+]);
 
 export const PRESERVATION_CONTRACT: ReadonlyArray<PreservationCheck> = CONTRACT_CHECKS;
 
@@ -569,5 +604,10 @@ export const withoutRetiredPaths = (paths: ReadonlyArray<string>): ReadonlyArray
 export const RETIRED_CHECKS = RETIREMENTS.checks;
 
 export const PRESERVATION_CHECKS = applyRetirements(CONTRACT_CHECKS, RETIREMENTS);
+
+for (const id of PENDING_INVENTORY_CHECKS.keys()) {
+  if (!PRESERVATION_CHECKS.some((check) => check.id === id))
+    throw new Error(`Pending inventory check ${id} is not an active preservation check.`);
+}
 
 export const CANONICAL_CHECK_IDS = PRESERVATION_CHECKS.map((check) => check.id);

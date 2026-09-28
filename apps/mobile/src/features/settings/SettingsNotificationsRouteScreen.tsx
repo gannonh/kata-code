@@ -223,13 +223,17 @@ function ConfiguredSettingsNotificationsRouteScreen() {
 
   const promptSignIn = useCallback(() => {
     Alert.alert(
-      `Sign in to ${CLOUD_PRODUCT_NAME}`,
-      `Live Activity updates require ${CLOUD_PRODUCT_NAME} so relay can deliver updates to this device.`,
+      `${CLOUD_PRODUCT_NAME} early access`,
+      `Live Activity updates require approved ${CLOUD_PRODUCT_NAME} access so relay can deliver updates to this device.`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Continue",
-          onPress: () => navigation.navigate("SettingsSheet", { screen: "SettingsAuth" }),
+          onPress: () =>
+            navigation.navigate("SettingsSheet", {
+              screen: "SettingsContent",
+              params: { screen: "SettingsWaitlist" },
+            }),
         },
       ],
     );
