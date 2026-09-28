@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { ManagedRelayAuthProvider } from "../../cloud/managedAuth";
 import { clerkAppearance } from "./clerkAppearance";
+import { clerkEarlyAccessLocalization } from "./earlyAccess";
 
 /**
  * Browser half of the managed-auth boundary, loaded lazily from the entry so
@@ -18,7 +19,11 @@ export default function BrowserManagedAuthShell({
   readonly children: ReactNode;
 }) {
   return (
-    <ClerkProvider appearance={clerkAppearance} publishableKey={publishableKey}>
+    <ClerkProvider
+      appearance={clerkAppearance}
+      localization={clerkEarlyAccessLocalization}
+      publishableKey={publishableKey}
+    >
       <ManagedRelayAuthProvider>{children}</ManagedRelayAuthProvider>
     </ClerkProvider>
   );

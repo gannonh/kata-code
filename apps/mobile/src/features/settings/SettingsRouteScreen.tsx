@@ -59,7 +59,7 @@ function ConfiguredSettingsRouteScreen() {
   const accountLabel = !isLoaded
     ? "Checking"
     : !isSignedIn
-      ? "Sign in"
+      ? "Early access"
       : (user?.primaryEmailAddress?.emailAddress ?? "Signed in");
 
   return (
@@ -77,7 +77,14 @@ function ConfiguredSettingsRouteScreen() {
             label="Kata Code Account"
             value={accountLabel}
             disabled={!isLoaded}
-            onPress={() => navigation.navigate("SettingsSheet", { screen: "SettingsAuth" })}
+            onPress={() =>
+              isSignedIn
+                ? navigation.navigate("SettingsSheet", { screen: "SettingsAuth" })
+                : navigation.navigate("SettingsSheet", {
+                    screen: "SettingsContent",
+                    params: { screen: "SettingsWaitlist" },
+                  })
+            }
           />
           <SettingsRow
             icon="desktopcomputer"

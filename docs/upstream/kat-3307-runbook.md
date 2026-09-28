@@ -97,6 +97,21 @@ Clean up in the step 2 PR:
   unfrozen window must end with the PR that needed it. KAT-3543 retired the sandbox checks
   this way before KAT-3544 removed the sandbox feature.
 
+## Add a check
+
+The base checker also rejects an inventory entry it does not know, so a new
+check lands in two PRs:
+
+1. Add the check to `CONTRACT_CHECKS` and its ID to `PENDING_INVENTORY_CHECKS`
+   in `scripts/lib/upstream-preservation/checks.ts`. Leave the inventory
+   unchanged. The base checker accepts the unchanged inventory, and once the PR
+   lands the new check runs on every candidate.
+2. Once step 1 is on `main`, add the inventory entry and remove the ID from
+   `PENDING_INVENTORY_CHECKS` in a second PR. The base checker accepts the
+   inventory with or without a pending entry.
+
+KAT-3512 added `connect-early-access-waitlist` this way.
+
 ## Unsupported platform paths
 
 Kata ships macOS, Linux, and iOS only

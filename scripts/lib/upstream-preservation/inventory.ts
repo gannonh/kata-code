@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import * as Schema from "effect/Schema";
 
 import {
+  PENDING_INVENTORY_CHECKS,
   PRESERVATION_CHECKS,
   PRESERVATION_CONTRACT,
   RETIRED_CHECKS,
@@ -87,9 +88,19 @@ export function validateInventory(
   assertNoForbiddenInventoryKeys(value, "inventory");
   const inventory = decodeOrThrow(decodeInventory, value, "Retained behavior inventory");
   const activeEntries = inventory.entries.filter((entry) => !RETIRED_CHECKS.has(entry.id));
-  if (activeEntries.length !== PRESERVATION_CHECKS.length) {
+  const requiredChecks = PRESERVATION_CHECKS.filter(
+    (check) => !PENDING_INVENTORY_CHECKS.has(check.id),
+  );
+  if (
+    activeEntries.length < requiredChecks.length ||
+    activeEntries.length > PRESERVATION_CHECKS.length
+  ) {
+    const expected =
+      requiredChecks.length === PRESERVATION_CHECKS.length
+        ? `${PRESERVATION_CHECKS.length}`
+        : `${requiredChecks.length} to ${PRESERVATION_CHECKS.length}`;
     throw new Error(
-      `Inventory must contain exactly ${PRESERVATION_CHECKS.length} entries; found ${activeEntries.length}.`,
+      `Inventory must contain exactly ${expected} entries; found ${activeEntries.length}.`,
     );
   }
 
@@ -155,7 +166,7 @@ export function validateInventory(
       }
     }
   }
-  for (const check of PRESERVATION_CHECKS) {
+  for (const check of requiredChecks) {
     if (!seen.has(check.id)) throw new Error(`Inventory is missing mandatory check ${check.id}.`);
   }
   return inventory;

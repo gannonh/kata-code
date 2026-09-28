@@ -411,7 +411,7 @@ function ConnectAccountOption({
 }) {
   const { environments } = useEnvironments();
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const { openAuthPrompt } = useT3ConnectAuthPrompt();
+  const { openEarlyAccess, openSignIn } = useT3ConnectAuthPrompt();
   const [expanded, setExpanded] = useState(true);
   const [discoveryReady, setDiscoveryReady] = useState(false);
   const onDiscoveryReady = useCallback(() => setDiscoveryReady(true), []);
@@ -425,7 +425,7 @@ function ConnectAccountOption({
             if (!isSignedIn) {
               event.preventDefault();
               setExpanded(true);
-              openAuthPrompt();
+              openEarlyAccess();
             }
           }}
           render={
@@ -438,7 +438,7 @@ function ConnectAccountOption({
             {!isLoaded
               ? "Loading sign-in…"
               : !isSignedIn
-                ? "Sign in"
+                ? "Request early access"
                 : !discoveryReady
                   ? "Loading computers…"
                   : null}
@@ -447,6 +447,19 @@ function ConnectAccountOption({
             className={cn("size-4 text-muted-foreground", expanded && isSignedIn && "rotate-90")}
           />
         </CollapsibleTrigger>
+        {isLoaded && !isSignedIn ? (
+          <p className="px-3 pb-3 text-xs text-muted-foreground">
+            Already approved?{" "}
+            <button
+              type="button"
+              disabled={disabled}
+              className="font-medium text-foreground underline-offset-4 hover:underline disabled:opacity-50"
+              onClick={openSignIn}
+            >
+              Sign in
+            </button>
+          </p>
+        ) : null}
         <CollapsiblePanel keepMounted>
           <div className="px-3 pb-3">
             <div className="mb-3 space-y-1.5">

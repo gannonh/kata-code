@@ -21,6 +21,7 @@ import {
 } from "./upstream-preservation-runner.ts";
 
 export {
+  PENDING_INVENTORY_CHECKS,
   PRESERVATION_CHECKS,
   PRESERVATION_CONTRACT,
   RETIREMENTS,

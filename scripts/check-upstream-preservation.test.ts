@@ -10,6 +10,7 @@ import {
   calculateResultArtifactDigest,
   changedInventoryOutcomeDetails,
   loadInventory,
+  PENDING_INVENTORY_CHECKS,
   parseNameStatusDiff,
   matchesOwnerPath,
   resolveRefs,
@@ -415,7 +416,14 @@ describe("upstream preservation CLI", () => {
           { cwd: repositoryRoot, encoding: "utf8" },
         );
 
-        expect(result.status).toBe(0);
+        // A check added after the historical candidate cannot pass there; every
+        // check that predates it must.
+        const failedChecks = result.stdout
+          .split("\n")
+          .filter((line) => /^CHECK id=\S+ status=FAIL/.test(line))
+          .map((line) => line.split(" ")[1]);
+        expect(failedChecks).toEqual(["id=connect-early-access-waitlist"]);
+        expect(result.status).toBe(1);
         expect(result.stdout).toContain(
           `UPSTREAM_PRESERVATION mode=baseline candidate=${baselineCandidateSha} base=${baselineCandidateSha}`,
         );
@@ -465,6 +473,39 @@ describe("upstream preservation CLI", () => {
     expect(() =>
       validateInventory({ ...inventory, entries: inventory.entries.slice(1) }, repositoryRoot),
     ).toThrow("exactly");
+  });
+
+  it("accepts an inventory with or without a pending check entry", () => {
+    const inventory = JSON.parse(
+      NodeFS.readFileSync(
+        NodePath.join(repositoryRoot, "docs/upstream/retained-behavior.v1.json"),
+        "utf8",
+      ),
+    ) as { entries: Array<{ id: string }> };
+    const pending = PRESERVATION_CONTRACT.find(
+      (check) => check.id === "connect-early-access-waitlist",
+    )!;
+    const pendingEntry = {
+      id: pending.id,
+      title: pending.title,
+      retainedOutcome: "Signed-out users request Kata Code Connect early access.",
+      ownerPaths: [...pending.ownerPaths],
+      specRefs: [...pending.specRefs],
+      evidence: { kind: "automated", profile: "portable", verification: pending.id },
+    };
+    const withoutPending = inventory.entries.filter((entry) => entry.id !== pending.id);
+
+    expect([...PENDING_INVENTORY_CHECKS.keys()]).toEqual(["connect-early-access-waitlist"]);
+    expect(
+      validateInventory({ ...inventory, entries: withoutPending }, repositoryRoot).entries,
+    ).toHaveLength(30);
+    expect(
+      validateInventory(
+        { ...inventory, entries: [...withoutPending, pendingEntry] },
+        repositoryRoot,
+      ).entries,
+    ).toHaveLength(31);
+    expect(PRESERVATION_CHECKS.map((check) => check.id)).toContain(pending.id);
   });
 
   it("rejects skip metadata added to the inventory", () => {
@@ -1050,8 +1091,8 @@ describe("upstream preservation CLI", () => {
       expect(RETIREMENTS.checks.size).toBe(0);
       expect(RETIREMENTS.paths.size).toBe(0);
       expect(RETIREMENTS.unfrozenTrustedPaths.size).toBe(0);
-      expect(PRESERVATION_CONTRACT.length).toBe(30);
-      expect(PRESERVATION_CHECKS.length).toBe(30);
+      expect(PRESERVATION_CONTRACT.length).toBe(31);
+      expect(PRESERVATION_CHECKS.length).toBe(31);
       const provider = PRESERVATION_CHECKS.find(
         (check) => check.id === "provider-sandbox-environment-isolation",
       );
