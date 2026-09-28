@@ -230,14 +230,16 @@ function ConfiguredSettingsNotificationsRouteScreen() {
         {
           text: "Continue",
           onPress: () =>
-            navigation.navigate("SettingsSheet", {
-              screen: "SettingsContent",
-              params: { screen: "SettingsWaitlist" },
-            }),
+            isSignedIn
+              ? navigation.navigate("SettingsSheet", { screen: "SettingsAuth" })
+              : navigation.navigate("SettingsSheet", {
+                  screen: "SettingsContent",
+                  params: { screen: "SettingsWaitlist" },
+                }),
         },
       ],
     );
-  }, [navigation]);
+  }, [isSignedIn, navigation]);
 
   const linkEnvironments = useCallback(async () => {
     if (!isSignedIn) {

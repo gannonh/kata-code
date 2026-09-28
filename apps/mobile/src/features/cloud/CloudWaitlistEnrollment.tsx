@@ -1,6 +1,6 @@
 import { useWaitlist } from "@clerk/expo";
 import { ActivityIndicator, Pressable, View } from "react-native";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { CLOUD_PRODUCT_NAME } from "@kata-sh/code-shared/branding";
 
@@ -14,15 +14,18 @@ export function CloudWaitlistEnrollment(props: { readonly onSignIn: () => void }
   const { errors, fetchStatus, waitlist } = useWaitlist();
   const [emailAddress, setEmailAddress] = useState("");
   const [requestError, setRequestError] = useState<string | null>(null);
+  // `fetchStatus` updates a render later, so a quick second tap could submit twice.
+  const inFlight = useRef(false);
   const isSubmitting = fetchStatus === "fetching";
   const fieldError = errors.fields.emailAddress?.longMessage;
 
   const requestEarlyAccess = async () => {
     const normalizedEmailAddress = emailAddress.trim();
-    if (!normalizedEmailAddress || isSubmitting) {
+    if (!normalizedEmailAddress || isSubmitting || inFlight.current) {
       return;
     }
 
+    inFlight.current = true;
     setRequestError(null);
     try {
       await joinCloudWaitlist(waitlist, normalizedEmailAddress);
@@ -33,6 +36,8 @@ export function CloudWaitlistEnrollment(props: { readonly onSignIn: () => void }
           ? "Could not request early access. Check your email address and try again."
           : "Could not request early access. Check your connection and try again.",
       );
+    } finally {
+      inFlight.current = false;
     }
   };
 
