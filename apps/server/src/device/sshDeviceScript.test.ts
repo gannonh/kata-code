@@ -1,11 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetchInEffect:off preferSchemaOverJson:off - verifies generated remote scripts using real shell and Node processes.
 import * as Effect from "effect/Effect";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
-import { describe, expect, it } from "@effect/vitest";
+import { afterEach, describe, expect, it } from "@effect/vitest";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeTimersPromises from "node:timers/promises";
 import * as NodeUtil from "node:util";
 import { quoteRemoteArg, remoteDeviceEnvironment, remoteDeviceScript } from "./sshDeviceScript.ts";
 import { AGENT_DEVICE_VERSION, DEVICE_HUB_VERSION } from "./DeviceToolchain.ts";
@@ -48,14 +49,39 @@ it.effect("preserves shell metacharacters and newlines in remote arguments", () 
 );
 
 describe("remote helper lifecycle", () => {
+  const homes = new Set<string>();
+  // Helpers run detached, so kill everything started from a test home, including after a timeout.
+  const removeHome = async (home: string) => {
+    const pattern = NodePath.basename(home);
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const found = await exec("pgrep", ["-f", pattern]).then(
+        () => true,
+        () => false,
+      );
+      if (!found) break;
+      await exec("pkill", ["-KILL", "-f", pattern]).catch(() => {});
+      await NodeTimersPromises.setTimeout(100);
+    }
+    await NodeFSP.rm(home, { recursive: true, force: true });
+    homes.delete(home);
+  };
+  afterEach(async () => {
+    await Promise.all([...homes].map(removeHome));
+  });
+
   it.effect("reuses its own healthy helpers and stops only its own runtime", () =>
     Effect.gen(function* () {
       if ((yield* HostProcessPlatform) === "win32") return;
       yield* Effect.promise(async () => {
         const home = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-remote-script-"));
+        homes.add(home);
         const bin = NodePath.join(home, "bin");
         await NodeFSP.mkdir(bin);
         await NodeFSP.writeFile(NodePath.join(bin, "adb"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+        // The real xcrun can block for its 30 s timeout, e.g. when Xcode still needs its first launch.
+        await NodeFSP.writeFile(NodePath.join(bin, "xcrun"), "#!/bin/sh\nexit 0\n", {
+          mode: 0o755,
+        });
         const root = NodePath.join(home, ".t3/device");
         const hubDir = NodePath.join(root, `tools/expo-device-hub@${DEVICE_HUB_VERSION}`);
         const agentDir = NodePath.join(root, `tools/agent-device@${AGENT_DEVICE_VERSION}`);
@@ -224,7 +250,7 @@ else { const child=spawn(process.execPath,[path.join(path.dirname(process.argv[1
         } finally {
           await invoke("one", "stop").catch(() => {});
           await invoke("two", "stop").catch(() => {});
-          await NodeFSP.rm(home, { recursive: true, force: true });
+          await removeHome(home);
         }
       });
     }),
