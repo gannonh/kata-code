@@ -1,5 +1,5 @@
 import { UserButton, useAuth } from "@clerk/react";
-import { LogInIcon, ServerIcon, SmartphoneIcon } from "lucide-react";
+import { LogInIcon, ServerIcon, SmartphoneIcon, SparklesIcon } from "lucide-react";
 
 import { hasCloudPublicConfig } from "../../cloud/publicConfig";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
@@ -53,21 +53,34 @@ function ConfiguredT3ConnectSidebarAvatar() {
 
 function ConfiguredT3ConnectSidebarSignIn() {
   const { isLoaded, isSignedIn } = useAuth();
-  const { authPrompt, openAuthPrompt } = useT3ConnectAuthPrompt();
+  const { openEarlyAccess, openSignIn } = useT3ConnectAuthPrompt();
 
   if (!isLoaded || isSignedIn) return null;
 
+  return <T3ConnectSignedOutMenu onRequestEarlyAccess={openEarlyAccess} onSignIn={openSignIn} />;
+}
+
+export function T3ConnectSignedOutMenu({
+  onRequestEarlyAccess,
+  onSignIn,
+}: {
+  readonly onRequestEarlyAccess: () => void;
+  readonly onSignIn: () => void;
+}) {
   return (
-    <>
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton onClick={openAuthPrompt}>
-            <LogInIcon />
-            <span>Sign in to Kata Code Connect</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
-      {authPrompt}
-    </>
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <SidebarMenuButton onClick={onRequestEarlyAccess}>
+          <SparklesIcon />
+          <span>Request early access</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+      <SidebarMenuItem>
+        <SidebarMenuButton onClick={onSignIn}>
+          <LogInIcon />
+          <span>Sign in to Kata Code Connect</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
   );
 }

@@ -37,6 +37,28 @@ const runSwiftLint = runCommand("swiftlint", ["lint", "--strict"], "/repo/apps/m
 );
 
 it.layer(NodeServices.layer)("mobile native source discovery", (it) => {
+  it.effect("lints Swift sources only while Android is parked", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "mobile-native-static-check-" });
+      const iosDirectory = path.join(root, "modules", "t3-terminal", "ios");
+      const androidDirectory = path.join(root, "modules", "t3-terminal", "android");
+      yield* fs.makeDirectory(iosDirectory, { recursive: true });
+      yield* fs.makeDirectory(androidDirectory, { recursive: true });
+      yield* fs.writeFileString(path.join(iosDirectory, "Terminal.swift"), "");
+      yield* fs.writeFileString(path.join(androidDirectory, "Terminal.kt"), "");
+      yield* fs.writeFileString(path.join(androidDirectory, "build.gradle.kts"), "");
+
+      const sources = yield* collectSources(root, root);
+
+      assert.deepStrictEqual(
+        sources.map((source) => path.relative(root, source)),
+        ["modules/t3-terminal/ios/Terminal.swift"],
+      );
+    }),
+  );
+
   it.effect("preserves the failed discovery operation, path, and exact cause", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

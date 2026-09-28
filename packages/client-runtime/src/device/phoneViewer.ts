@@ -20,10 +20,13 @@ import {
 import { createImportedPhoneScene, loadDeviceModel } from "./modelScene.ts";
 import { createPhoneScene, phoneDisplayLayout } from "./phoneScene.ts";
 import {
-  createAndroidFoldScene,
+  createFoldScene,
   DEFAULT_FOLD_INNER_ASPECT,
+  duoPresentation,
   isFoldInnerAspect,
-} from "./androidFoldScene.ts";
+  type FoldBody,
+  type FoldDisplay,
+} from "./foldScene.ts";
 import { createRenderScheduler } from "./renderScheduler.ts";
 import { createDeviceMotion } from "./deviceMotion.ts";
 import { createDeviceFraming } from "./deviceFraming.ts";
@@ -51,6 +54,9 @@ export interface PhoneViewer {
 
 const ANDROID_ORIENTATION_TURN_MS = 450;
 const ANDROID_FOLD_TURN_MS = 850;
+
+const foldBody = (profile: DeviceShapeProfile): FoldBody | null =>
+  profile.id === "ios-duo" ? "iphone-duo" : profile.id.startsWith("android") ? "android" : null;
 
 /** Owns only presentation resources. The caller retains the decoded canvas and the stream connection. */
 export function createPhoneViewer(options: {
@@ -98,19 +104,30 @@ export function createPhoneViewer(options: {
   let layout = phoneDisplayLayout(screen, options.source.width, options.source.height);
   let profile = options.profile ?? IOS_PHONE_SHAPE;
   let foldAngle = options.foldAngle ?? null;
-  let orientationAngle =
-    foldAngle !== null && profile.id.startsWith("android") ? 0 : layout.rotation;
+  let orientationAngle = foldAngle !== null && foldBody(profile) ? 0 : layout.rotation;
   let orientationTurn: { from: number; to: number; startedAt: number } | null = null;
   let imported: Awaited<ReturnType<typeof loadDeviceModel>> | null = null;
   let modelSource = options.model ?? null;
   let accessory: Awaited<ReturnType<typeof loadDeviceModel>> | null = null;
   let accessoryBounds: Box3 | null = null;
   let foldTurn: { from: number; to: number; startedAt: number } | null = null;
-  // The inner display's raw width over height. Cover frames leave the last unfolded shape.
-  const rawAspect = () => options.source.width / options.source.height;
-  let foldAspect = isFoldInnerAspect(rawAspect()) ? rawAspect() : DEFAULT_FOLD_INNER_ASPECT;
-  const createFoldScene = (angle: number, displayLayout = layout) =>
-    createAndroidFoldScene(texture, displayLayout, angle, foldAspect);
+  /**
+   * The unfolded body's width over height when the live frame is the inner display.
+   * Cover frames leave the last unfolded shape.
+   */
+  const innerFrameAspect = (shape = profile) => {
+    const { width, height } = options.source;
+    // The Duo's inner panel is mounted a quarter turn from its book-style body.
+    if (foldBody(shape) === "iphone-duo")
+      return screen?.screenId === 3 ||
+        (screen?.screenId === undefined && isFoldInnerAspect(height / width))
+        ? height / width
+        : null;
+    return isFoldInnerAspect(width / height) ? width / height : null;
+  };
+  let foldAspect = innerFrameAspect() ?? DEFAULT_FOLD_INNER_ASPECT;
+  const buildFoldScene = (angle: number, displayLayout = layout, shape = profile) =>
+    createFoldScene(texture, displayLayout, angle, foldAspect, foldBody(shape) ?? "android");
   /** The hinge angle currently on screen, including an unfinished turn. */
   const visibleFoldAngle = (fallback: number) => {
     if (!foldTurn) return fallback;
@@ -118,17 +135,17 @@ export function createPhoneViewer(options: {
     const eased = progress * progress * (3 - 2 * progress);
     return foldTurn.from + (foldTurn.to - foldTurn.from) * eased;
   };
-  let phone: ReturnType<typeof createPhoneScene> | ReturnType<typeof createAndroidFoldScene> =
-    foldAngle !== null && profile.id.startsWith("android")
-      ? createFoldScene(foldAngle)
+  let phone: ReturnType<typeof createPhoneScene> | ReturnType<typeof createFoldScene> =
+    foldAngle !== null && foldBody(profile)
+      ? buildFoldScene(foldAngle)
       : createPhoneScene(texture, layout, profile);
   scene.add(phone.root);
   let disposed = false;
+  // The resting view. Only an iPhone Duo fold moves it, to present its hinge pose.
   const rest = new Quaternion();
   const motion = createDeviceMotion({
     choose: (rotation) =>
-      nearestDeviceView(rotation, [{ rotation: new Quaternion(), yawLimit: Math.PI / 3 }])!
-        .rotation,
+      nearestDeviceView(rotation, [{ rotation: rest.clone(), yawLimit: Math.PI / 3 }])!.rotation,
   });
   motion.setPose(rest, performance.now(), true);
   const framing = createDeviceFraming();
@@ -147,6 +164,7 @@ export function createPhoneViewer(options: {
     );
     if (imported && accessoryBounds) bounds.union(accessoryBounds);
     bounds.applyMatrix4(new Matrix4().makeRotationZ(orientationAngle));
+    bounds.applyMatrix4(new Matrix4().makeRotationFromQuaternion(rest));
     const size = bounds.getSize(new Vector3());
     const aspect = size.x / size.y;
     if (aspect !== framingAspect) {
@@ -171,6 +189,31 @@ export function createPhoneViewer(options: {
   const applyPose = () => {
     phone.root.quaternion.copy(motion.rotation);
     phone.orientation.rotation.z = orientationAngle;
+  };
+  /** Point the Duo body at the display the hub streams and rest it in the hub's hinge pose. */
+  const presentDuo = (immediate = false) => {
+    const duo = !imported && "setAngle" in phone && foldBody(profile) === "iphone-duo";
+    const display: FoldDisplay | null =
+      screen?.screenId === 1 ? "cover" : screen?.screenId === 3 ? "inner" : null;
+    const next =
+      duo && foldAngle !== null
+        ? duoPresentation({
+            angle: foldAngle,
+            pose: screen?.hingePose,
+            display: display ?? (foldAngle < 90 ? "cover" : "inner"),
+            layout,
+          })
+        : new Quaternion();
+    if (duo && "setActiveDisplay" in phone) phone.setActiveDisplay(display);
+    if (next.equals(rest)) return;
+    rest.copy(next);
+    const instant = immediate || reducedMotion();
+    motion.setPose(rest, performance.now(), instant);
+    if (instant) {
+      // No spring will carry this pose into the scene, so apply and frame it here.
+      applyPose();
+      fit(true);
+    }
   };
   const scheduler = createRenderScheduler(() => {
     if (disposed || !viewport.width || !viewport.height) return;
@@ -239,16 +282,29 @@ export function createPhoneViewer(options: {
         previous.dispose();
       }
       // Learn the inner display shape from any unfolded frame, including before fold mode.
-      const frameAspect = rawAspect();
-      const innerChanged = isFoldInnerAspect(frameAspect) && frameAspect !== foldAspect;
-      if (innerChanged) foldAspect = frameAspect;
+      const frameAspect = innerFrameAspect(nextProfile);
+      const innerChanged = frameAspect !== null && frameAspect !== foldAspect;
+      if (frameAspect !== null) foldAspect = frameAspect;
       if (!imported && "setAngle" in phone && innerChanged) {
         // A new inner display shape resizes the body; the hinge keeps its visible angle.
         const angle = visibleFoldAngle(foldAngle ?? 180);
         scene.remove(phone.root);
         phone.dispose();
-        phone = createFoldScene(angle, next);
+        phone = buildFoldScene(angle, next);
         scene.add(phone.root);
+      } else if (
+        !imported &&
+        !("setAngle" in phone) &&
+        foldAngle !== null &&
+        foldBody(nextProfile)
+      ) {
+        // A hinge angle that arrived before its foldable profile folds the new body.
+        scene.remove(phone.root);
+        phone.dispose();
+        phone = buildFoldScene(foldAngle, next, nextProfile);
+        scene.add(phone.root);
+        orientationTurn = null;
+        orientationAngle = 0;
       } else if (
         !imported &&
         !("setAngle" in phone) &&
@@ -279,6 +335,7 @@ export function createPhoneViewer(options: {
       }
       layout = next;
       profile = nextProfile;
+      presentDuo();
       applyPose();
       fit(!orientationTurn);
     }
@@ -293,8 +350,8 @@ export function createPhoneViewer(options: {
         ? null
         : model
           ? createImportedPhoneScene(model.asset, texture, layout)
-          : foldAngle !== null && profile.id.startsWith("android")
-            ? createFoldScene(foldAngle)
+          : foldAngle !== null && foldBody(profile)
+            ? buildFoldScene(foldAngle)
             : createPhoneScene(texture, layout, profile);
       foldTurn = null;
       scene.remove(phone.root);
@@ -307,6 +364,7 @@ export function createPhoneViewer(options: {
         if (imported) phone.orientation.add(accessory.asset);
         else accessory.asset.removeFromParent();
       }
+      presentDuo(true);
       applyPose();
       fit(true);
       scheduler.invalidate();
@@ -340,6 +398,7 @@ export function createPhoneViewer(options: {
     options.onUnavailable();
   };
   options.canvas.addEventListener("webglcontextlost", contextLost);
+  presentDuo(true);
   applyPose();
   modelSlot.set(options.model ?? null);
   setAccessory(options.accessory ?? null);
@@ -357,13 +416,16 @@ export function createPhoneViewer(options: {
       foldAngle = next;
       // A loaded model owns the scene; install() reads foldAngle if it is removed.
       if (imported) return;
-      if (next === null || !("setAngle" in phone)) {
+      const folding = next !== null && foldBody(profile) !== null;
+      // A single-screen body ignores a hinge angle.
+      if (next !== null && !folding) return;
+      if (!folding || !("setAngle" in phone)) {
         scene.remove(phone.root);
         phone.dispose();
-        phone = next === null ? createPhoneScene(texture, layout, profile) : createFoldScene(next);
+        phone = folding ? buildFoldScene(next) : createPhoneScene(texture, layout, profile);
         scene.add(phone.root);
         orientationTurn = null;
-        orientationAngle = next === null ? layout.rotation : 0;
+        orientationAngle = folding ? 0 : layout.rotation;
         foldTurn = null;
         applyPose();
         fit(true);
@@ -377,6 +439,7 @@ export function createPhoneViewer(options: {
           foldTurn = { from, to: next, startedAt: performance.now() };
         }
       }
+      presentDuo();
       scheduler.invalidate();
     },
     frameUpdated() {
@@ -389,6 +452,7 @@ export function createPhoneViewer(options: {
       if (disposed) return;
       screen = next;
       updateLayout(nextProfile);
+      presentDuo();
       scheduler.invalidate();
     },
     resize(width, height, pixelRatio) {

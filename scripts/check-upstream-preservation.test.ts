@@ -10,6 +10,7 @@ import {
   calculateResultArtifactDigest,
   changedInventoryOutcomeDetails,
   loadInventory,
+  PENDING_INVENTORY_CHECKS,
   parseNameStatusDiff,
   matchesOwnerPath,
   resolveRefs,
@@ -38,10 +39,11 @@ const currentSha = "251a6bcb5cfad04999a6bdd4c7dbb5bb4c983ff9";
 const upstreamSha = "12391bd0d38eef6655b7a9f8945d0cb5febadc2b";
 // withHistoricalBaselineWorktree checks out baselineCandidateSha and runs today's
 // checker against that tree. Pass that commit's FORK.md pin (baselineUpstreamSha),
-// not the live pin. currentSha stays historical because withRetainedRegressionWorktree
+// not the live pin. The candidate must contain every inventory owner path, so it moves
+// forward when a check is added (KAT-3512 merge). currentSha stays historical because withRetainedRegressionWorktree
 // copies today's checker over that checkout and needs a tree difference to commit.
-const baselineCandidateSha = "00406934429021e47d3cb60e16491febb46742b4";
-const baselineUpstreamSha = "c14f6015bfe479d313355cb234af1a5c16dbb15f";
+const baselineCandidateSha = "d62d138f6ab43eec6da1b45a9582a7f757ffda10";
+const baselineUpstreamSha = "ab099178a7b7f9728843e90fc95ed90bb61d710d";
 const currentUpstreamSha = "d15210cd3da79f9a1a495a6309d912d76362a046";
 const upstreamBaseSha = "6a687ee43bf222672ab8d3f4c0bab3d8d174f79f";
 
@@ -188,6 +190,32 @@ const withRetainedRegressionWorktree = <A>(
         NodePath.join(temporaryRoot, relativePath),
       );
     }
+    // Checks added after currentSha own files that checkout lacks; carry today's copies.
+    const addedContractPaths = [
+      ...new Set(
+        PRESERVATION_CONTRACT.flatMap((check) => [
+          ...check.ownerPaths,
+          ...check.commands.flatMap((command) => [
+            ...command.requiredPaths,
+            ...(command.trustedPaths ?? []),
+          ]),
+        ]),
+      ),
+    ].filter(
+      (relativePath) =>
+        !NodeFS.existsSync(NodePath.join(temporaryRoot, relativePath)) &&
+        NodeFS.existsSync(NodePath.join(repositoryRoot, relativePath)),
+    );
+    for (const relativePath of addedContractPaths) {
+      NodeFS.mkdirSync(NodePath.dirname(NodePath.join(temporaryRoot, relativePath)), {
+        recursive: true,
+      });
+      NodeFS.cpSync(
+        NodePath.join(repositoryRoot, relativePath),
+        NodePath.join(temporaryRoot, relativePath),
+        { recursive: true },
+      );
+    }
     linkWorkspaceDependencies(temporaryRoot);
 
     if (mutateRetainedSource) {
@@ -224,6 +252,7 @@ const withRetainedRegressionWorktree = <A>(
           "apps/desktop/src/app/DesktopStatePaths.ts",
           "apps/desktop/src/app/DesktopStatePaths.test.ts",
           "apps/desktop/src/app/DesktopEnvironment.test.ts",
+          ...addedContractPaths,
         ],
         { cwd: temporaryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
       );
@@ -415,6 +444,7 @@ describe("upstream preservation CLI", () => {
           { cwd: repositoryRoot, encoding: "utf8" },
         );
 
+        expect(result.stdout).not.toContain("status=FAIL");
         expect(result.status).toBe(0);
         expect(result.stdout).toContain(
           `UPSTREAM_PRESERVATION mode=baseline candidate=${baselineCandidateSha} base=${baselineCandidateSha}`,
@@ -465,6 +495,24 @@ describe("upstream preservation CLI", () => {
     expect(() =>
       validateInventory({ ...inventory, entries: inventory.entries.slice(1) }, repositoryRoot),
     ).toThrow("exactly");
+  });
+
+  it("requires the early-access inventory entry once its check is no longer pending", () => {
+    const inventory = JSON.parse(
+      NodeFS.readFileSync(
+        NodePath.join(repositoryRoot, "docs/upstream/retained-behavior.v1.json"),
+        "utf8",
+      ),
+    ) as { entries: Array<{ id: string }> };
+    const withoutEntry = inventory.entries.filter(
+      (entry) => entry.id !== "connect-early-access-waitlist",
+    );
+
+    expect(PENDING_INVENTORY_CHECKS.size).toBe(0);
+    expect(validateInventory(inventory, repositoryRoot).entries).toHaveLength(31);
+    expect(() =>
+      validateInventory({ ...inventory, entries: withoutEntry }, repositoryRoot),
+    ).toThrow("Inventory must contain exactly 29 entries; found 28.");
   });
 
   it("rejects skip metadata added to the inventory", () => {
@@ -733,18 +781,6 @@ describe("upstream preservation CLI", () => {
         observedAt: "2026-09-09T00:00:00Z",
       },
     );
-    const androidBindingPath = writeEvidenceBinding(
-      evidenceDirectory,
-      refs,
-      "mobile-android-asset-live-evidence",
-      {
-        kind: "manual",
-        checkId: "mobile-android-asset-live-evidence",
-        status: "PASS",
-        observer: "maintainer",
-        observedAt: "2026-09-09T00:00:00Z",
-      },
-    );
     const relativePath = `${relativeRepositoryPath(evidenceDirectory)}/manual-evidence.json`;
     const absolutePath = NodePath.resolve(repositoryRoot, relativePath);
     NodeFS.writeFileSync(
@@ -767,13 +803,6 @@ describe("upstream preservation CLI", () => {
             observer: "maintainer",
             observedAt: "2026-09-09T00:00:00Z",
           },
-          {
-            checkId: "mobile-android-asset-live-evidence",
-            status: "PASS",
-            evidence: { path: androidBindingPath },
-            observer: "maintainer",
-            observedAt: "2026-09-09T00:00:00Z",
-          },
         ],
       }),
     );
@@ -789,7 +818,9 @@ describe("upstream preservation CLI", () => {
       expect(report.exitCode).toBe(0);
       expect(report.lines).toContain("CHECK id=icon-composer-live-evidence status=PASS");
       expect(report.lines).toContain("CHECK id=human-device-provider-evidence status=PASS");
-      expect(report.lines).toContain("CHECK id=mobile-android-asset-live-evidence status=PASS");
+      expect(report.lines.some((line) => line.includes("mobile-android-asset-live-evidence"))).toBe(
+        false,
+      );
       expect(report.lines).toContain("HUMAN_REVIEW_ACCEPTANCE status=PASS");
     } finally {
       NodeFS.rmSync(evidenceDirectory, { recursive: true, force: true });
@@ -1046,12 +1077,29 @@ describe("upstream preservation CLI", () => {
         executionTreeCheck: () => undefined,
       });
 
-    it("holds no retirements after KAT-3544 removed the sandbox checks", () => {
-      expect(RETIREMENTS.checks.size).toBe(0);
-      expect(RETIREMENTS.paths.size).toBe(0);
+    it("retires only the parked Android checks and paths", () => {
+      expect([...RETIREMENTS.checks.keys()]).toEqual([
+        "mobile-android-asset-live-evidence",
+        "mobile-android-fab-inset",
+      ]);
+      expect([...RETIREMENTS.paths.keys()]).toEqual([
+        "apps/mobile/src/lib/materialYouTheme.ts",
+        "apps/mobile/src/lib/materialYouTheme.test.ts",
+      ]);
       expect(RETIREMENTS.unfrozenTrustedPaths.size).toBe(0);
-      expect(PRESERVATION_CONTRACT.length).toBe(30);
-      expect(PRESERVATION_CHECKS.length).toBe(30);
+      expect(PRESERVATION_CONTRACT.length).toBe(31);
+      expect(PRESERVATION_CHECKS.length).toBe(29);
+      const theme = PRESERVATION_CHECKS.find(
+        (check) => check.id === "mobile-theme-native-identity",
+      );
+      expect(theme?.ownerPaths).toEqual([
+        "apps/mobile/src/lib/mobileTheme.ts",
+        "apps/mobile/src/lib/mobileThemeVariables.ts",
+      ]);
+      expect(theme?.commands[0]?.trustedPaths).toEqual([
+        "apps/mobile/src/lib/mobileTheme.test.ts",
+        "apps/mobile/src/lib/mobileThemeVariables.test.ts",
+      ]);
       const provider = PRESERVATION_CHECKS.find(
         (check) => check.id === "provider-sandbox-environment-isolation",
       );

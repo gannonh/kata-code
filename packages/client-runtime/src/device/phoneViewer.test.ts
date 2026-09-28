@@ -92,9 +92,14 @@ import {
 } from "three";
 import { disposeDeviceModel } from "./modelScene.ts";
 import { createPhoneViewer } from "./phoneViewer.ts";
+import { sceneDigest } from "./sceneDigest.test-util.ts";
+import { duoPresentation } from "./foldScene.ts";
+import { phoneDisplayLayout } from "./phoneScene.ts";
 import {
   ANDROID_PHONE_SHAPE,
+  IOS_PHONE_SHAPE,
   IOS_TABLET_SHAPE,
+  IPHONE_DUO_SHAPE,
   resolveDeviceShape,
   type DeviceShapeProfile,
 } from "./shapeProfile.ts";
@@ -312,6 +317,208 @@ it("keeps the fold body through a rotated cover frame and learns the inner shape
   viewer.frameUpdated();
   draw(20);
   expect(state.frames.at(-1)!.phone).toBe(landscape);
+  viewer.dispose();
+});
+
+it("pins what the Android fold viewer draws through hinge turns, rotation and orbit", () => {
+  const openProfile = resolveDeviceShape({ platform: "android", portraitAspect: 0.96 });
+  const { viewer, draw, source, state, onFramingAspect } = fixture(openProfile);
+  const drawn: string[] = [];
+  const record = (time: number) => {
+    draw(time);
+    const frame = state.frames.at(-1)!;
+    drawn.push(
+      [
+        sceneDigest(frame.phone!),
+        frame.displayAngle!.toFixed(4),
+        frame
+          .rotation!.toArray()
+          .map((value) => value.toFixed(4))
+          .join(","),
+        frame.cameraZ.toFixed(4),
+      ].join(" "),
+    );
+  };
+  source.width = 2076;
+  source.height = 2152;
+  viewer.setScreen({ width: 2076, height: 2152, orientation: "portrait" }, openProfile);
+  viewer.frameUpdated();
+  viewer.setFoldAngle(180);
+  record(0);
+  viewer.setFoldAngle(90);
+  record(425);
+  record(900);
+  viewer.setFoldAngle(0);
+  record(2000);
+  source.width = 1080;
+  source.height = 2424;
+  viewer.setScreen({ width: 1080, height: 2424, orientation: "landscape_left" }, openProfile);
+  viewer.frameUpdated();
+  record(2100);
+  viewer.orbit(0.1, 0.05);
+  record(2200);
+  viewer.setFoldAngle(null);
+  record(4000);
+  expect(drawn).toEqual([
+    "27:75290375 0.0000 0.0000,0.0000,0.0000,1.0000 7.4290",
+    "27:7fbc2399 0.0000 0.0000,0.0000,0.0000,1.0000 7.4574",
+    "27:fba12286 0.0000 0.0000,0.0000,0.0000,1.0000 7.3002",
+    "27:76d56d18 0.0000 0.0000,0.0000,0.0000,1.0000 5.4394",
+    "27:76d56d18 0.0000 0.0000,0.0000,0.0000,1.0000 4.4604",
+    "27:ebdd216e 0.0000 0.0097,0.0111,0.0000,0.9999 4.4604",
+    "13:5b378e36 -1.5708 0.0259,0.0296,0.0000,0.9992 8.2510",
+  ]);
+  expect(onFramingAspect.mock.calls.map(([aspect]) => (aspect as number).toFixed(4))).toEqual([
+    "0.4901",
+    "0.9667",
+    "0.9655",
+    "2.0987",
+  ]);
+  viewer.dispose();
+});
+
+it("folds an iPhone Duo body to the hub's hinge pose and rests it facing the streamed display", () => {
+  const { viewer, draw, source, state } = fixture(IPHONE_DUO_SHAPE);
+  source.width = 1800;
+  source.height = 2000;
+  const inner = {
+    width: 1800,
+    height: 2000,
+    orientation: "portrait",
+    screenId: 3,
+    supportsHingeAngle: true,
+  } as const;
+  const layout = phoneDisplayLayout(inner, 1800, 2000);
+  const shown = () => {
+    const phone = state.frames.at(-1)!.phone!;
+    return ["cover-screen", "continuous-inner-screen"].filter(
+      (name) => phone.getObjectByName(name)?.visible,
+    );
+  };
+  viewer.setScreen({ ...inner, hingeAngle: 90, hingePose: "laptop" }, IPHONE_DUO_SHAPE);
+  viewer.frameUpdated();
+  viewer.setFoldAngle(90);
+  draw(0);
+  draw(5000);
+  const laptop = state.frames.at(-1)!;
+  expect(laptop.phone!.getObjectByName("hinge-spine")).toBeDefined();
+  expect(
+    laptop.phone!.getObjectByName("left-inner-screen")!.parent!.parent!.rotation.y,
+  ).toBeCloseTo(Math.PI / 2);
+  expect(shown()).toEqual(["continuous-inner-screen"]);
+  expect(
+    laptop.rotation!.angleTo(
+      duoPresentation({ angle: 90, pose: "laptop", display: "inner", layout }),
+    ),
+  ).toBeLessThan(0.01);
+  viewer.orbit(0.2, 0);
+  draw(5100);
+  viewer.resetPose();
+  draw(9000);
+  expect(
+    state.frames
+      .at(-1)!
+      .rotation!.angleTo(duoPresentation({ angle: 90, pose: "laptop", display: "inner", layout })),
+  ).toBeLessThan(0.01);
+  // Closing streams the cover: it faces the viewer upright.
+  viewer.setScreen(
+    { ...inner, width: 1000, height: 2400, screenId: 1, hingeAngle: 0, hingePose: "closed" },
+    IPHONE_DUO_SHAPE,
+  );
+  viewer.setFoldAngle(0);
+  draw(9100);
+  draw(14000);
+  expect(shown()).toEqual(["cover-screen"]);
+  expect(state.frames.at(-1)!.rotation!.angleTo(new Quaternion())).toBeLessThan(0.01);
+  // The body keeps the inner shape it learned while open.
+  const width = new Box3().setFromObject(state.frames.at(-1)!.phone!).getSize(new Vector3()).x;
+  expect(width).toBeCloseTo(1.315, 2);
+  viewer.dispose();
+});
+
+it("folds a retained viewer whose hinge angle arrives before its iPhone Duo profile", () => {
+  const { viewer, draw, state } = fixture(IOS_PHONE_SHAPE);
+  const screen = {
+    width: 1206,
+    height: 2622,
+    orientation: "portrait",
+    screenId: 1,
+    supportsHingeAngle: true,
+    hingeAngle: 0,
+    hingePose: "closed",
+  } as const;
+  // DevicePhoneViewport applies the fold angle effect before the screen and profile effect.
+  viewer.setFoldAngle(0);
+  viewer.setScreen(screen, IPHONE_DUO_SHAPE);
+  draw(100);
+  const phone = state.frames.at(-1)!.phone!;
+  expect(phone.getObjectByName("hinge-spine")).toBeDefined();
+  expect(phone.getObjectByName("cover-screen")!.visible).toBe(true);
+  expect(state.frames.at(-1)!.displayAngle).toBe(0);
+  viewer.dispose();
+});
+
+it("shapes a late Duo body from the inner frame it already shows", () => {
+  const { viewer, draw, source, state } = fixture(IOS_PHONE_SHAPE);
+  source.width = 1800;
+  source.height = 2000;
+  viewer.setFoldAngle(180);
+  viewer.setScreen(
+    {
+      width: 1800,
+      height: 2000,
+      orientation: "portrait",
+      screenId: 3,
+      supportsHingeAngle: true,
+      hingeAngle: 180,
+      hingePose: "open",
+    },
+    IPHONE_DUO_SHAPE,
+  );
+  viewer.frameUpdated();
+  draw(100);
+  const surface = state.frames.at(-1)!.phone!.getObjectByName("continuous-inner-screen") as Mesh;
+  surface.geometry.computeBoundingBox();
+  const size = surface.geometry.boundingBox!.getSize(new Vector3());
+  expect(size.x / size.y).toBeCloseTo(2000 / 1800, 2);
+  viewer.dispose();
+});
+
+it("moves a reduced-motion Duo straight to its new stance in the next frame", () => {
+  vi.stubGlobal("matchMedia", () => ({ matches: true }));
+  const { viewer, draw, source, state } = fixture(IPHONE_DUO_SHAPE);
+  source.width = 1800;
+  source.height = 2000;
+  const screen = {
+    width: 1800,
+    height: 2000,
+    orientation: "portrait",
+    screenId: 3,
+    supportsHingeAngle: true,
+    hingeAngle: 90,
+  } as const;
+  const layout = phoneDisplayLayout(screen, 1800, 2000);
+  viewer.setScreen({ ...screen, hingePose: "book" }, IPHONE_DUO_SHAPE);
+  viewer.frameUpdated();
+  viewer.setFoldAngle(90);
+  draw(100);
+  viewer.setScreen({ ...screen, hingePose: "laptop" }, IPHONE_DUO_SHAPE);
+  draw(116);
+  expect(
+    state.frames
+      .at(-1)!
+      .rotation!.angleTo(duoPresentation({ angle: 90, pose: "laptop", display: "inner", layout })),
+  ).toBeLessThan(0.001);
+  viewer.dispose();
+});
+
+it("keeps a single-screen iPhone flat when it is handed a hinge angle", () => {
+  const { viewer, draw, state } = fixture(IOS_PHONE_SHAPE);
+  const before = state.frames.at(-1)!.phone;
+  viewer.setFoldAngle(90);
+  draw(100);
+  expect(state.frames.at(-1)!.phone).toBe(before);
+  expect(before!.getObjectByName("hinge-spine")).toBeUndefined();
   viewer.dispose();
 });
 

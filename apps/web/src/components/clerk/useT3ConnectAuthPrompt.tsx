@@ -1,12 +1,12 @@
 import { useClerk } from "@clerk/react";
 
 import { isElectron } from "../../env";
-import { resolveClerkSignInProps } from "./authRedirect";
+import { openT3ConnectEarlyAccess, openT3ConnectSignIn } from "./earlyAccess";
 
 export function useT3ConnectAuthPrompt() {
   const clerk = useClerk();
-  const openAuthPrompt = () => {
-    clerk.openSignIn(resolveClerkSignInProps(window.location.href, isElectron));
+  return {
+    openEarlyAccess: () => openT3ConnectEarlyAccess(clerk),
+    openSignIn: () => openT3ConnectSignIn(clerk, window.location.href, isElectron),
   };
-  return { authPrompt: null, openAuthPrompt };
 }

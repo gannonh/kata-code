@@ -97,6 +97,24 @@ Clean up in the step 2 PR:
   unfrozen window must end with the PR that needed it. KAT-3543 retired the sandbox checks
   this way before KAT-3544 removed the sandbox feature.
 
+## Add a check
+
+The base checker also rejects an inventory entry it does not know, so a new
+check lands in two PRs:
+
+1. Add the check to `CONTRACT_CHECKS` and its ID to `PENDING_INVENTORY_CHECKS`
+   in `scripts/lib/upstream-preservation/checks.ts`. Leave the inventory
+   unchanged. The base checker accepts the unchanged inventory, and once the PR
+   lands the new check runs on every candidate.
+2. Once step 1 is on `main`, add the inventory entry and remove the ID from
+   `PENDING_INVENTORY_CHECKS` in a second PR. The base checker accepts the
+   inventory with or without a pending entry. The checker tests run today's
+   inventory against older commits, so the same PR moves `baselineCandidateSha`
+   in `scripts/check-upstream-preservation.test.ts` to a commit that has the new
+   owner paths.
+
+KAT-3512 added `connect-early-access-waitlist` this way.
+
 ## Unsupported platform paths
 
 Kata ships macOS, Linux, and iOS only
@@ -126,6 +144,25 @@ Parked by KAT-3514.
   and update `.github/disabled/release-windows.yml` instead
 - `win32-*` keys in `CLI_ARCHIVE_PLATFORM_KEYS` (`packages/shared/src/cliRelease.ts`):
   keep them out while Windows is parked
+
+### Android
+
+Parked by KAT-3515. `RETIREMENTS` in `scripts/lib/upstream-preservation/checks.ts`
+retires `mobile-android-asset-live-evidence`, `mobile-android-fab-inset`, and the
+Material You theme paths, so no active check owns these paths.
+
+- `apps/mobile/modules/*/android/**`, and `*.kt` / `*.kts` under `apps/mobile/`
+- `apps/mobile/plugins/withAndroid*.cjs`
+- `apps/mobile/src/**/*.android.ts`, `apps/mobile/src/**/*.android.tsx`
+- `apps/mobile/src/features/home/android-home-fab-layout*.ts`
+- `apps/mobile/src/lib/materialYouTheme.ts`, `apps/mobile/src/lib/materialYouTheme.test.ts`
+- `apps/mobile/assets/android-*.png`
+- `apps/mobile/detekt.yml`, `apps/mobile/.editorconfig`
+- `docs/operations/android-notifications.md`
+- Android hunks in `apps/mobile/app.config.ts`: keep `platforms: ["ios"]` and no
+  `withAndroid*` plugin entries
+- Android build scripts in `apps/mobile/package.json` and `android` fields in
+  `apps/mobile/eas.json`: keep them out while Android is parked
 
 ## Review the full delta
 

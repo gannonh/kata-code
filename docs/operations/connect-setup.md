@@ -90,6 +90,8 @@ persistence and system-browser callback delivery.
 
 ## Android native sign-in redirects
 
+Android is parked ([supported platforms](./supported-platforms.md#android)). Keep this for when it returns.
+
 Clerk's native Android SDK uses `clerk://<applicationId>.callback`. In the Clerk instance selected by the app's publishable key, add each supported package to **Native applications > Allowlist for mobile SSO redirect**:
 
 | Variant     | Callback                                      |
@@ -143,10 +145,63 @@ codesign --verify --deep --strict "/Applications/Kata Code (Alpha).app"
 codesign -d --entitlements :- "/Applications/Kata Code (Alpha).app"
 ```
 
+## Early access waitlist
+
+Kata Code Connect is invite-gated. Clients show **Request early access**, which submits the email to
+the Clerk waitlist, and a separate **Sign in** path for approved users. Web and desktop open Clerk's
+`<Waitlist />` modal; mobile submits through `useWaitlist()` on the Settings early-access screen
+(deep link `/settings/waitlist`). Clerk enforces the gate server-side, so the instance must be in
+waitlist mode. Otherwise any client's sign-in screen can still create an account.
+
+### Turn on waitlist mode
+
+The Backend API and the Clerk secret key cannot change the sign-up mode. Use the Dashboard for the
+instance that released builds use:
+
+1. Open the Clerk Dashboard, select the application, and select the instance (Development or
+   Production) whose publishable key the release uses.
+2. Go to **User & authentication > Access mode**.
+3. Select **Waitlist**, then select **Save**.
+
+The Clerk CLI can set the same value after an interactive `clerk auth login` and `clerk link` to
+the application:
+
+```sh
+npx clerk@latest config patch --instance dev --json '{"sign_up_mode":"waitlist"}'
+```
+
+Check the result without a secret. The instance's Frontend API host is the base64-decoded
+publishable key without the trailing `$`:
+
+```sh
+curl -s "https://<frontend-api-host>/v1/environment" | jq -r .user_settings.sign_up.mode
+# waitlist
+```
+
+### Approve requests
+
+In the Dashboard, open **Waitlist**. For each entry, choose **Invite** to email the person a sign-up
+invitation or **Deny** to reject the request. An invited person creates their account from the
+invitation, then signs in from any client.
+
+The Backend API can do the same with the Clerk secret key:
+
+```sh
+curl -s -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+  "https://api.clerk.com/v1/waitlist_entries?status=pending"
+curl -s -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+  "https://api.clerk.com/v1/waitlist_entries/<waitlist_entry_id>/invite"
+curl -s -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+  "https://api.clerk.com/v1/waitlist_entries/<waitlist_entry_id>/reject"
+```
+
+Load `CLERK_SECRET_KEY` from the 1Password Environment into the shell for the command; do not
+write it to a file.
+
 ## Restricting sign-ups
 
-Use Clerk's allowlist for permitted email addresses or domains, or Restricted mode for invitation-only
-sign-up. An enabled empty allowlist blocks all new sign-ups.
+Waitlist mode replaces the allowlist and Invite-only mode for Connect access. An enabled empty
+allowlist blocks all new sign-ups.
 
 Sign-up restrictions do not revoke an existing account's access. Ban the account in Clerk when
 its active sessions and future sign-ins must be disabled.

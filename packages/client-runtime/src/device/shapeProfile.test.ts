@@ -8,6 +8,9 @@ it("chooses tablet and phone families without mistaking display rotation for dev
   expect(
     resolveDeviceShape({ platform: "ios", name: "iPhone 18 Pro", portraitAspect: 0.46 }).id,
   ).toBe("ios-phone");
+  expect(resolveDeviceShape({ platform: "ios", name: "iPhone Duo", portraitAspect: 0.96 }).id).toBe(
+    "ios-duo",
+  );
   expect(
     resolveDeviceShape({ platform: "android", name: "Pixel 9", portraitAspect: 0.45 }).id,
   ).toBe("android-phone");
