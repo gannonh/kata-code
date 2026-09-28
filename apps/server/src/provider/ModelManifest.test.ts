@@ -548,6 +548,30 @@ describe("ModelManifest service", () => {
     );
   });
 
+  it.live("keeps a newer fetched manifest when a later fetch is an older edit", () => {
+    let fetchCount = 0;
+    const rolledBack: ModelManifestData = {
+      ...REMOTE_MANIFEST,
+      updatedAt: "2098-01-01T00:00:00Z",
+      currentModels: { codex: ["rolled-back-model"] },
+    };
+    return Effect.gen(function* () {
+      const service = yield* make;
+      assert.deepStrictEqual(yield* service.refresh, REMOTE_MANIFEST);
+      assert.deepStrictEqual(yield* service.forceRefresh, REMOTE_MANIFEST);
+      assert.strictEqual(fetchCount, 2);
+      assert.deepStrictEqual(yield* (yield* make).current, REMOTE_MANIFEST);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        serviceLayers({
+          prefix: "model-manifest-rolled-back-fetch-test",
+          response: () => Response.json(fetchCount++ === 0 ? REMOTE_MANIFEST : rolledBack),
+        }),
+      ),
+    );
+  });
+
   it.live("does not fetch when provider update checks are disabled", () =>
     Effect.gen(function* () {
       let fetchCount = 0;
