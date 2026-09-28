@@ -115,10 +115,10 @@ export function createPhoneViewer(options: {
    * The unfolded body's width over height when the live frame is the inner display.
    * Cover frames leave the last unfolded shape.
    */
-  const innerFrameAspect = () => {
+  const innerFrameAspect = (shape = profile) => {
     const { width, height } = options.source;
     // The Duo's inner panel is mounted a quarter turn from its book-style body.
-    if (foldBody(profile) === "iphone-duo")
+    if (foldBody(shape) === "iphone-duo")
       return screen?.screenId === 3 ||
         (screen?.screenId === undefined && isFoldInnerAspect(height / width))
         ? height / width
@@ -207,7 +207,13 @@ export function createPhoneViewer(options: {
     if (duo && "setActiveDisplay" in phone) phone.setActiveDisplay(display);
     if (next.equals(rest)) return;
     rest.copy(next);
-    motion.setPose(rest, performance.now(), immediate || reducedMotion());
+    const instant = immediate || reducedMotion();
+    motion.setPose(rest, performance.now(), instant);
+    if (instant) {
+      // No spring will carry this pose into the scene, so apply and frame it here.
+      applyPose();
+      fit(true);
+    }
   };
   const scheduler = createRenderScheduler(() => {
     if (disposed || !viewport.width || !viewport.height) return;
@@ -276,7 +282,7 @@ export function createPhoneViewer(options: {
         previous.dispose();
       }
       // Learn the inner display shape from any unfolded frame, including before fold mode.
-      const frameAspect = innerFrameAspect();
+      const frameAspect = innerFrameAspect(nextProfile);
       const innerChanged = frameAspect !== null && frameAspect !== foldAspect;
       if (frameAspect !== null) foldAspect = frameAspect;
       if (!imported && "setAngle" in phone && innerChanged) {

@@ -458,6 +458,60 @@ it("folds a retained viewer whose hinge angle arrives before its iPhone Duo prof
   viewer.dispose();
 });
 
+it("shapes a late Duo body from the inner frame it already shows", () => {
+  const { viewer, draw, source, state } = fixture(IOS_PHONE_SHAPE);
+  source.width = 1800;
+  source.height = 2000;
+  viewer.setFoldAngle(180);
+  viewer.setScreen(
+    {
+      width: 1800,
+      height: 2000,
+      orientation: "portrait",
+      screenId: 3,
+      supportsHingeAngle: true,
+      hingeAngle: 180,
+      hingePose: "open",
+    },
+    IPHONE_DUO_SHAPE,
+  );
+  viewer.frameUpdated();
+  draw(100);
+  const surface = state.frames.at(-1)!.phone!.getObjectByName("continuous-inner-screen") as Mesh;
+  surface.geometry.computeBoundingBox();
+  const size = surface.geometry.boundingBox!.getSize(new Vector3());
+  expect(size.x / size.y).toBeCloseTo(2000 / 1800, 2);
+  viewer.dispose();
+});
+
+it("moves a reduced-motion Duo straight to its new stance in the next frame", () => {
+  vi.stubGlobal("matchMedia", () => ({ matches: true }));
+  const { viewer, draw, source, state } = fixture(IPHONE_DUO_SHAPE);
+  source.width = 1800;
+  source.height = 2000;
+  const screen = {
+    width: 1800,
+    height: 2000,
+    orientation: "portrait",
+    screenId: 3,
+    supportsHingeAngle: true,
+    hingeAngle: 90,
+  } as const;
+  const layout = phoneDisplayLayout(screen, 1800, 2000);
+  viewer.setScreen({ ...screen, hingePose: "book" }, IPHONE_DUO_SHAPE);
+  viewer.frameUpdated();
+  viewer.setFoldAngle(90);
+  draw(100);
+  viewer.setScreen({ ...screen, hingePose: "laptop" }, IPHONE_DUO_SHAPE);
+  draw(116);
+  expect(
+    state.frames
+      .at(-1)!
+      .rotation!.angleTo(duoPresentation({ angle: 90, pose: "laptop", display: "inner", layout })),
+  ).toBeLessThan(0.001);
+  viewer.dispose();
+});
+
 it("keeps a single-screen iPhone flat when it is handed a hinge angle", () => {
   const { viewer, draw, state } = fixture(IOS_PHONE_SHAPE);
   const before = state.frames.at(-1)!.phone;
