@@ -11,7 +11,10 @@ import { deviceKeyboard, deviceModel } from "./deviceModels";
 import { fitDeviceFrame } from "./deviceFrameLayout";
 import { DeviceDuoControls } from "./DeviceDuoControls";
 import { DeviceAndroidFoldControls } from "./DeviceAndroidFoldControls";
-import type { DuoControlState } from "@kata-sh/code-client-runtime/device/duo-control";
+import {
+  duoHingeAngle,
+  type DuoControlState,
+} from "@kata-sh/code-client-runtime/device/duo-control";
 import { DevicePhoneViewport } from "./DevicePhoneViewport";
 import { DeviceLoadingView } from "./DeviceLoadingView";
 import { type DeviceAxElement, fetchDeviceAxTree } from "./deviceHubApi";
@@ -477,7 +480,7 @@ export function DeviceStreamView(props: {
             onInputCancel={onInputCancel}
             onResetReady={onResetReady}
             screen={screen}
-            foldAngle={foldAngle}
+            foldAngle={isDuo ? duoHingeAngle(screen) : foldAngle}
             onUnavailable={onPhoneUnavailable}
           />
         ) : null}

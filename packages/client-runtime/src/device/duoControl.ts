@@ -12,6 +12,14 @@ export type DuoOrientation =
   | "landscape_left"
   | "portrait_upside_down"
   | "landscape_right";
+/** The hinge angle the 3D body shows. Device Hub 0.11+ reports it; the cover display alone means folded shut. */
+export function duoHingeAngle(
+  screen: { supportsHingeAngle?: boolean; hingeAngle?: number; screenId?: number } | null,
+) {
+  if (!screen?.supportsHingeAngle) return null;
+  return screen.hingeAngle ?? (screen.screenId === 1 ? 0 : 180);
+}
+
 export type DuoCommand =
   | { control: "angle"; value: number }
   | { control: "pose"; value: DuoPose }
