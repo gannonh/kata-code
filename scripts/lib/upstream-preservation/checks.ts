@@ -514,9 +514,22 @@ export interface RetirementTables {
 // CI runs the base checker, so a retirement lands here first and the code and inventory
 // entries it covers are deleted in a later PR. See docs/upstream/kat-3307-runbook.md.
 // KAT-3543 retired the sandbox checks; KAT-3544 removed them with the sandbox feature.
+// A parked platform's checks stay retired, with code and inventory kept, until the platform
+// returns. See docs/operations/supported-platforms.md.
+const ANDROID_PARKED: Retirement = {
+  issue: "KAT-3515",
+  reason: "Android is parked; intake takes upstream Android-only changes without Kata review.",
+};
+
 export const RETIREMENTS: RetirementTables = {
-  checks: new Map(),
-  paths: new Map(),
+  checks: new Map([
+    ["mobile-android-asset-live-evidence", ANDROID_PARKED],
+    ["mobile-android-fab-inset", ANDROID_PARKED],
+  ]),
+  paths: new Map([
+    ["apps/mobile/src/lib/materialYouTheme.ts", ANDROID_PARKED],
+    ["apps/mobile/src/lib/materialYouTheme.test.ts", ANDROID_PARKED],
+  ]),
   unfrozenTrustedPaths: new Map(),
 };
 

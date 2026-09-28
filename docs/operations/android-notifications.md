@@ -1,5 +1,8 @@
 # Android notifications
 
+> Android is parked. This setup applies only when Android is turned back on; see
+> [supported platforms](./supported-platforms.md#android).
+
 The Android app receives Firebase Cloud Messaging (FCM) data messages. The relay sends them directly through FCM HTTP v1; an Expo Push account is not required.
 
 ## Android compatibility and automated checks

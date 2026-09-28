@@ -121,10 +121,9 @@ settings section when you no longer need it.
 
 ## Subscription usage widget
 
-Add **Subscription usage** from your iOS or Android widget gallery to see remaining Codex and
+Add **Subscription usage** from your iOS widget gallery to see remaining Codex and
 Claude quotas. Tap it to open **Usage → Limits**. On iOS, use **Edit Widget** to choose Session,
-Weekly, or both for each provider. Reopen Kata Code to refresh expired readings. The Android widget
-requires Android 12L or later.
+Weekly, or both for each provider. Reopen Kata Code to refresh expired readings.
 
 ## Keyboard shortcuts
 

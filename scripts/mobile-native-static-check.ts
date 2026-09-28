@@ -63,22 +63,14 @@ export class NativeStaticCheckCommandError extends Schema.TaggedError<NativeStat
   }
 }
 
-const tools = [
-  {
-    command: "swiftlint",
-    installHint: "brew install swiftlint",
-  },
-  {
-    command: "ktlint",
-    installHint: "brew install ktlint",
-  },
-  {
-    command: "detekt",
-    installHint: "brew install detekt",
-  },
-] as const satisfies ReadonlyArray<NativeStaticTool>;
+const swiftlint = {
+  command: "swiftlint",
+  installHint: "brew install swiftlint",
+} as const satisfies NativeStaticTool;
 
-const sourceExtensions = new Set([".swift", ".kt", ".kts"]);
+// Android is parked (docs/operations/supported-platforms.md), so the Kotlin
+// sources stay in the tree without ktlint or detekt.
+const sourceExtensions = new Set([".swift"]);
 const excludedDirectories = new Set([
   ".expo",
   ".git",
@@ -228,55 +220,16 @@ export function collectSources(
 }
 
 const runNativeStaticChecks = Effect.fn("runNativeStaticChecks")(function* () {
-  const path = yield* Path.Path;
   const root = yield* appRoot;
-  const sources = yield* collectSources(root, root);
-  const swiftSources = sources.filter((source) => path.extname(source) === ".swift");
-  const kotlinSources = sources.filter((source) => {
-    const extension = path.extname(source);
-    return extension === ".kt" || extension === ".kts";
-  });
-  const availableTools = new Map<string, boolean>();
+  const swiftSources = yield* collectSources(root, root);
 
-  for (const tool of tools) {
-    availableTools.set(tool.command, yield* commandExists(tool.command));
-  }
-
-  yield* Console.log(
-    `Found ${swiftSources.length} Swift and ${kotlinSources.length} Kotlin native source files.`,
-  );
+  yield* Console.log(`Found ${swiftSources.length} Swift native source files.`);
 
   if (swiftSources.length > 0) {
-    if (availableTools.get("swiftlint")) {
+    if (yield* commandExists(swiftlint.command)) {
       yield* runCommand("swiftlint", ["lint", "--config", ".swiftlint.yml", "--strict"], root);
     } else {
-      yield* warnMissingTool(tools[0], "SwiftLint");
-    }
-  }
-
-  if (kotlinSources.length > 0) {
-    const relativeKotlinSources = kotlinSources.map((source) => path.relative(root, source));
-
-    if (availableTools.get("ktlint")) {
-      yield* runCommand("ktlint", relativeKotlinSources, root);
-    } else {
-      yield* warnMissingTool(tools[1], "ktlint");
-    }
-
-    if (availableTools.get("detekt")) {
-      yield* runCommand(
-        "detekt",
-        [
-          "--config",
-          "detekt.yml",
-          "--input",
-          relativeKotlinSources.join(","),
-          "--build-upon-default-config",
-        ],
-        root,
-      );
-    } else {
-      yield* warnMissingTool(tools[2], "detekt");
+      yield* warnMissingTool(swiftlint, "SwiftLint");
     }
   }
 

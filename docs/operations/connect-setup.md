@@ -90,6 +90,8 @@ persistence and system-browser callback delivery.
 
 ## Android native sign-in redirects
 
+Android is parked ([supported platforms](./supported-platforms.md#android)). Keep this for when it returns.
+
 Clerk's native Android SDK uses `clerk://<applicationId>.callback`. In the Clerk instance selected by the app's publishable key, add each supported package to **Native applications > Allowlist for mobile SSO redirect**:
 
 | Variant     | Callback                                      |

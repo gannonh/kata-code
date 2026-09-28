@@ -204,7 +204,9 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 const config: ExpoConfig = {
   name: variant.appName,
   slug: "katacode",
-  platforms: ["ios", "android"],
+  // Android is parked: prebuild generates only the iOS project. The android
+  // fields below stay for the way back in docs/operations/supported-platforms.md.
+  platforms: ["ios"],
   scheme: variant.scheme,
   version: "1.3.1",
   runtimeVersion: {
@@ -407,13 +409,7 @@ const config: ExpoConfig = {
     // target (which must exist before the compile phase can be attached).
     ...(!isIosPersonalTeamBuild ? ["./plugins/withWidgetLogoAsset.cjs", widgetsPlugin] : []),
     "./plugins/withIosSceneLifecycle.cjs",
-    "./plugins/withAndroidCleartextTraffic.cjs",
-    "./plugins/withAndroidGradleHeap.cjs",
-    "./plugins/withAndroidInputBackground.cjs",
-    "./plugins/withAndroidModernPopupMenu.cjs",
-    "./plugins/withAndroidModernAlertDialog.cjs",
-    "./plugins/withAndroidPredictiveBackCompat.cjs",
-    "./plugins/withAndroidTabletOrientation.cjs",
+    // The withAndroid* plugins stay in ./plugins, unapplied while Android is parked.
     ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
   ],
   extra: {

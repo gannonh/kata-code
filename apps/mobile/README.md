@@ -5,6 +5,9 @@
 > [!NOTE]
 > Uses native modules so using Expo Go is not supported. You need to use the Expo Dev Client.
 
+Kata Code Mobile builds for iOS only. Android is parked; see
+[supported platforms](../../docs/operations/supported-platforms.md) for the way back.
+
 This app has three variants:
 
 - `development`: Expo dev client, installable side-by-side as `Kata Code Dev`
@@ -19,12 +22,11 @@ Kata Code Connect is optional and disabled in a fresh clone. Public configuratio
 
 ## Development
 
-For simulator/emulator development, select and boot a device, then ensure its native client matches
+For simulator development, select and boot an iOS Simulator, then ensure its native client matches
 this checkout before starting Metro:
 
 ```bash
 node ../../scripts/mobile-native-client.ts ensure ios <simulator-udid>
-# Or: node ../../scripts/mobile-native-client.ts ensure android <emulator-serial>
 vp run dev:client
 ```
 
@@ -114,7 +116,7 @@ Run static checks for mobile native code:
 node ../../scripts/mobile-native-static-check.ts
 ```
 
-The native lint task runs SwiftLint for Swift plus ktlint and detekt for Kotlin. Missing native tools are reported as warnings and skipped locally. CI installs the default toolset from `apps/mobile/Brewfile` before running the native checks.
+The native lint task runs SwiftLint for Swift. The Kotlin sources are parked with Android and are not linted. A missing SwiftLint is reported as a warning and skipped locally. CI installs it from `apps/mobile/Brewfile` before running the native checks.
 
 ## EAS Builds
 
@@ -142,12 +144,4 @@ Create a persistent preview build:
 
 ```bash
 vp run eas:ios:preview
-```
-
-Android equivalents:
-
-```bash
-vp run eas:android:dev
-vp run eas:android:preview:dev
-vp run eas:android:preview
 ```

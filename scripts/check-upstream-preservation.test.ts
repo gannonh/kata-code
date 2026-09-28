@@ -774,18 +774,6 @@ describe("upstream preservation CLI", () => {
         observedAt: "2026-09-09T00:00:00Z",
       },
     );
-    const androidBindingPath = writeEvidenceBinding(
-      evidenceDirectory,
-      refs,
-      "mobile-android-asset-live-evidence",
-      {
-        kind: "manual",
-        checkId: "mobile-android-asset-live-evidence",
-        status: "PASS",
-        observer: "maintainer",
-        observedAt: "2026-09-09T00:00:00Z",
-      },
-    );
     const relativePath = `${relativeRepositoryPath(evidenceDirectory)}/manual-evidence.json`;
     const absolutePath = NodePath.resolve(repositoryRoot, relativePath);
     NodeFS.writeFileSync(
@@ -808,13 +796,6 @@ describe("upstream preservation CLI", () => {
             observer: "maintainer",
             observedAt: "2026-09-09T00:00:00Z",
           },
-          {
-            checkId: "mobile-android-asset-live-evidence",
-            status: "PASS",
-            evidence: { path: androidBindingPath },
-            observer: "maintainer",
-            observedAt: "2026-09-09T00:00:00Z",
-          },
         ],
       }),
     );
@@ -830,7 +811,9 @@ describe("upstream preservation CLI", () => {
       expect(report.exitCode).toBe(0);
       expect(report.lines).toContain("CHECK id=icon-composer-live-evidence status=PASS");
       expect(report.lines).toContain("CHECK id=human-device-provider-evidence status=PASS");
-      expect(report.lines).toContain("CHECK id=mobile-android-asset-live-evidence status=PASS");
+      expect(report.lines.some((line) => line.includes("mobile-android-asset-live-evidence"))).toBe(
+        false,
+      );
       expect(report.lines).toContain("HUMAN_REVIEW_ACCEPTANCE status=PASS");
     } finally {
       NodeFS.rmSync(evidenceDirectory, { recursive: true, force: true });
@@ -1087,12 +1070,29 @@ describe("upstream preservation CLI", () => {
         executionTreeCheck: () => undefined,
       });
 
-    it("holds no retirements after KAT-3544 removed the sandbox checks", () => {
-      expect(RETIREMENTS.checks.size).toBe(0);
-      expect(RETIREMENTS.paths.size).toBe(0);
+    it("retires only the parked Android checks and paths", () => {
+      expect([...RETIREMENTS.checks.keys()]).toEqual([
+        "mobile-android-asset-live-evidence",
+        "mobile-android-fab-inset",
+      ]);
+      expect([...RETIREMENTS.paths.keys()]).toEqual([
+        "apps/mobile/src/lib/materialYouTheme.ts",
+        "apps/mobile/src/lib/materialYouTheme.test.ts",
+      ]);
       expect(RETIREMENTS.unfrozenTrustedPaths.size).toBe(0);
       expect(PRESERVATION_CONTRACT.length).toBe(31);
-      expect(PRESERVATION_CHECKS.length).toBe(31);
+      expect(PRESERVATION_CHECKS.length).toBe(29);
+      const theme = PRESERVATION_CHECKS.find(
+        (check) => check.id === "mobile-theme-native-identity",
+      );
+      expect(theme?.ownerPaths).toEqual([
+        "apps/mobile/src/lib/mobileTheme.ts",
+        "apps/mobile/src/lib/mobileThemeVariables.ts",
+      ]);
+      expect(theme?.commands[0]?.trustedPaths).toEqual([
+        "apps/mobile/src/lib/mobileTheme.test.ts",
+        "apps/mobile/src/lib/mobileThemeVariables.test.ts",
+      ]);
       const provider = PRESERVATION_CHECKS.find(
         (check) => check.id === "provider-sandbox-environment-isolation",
       );
