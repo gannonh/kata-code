@@ -1,7 +1,7 @@
 import type { DevicePlatform } from "@kata-sh/code-contracts";
 
 export interface DeviceShapeProfile {
-  readonly id: "ios-phone" | "ios-tablet" | "android-phone" | "android-tablet";
+  readonly id: "ios-phone" | "ios-duo" | "ios-tablet" | "android-phone" | "android-tablet";
   readonly bezel: number;
   readonly bodyRadius: number;
   readonly screenRadius: number;
@@ -49,6 +49,9 @@ export const IOS_PHONE_SHAPE: DeviceShapeProfile = {
     flash: [0.085, 0.11],
   },
 };
+
+/** Folded flat, before the hub reports a hinge, an iPhone Duo keeps the phone silhouette. */
+export const IPHONE_DUO_SHAPE: DeviceShapeProfile = { ...IOS_PHONE_SHAPE, id: "ios-duo" };
 
 export const IOS_TABLET_SHAPE: DeviceShapeProfile = {
   id: "ios-tablet",
@@ -111,6 +114,7 @@ export function resolveDeviceShape(options: {
   portraitAspect: number;
 }): DeviceShapeProfile {
   const name = options.name ?? "";
+  if (options.platform === "ios" && /^iPhone Duo$/i.test(name)) return IPHONE_DUO_SHAPE;
   const namedTablet = /\b(ipad|tablet)\b/i.test(name);
   const namedPhone = /\b(iphone|phone)\b/i.test(name);
   const tablet = namedTablet || (!namedPhone && options.portraitAspect >= 0.6);

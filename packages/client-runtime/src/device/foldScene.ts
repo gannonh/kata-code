@@ -4,11 +4,13 @@ import {
   CylinderGeometry,
   ExtrudeGeometry,
   Group,
+  Euler,
   Mesh,
   MeshBasicMaterial,
   MeshPhysicalMaterial,
   MeshStandardMaterial,
   PlaneGeometry,
+  Quaternion,
   Raycaster,
   Shape,
   ShapeGeometry,
@@ -17,7 +19,9 @@ import {
   type Camera,
   type Texture,
 } from "three";
+import type { DuoPose } from "./duoControl.ts";
 import type { PhoneDisplayLayout } from "./phoneScene.ts";
+import { IOS_PHONE_SHAPE } from "./shapeProfile.ts";
 
 const HEIGHT = 2.2;
 const DEPTH = 0.075;
@@ -35,6 +39,64 @@ export const DEFAULT_FOLD_INNER_ASPECT = 2076 / 2152;
  */
 export const isFoldInnerAspect = (aspect: number) =>
   Number.isFinite(aspect) && aspect > 0.75 && aspect < 1.5;
+
+/** Which procedural foldable to build. Both are original bodies, not reproductions of hardware. */
+export type FoldBody = "android" | "iphone-duo";
+export type FoldDisplay = "cover" | "inner";
+
+/**
+ * The Duo mounts its inner panel a quarter turn from the book-style body: raw X runs down the
+ * hinge and raw Y runs across it, right to left. Body coordinates are 0-1 from the top left.
+ */
+const duoInnerRaw = (across: number, down: number) => ({ x: down, y: 1 - across });
+
+/** Undo the stream's portrait-framebuffer touch remap, so a raw point arrives unchanged. */
+function duoOrientedPoint(raw: { x: number; y: number }, layout: PhoneDisplayLayout) {
+  if (layout.rawLandscape) return raw;
+  if (layout.rotation === -Math.PI / 2) return { x: 1 - raw.y, y: raw.x };
+  if (layout.rotation === Math.PI / 2) return { x: raw.y, y: 1 - raw.x };
+  if (layout.rotation === Math.PI) return { x: 1 - raw.x, y: 1 - raw.y };
+  return raw;
+}
+
+const turn = (x: number, y: number, z: number) =>
+  new Quaternion().setFromEuler(new Euler(x, y, z, "XYZ"));
+const degrees = (value: number) => (value * Math.PI) / 180;
+
+/**
+ * The Duo's resting presentation for a hub-reported hinge state. The hinge runs along body Y;
+ * the fixed half is on the right and the cover is on the moving half's back.
+ */
+export function duoPresentation(options: {
+  readonly angle: number;
+  readonly pose: DuoPose | null | undefined;
+  readonly display: FoldDisplay;
+  readonly layout: PhoneDisplayLayout;
+}) {
+  const angle = Math.max(0, Math.min(180, options.angle));
+  const opening = Math.PI * (1 - angle / 180);
+  if (options.pose === "tent") {
+    // Hinge on top, halves splayed evenly, cover half toward the viewer, seen from slightly above.
+    return turn(0, degrees(-20), 0)
+      .multiply(turn(degrees(angle / 2 + 10), 0, 0))
+      .multiply(turn(0, 0, -Math.PI / 2));
+  }
+  // Portrait framebuffers carry the app orientation; the body turns to keep content upright.
+  const orientation =
+    options.layout.rawLandscape && options.layout.landscape ? 0 : options.layout.rotation;
+  if (options.display === "cover") {
+    // Face the cover's own normal, whatever the hinge angle.
+    return turn(0, 0, orientation).multiply(turn(0, Math.PI - opening, 0));
+  }
+  if (options.pose === "laptop") {
+    // The fixed half stands as the lid; the moving half lies toward the viewer as the base.
+    return turn(0, degrees(-20), 0)
+      .multiply(turn(degrees(105 - angle), 0, 0))
+      .multiply(turn(0, 0, Math.PI / 2));
+  }
+  // The inner panel reads upright with the hinge across it, halves splayed evenly.
+  return turn(0, 0, Math.PI / 2 + orientation).multiply(turn(0, -opening / 2, 0));
+}
 
 function panelPath(
   halfWidth: number,
@@ -90,13 +152,16 @@ function coverPath(halfWidth: number) {
 /**
  * A procedural book-style foldable: one fixed half, one half rotating around a shared hinge.
  * The inner display keeps the raw framebuffer's native aspect, portrait or landscape.
+ * `innerAspect` is the unfolded body's width over height.
  */
-export function createAndroidFoldScene(
+export function createFoldScene(
   texture: Texture,
   layout: PhoneDisplayLayout,
   initialAngle: number,
   innerAspect = DEFAULT_FOLD_INNER_ASPECT,
+  body: FoldBody = "android",
 ) {
+  const duo = body === "iphone-duo";
   const screenHeight = HEIGHT - 2 * INSET;
   const halfWidth = (innerAspect * screenHeight) / 2 + INSET;
   const root = new Group();
@@ -106,7 +171,7 @@ export function createAndroidFoldScene(
   const right = new Group();
   orientation.add(left, right);
   const frameMetal = new MeshStandardMaterial({
-    color: 0xa3abb2,
+    color: duo ? 0xb5bcc7 : 0xa3abb2,
     metalness: 0.9,
     roughness: 0.28,
   });
@@ -122,7 +187,7 @@ export function createAndroidFoldScene(
     clearcoat: 1,
   });
   const backGlass = new MeshPhysicalMaterial({
-    color: 0x2c3237,
+    color: duo ? IOS_PHONE_SHAPE.backColor : 0x2c3237,
     metalness: 0.35,
     roughness: 0.52,
     clearcoat: 0.4,
@@ -222,7 +287,12 @@ export function createAndroidFoldScene(
     const limit = outerX - radius + Math.sqrt(Math.max(0, radius * radius - cornerY * cornerY));
     const x = Math.max(-limit, Math.min(limit, screenPositions.getX(i)));
     baseX[i] = x;
-    screenUvs.setXY(i, x / screenWidth + 0.5, y / screenHeight + 0.5);
+    const u = x / screenWidth + 0.5;
+    const v = y / screenHeight + 0.5;
+    if (duo) {
+      const raw = duoInnerRaw(u, 1 - v);
+      screenUvs.setXY(i, raw.x, 1 - raw.y);
+    } else screenUvs.setXY(i, u, v);
   }
   screenUvs.needsUpdate = true;
   const innerSurface = new Mesh(screenGeometry, displayMaterial);
@@ -257,8 +327,9 @@ export function createAndroidFoldScene(
   // Rear components use back-surface coordinates, with outward positive Z.
   const rearCamera = new Group();
   rearCamera.name = "rear-camera";
-  const islandWidth = 0.46;
-  const islandHeight = 0.2;
+  const camera = IOS_PHONE_SHAPE.camera;
+  const islandWidth = duo ? camera.width : 0.46;
+  const islandHeight = duo ? camera.height : 0.2;
   rearCamera.position.set(
     halfWidth - 0.07 - islandWidth / 2,
     HEIGHT / 2 - 0.08 - islandHeight / 2,
@@ -268,7 +339,7 @@ export function createAndroidFoldScene(
   right.add(rearCamera);
   const plateDepth = 0.02;
   const plate = new Mesh(
-    new ExtrudeGeometry(roundedRectPath(islandWidth, islandHeight, 0.07), {
+    new ExtrudeGeometry(roundedRectPath(islandWidth, islandHeight, duo ? 0.1 : 0.07), {
       depth: plateDepth,
       bevelEnabled: true,
       bevelSize: 0.008,
@@ -281,25 +352,29 @@ export function createAndroidFoldScene(
   plate.name = "camera-plate";
   rearCamera.add(plate);
   const plateFront = plateDepth + 0.006;
-  for (const [x, radius] of [
-    [-0.14, 0.05],
-    [-0.01, 0.05],
-    [0.105, 0.036],
-  ] as const) {
+  const lenses: ReadonlyArray<readonly [number, number, number]> = duo
+    ? camera.lenses.map(([x, y]) => [x, y, camera.lensRadius] as const)
+    : [
+        [-0.14, 0, 0.05],
+        [-0.01, 0, 0.05],
+        [0.105, 0, 0.036],
+      ];
+  for (const [x, y, radius] of lenses) {
     const ring = new Mesh(
       new CylinderGeometry(radius + 0.012, radius + 0.012, 0.012, 32),
       frameMetal,
     );
     ring.rotation.x = Math.PI / 2;
-    ring.position.set(x, 0, plateFront + 0.004);
+    ring.position.set(x, y, plateFront + 0.004);
     rearCamera.add(ring);
     const lens = new Mesh(new CircleGeometry(radius, 32), lensMaterial);
     lens.name = "camera-lens";
-    lens.position.set(x, 0, plateFront + 0.0105);
+    lens.position.set(x, y, plateFront + 0.0105);
     rearCamera.add(lens);
   }
   const flash = new Mesh(new CircleGeometry(0.018, 20), flashMaterial);
-  flash.position.set(0.185, 0.045, plateFront + 0.0005);
+  const [flashX, flashY] = duo ? camera.flash! : [0.185, 0.045];
+  flash.position.set(flashX, flashY, plateFront + 0.0005);
   rearCamera.add(flash);
 
   // Power and volume keys sit on the fixed half's outer edge.
@@ -318,8 +393,9 @@ export function createAndroidFoldScene(
   let capturedDisplay: Mesh | null = null;
   let activeLayout = layout;
   let angle = initialAngle;
+  let activeDisplay: FoldDisplay | null = null;
   const updateVisibleScreen = () => {
-    const innerActive = angle >= 90;
+    const innerActive = activeDisplay ? activeDisplay === "inner" : angle >= 90;
     innerSurface.visible = innerActive;
     innerLeft.visible = innerActive;
     innerRight.visible = innerActive;
@@ -378,6 +454,11 @@ export function createAndroidFoldScene(
     innerAspect,
     setAngle,
     setDisplay,
+    /** Pin the live feed to one display. `null` follows the hinge: cover below 90 degrees. */
+    setActiveDisplay(next: FoldDisplay | null) {
+      activeDisplay = next;
+      updateVisibleScreen();
+    },
     screenPoint(x: number, y: number, camera: Camera, captured = false) {
       orientation.updateWorldMatrix(true, true);
       camera.updateMatrixWorld(true);
@@ -408,6 +489,11 @@ export function createAndroidFoldScene(
       const u = Math.max(0, Math.min(1, (local.x - bounds.min.x) / (bounds.max.x - bounds.min.x)));
       const v = Math.max(0, Math.min(1, (bounds.max.y - local.y) / (bounds.max.y - bounds.min.y)));
       const across = display === cover ? u : (display === innerLeft ? u : 1 + u) / 2;
+      if (duo)
+        return duoOrientedPoint(
+          display === cover ? { x: across, y: v } : duoInnerRaw(across, v),
+          activeLayout,
+        );
       return activeLayout.rotation === Math.PI ? { x: 1 - across, y: 1 - v } : { x: across, y: v };
     },
     dispose() {

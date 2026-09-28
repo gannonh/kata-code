@@ -1,6 +1,6 @@
-import { Box3, Mesh, PerspectiveCamera, Texture, Vector3 } from "three";
+import { Box3, Mesh, MeshPhysicalMaterial, PerspectiveCamera, Texture, Vector3 } from "three";
 import { describe, expect, it } from "vite-plus/test";
-import { createFoldScene } from "./foldScene.ts";
+import { createFoldScene, duoPresentation } from "./foldScene.ts";
 import { phoneDisplayLayout } from "./phoneScene.ts";
 import { sceneDigest } from "./sceneDigest.test-util.ts";
 
@@ -133,5 +133,155 @@ describe("Android fold scene", () => {
       "2208x1840 portrait_upside_down 90": "27:714f1e8b - - 0.434,0.659 0.102,0.659",
     });
     texture.dispose();
+  });
+});
+
+describe("iPhone Duo fold scene", () => {
+  const texture = new Texture();
+  // The inner panel reports a portrait framebuffer; the book-style body is its quarter turn.
+  const layout = phoneDisplayLayout(
+    { width: 1800, height: 2000, orientation: "portrait" },
+    1800,
+    2000,
+  );
+  const duo = () => createFoldScene(texture, layout, 180, 2000 / 1800, "iphone-duo");
+  const facing = (scene: ReturnType<typeof duo>, name: string, axis = new Vector3(0, 0, 1)) => {
+    scene.root.updateMatrixWorld(true);
+    return axis
+      .clone()
+      .transformDirection(scene.root.getObjectByName(name)!.matrixWorld)
+      .toArray()
+      .map((value) => Math.round(value * 1000) / 1000 + 0);
+  };
+
+  it("folds to each hub pose and faces the display the hub streams toward the viewer", () => {
+    const diagonal = Math.round(Math.SQRT1_2 * 1000) / 1000;
+    const scene = duo();
+    const pose = (
+      hingePose: "closed" | "book" | "open" | "laptop" | "tent",
+      angle: number,
+      display: "cover" | "inner",
+    ) => {
+      scene.setAngle(angle);
+      scene.setActiveDisplay(display);
+      scene.root.quaternion.copy(duoPresentation({ angle, pose: hingePose, display, layout }));
+      return {
+        cover: scene.root.getObjectByName("cover-screen")!.visible,
+        inner: scene.root.getObjectByName("continuous-inner-screen")!.visible,
+        hinge: facing(scene, "hinge-spine", new Vector3(0, 1, 0)),
+        movingHalf: facing(scene, "left-inner-screen"),
+        fixedHalf: facing(scene, "right-inner-screen"),
+        coverFaces: facing(scene, "cover-screen"),
+      };
+    };
+    // Closed: the cover faces the viewer, upright, with the hinge down its side.
+    expect(pose("closed", 0, "cover")).toEqual({
+      cover: true,
+      inner: false,
+      hinge: [0, 1, 0],
+      movingHalf: [0, 0, -1],
+      fixedHalf: [0, 0, 1],
+      coverFaces: [0, 0, 1],
+    });
+    // Open: one flat inner display with the hinge across it.
+    expect(pose("open", 180, "inner")).toEqual({
+      cover: false,
+      inner: true,
+      hinge: [-1, 0, 0],
+      movingHalf: [0, 0, 1],
+      fixedHalf: [0, 0, 1],
+      coverFaces: [0, 0, -1],
+    });
+    // Book: a right angle, both halves turned equally toward the viewer.
+    expect(pose("book", 90, "inner")).toEqual({
+      cover: false,
+      inner: true,
+      hinge: [-1, 0, 0],
+      movingHalf: [0, diagonal, diagonal],
+      fixedHalf: [0, -diagonal, diagonal],
+      coverFaces: [0, -diagonal, -diagonal],
+    });
+    // Laptop: the moving half lies flat as the base; the fixed half stands as the lid.
+    expect(pose("laptop", 90, "inner")).toEqual({
+      cover: false,
+      inner: true,
+      hinge: [-0.94, 0, -0.342],
+      movingHalf: [-0.089, 0.966, 0.243],
+      fixedHalf: [-0.33, -0.259, 0.908],
+      coverFaces: [0.089, -0.966, -0.243],
+    });
+    // Tent: hinge on top, the halves splayed below it, the cover toward the viewer.
+    expect(pose("tent", 80, "cover")).toEqual({
+      cover: true,
+      inner: false,
+      hinge: [0.94, 0, 0.342],
+      movingHalf: [0.296, -0.5, -0.814],
+      fixedHalf: [-0.22, -0.766, 0.604],
+      coverFaces: [-0.296, 0.5, 0.814],
+    });
+    scene.dispose();
+  });
+
+  it("shows the display the hub streams, whatever the hinge angle, and the hinge rule otherwise", () => {
+    const scene = duo();
+    const visible = () =>
+      ["cover-screen", "continuous-inner-screen"].filter(
+        (name) => scene.root.getObjectByName(name)!.visible,
+      );
+    expect(visible()).toEqual(["continuous-inner-screen"]);
+    scene.setActiveDisplay("cover");
+    expect(visible()).toEqual(["cover-screen"]);
+    scene.setActiveDisplay(null);
+    scene.setAngle(45);
+    expect(visible()).toEqual(["cover-screen"]);
+    scene.setActiveDisplay("inner");
+    expect(visible()).toEqual(["continuous-inner-screen"]);
+    scene.dispose();
+  });
+
+  it("maps inner touches through the panel's quarter-turn mounting and cover touches directly", () => {
+    const scene = duo();
+    const camera = new PerspectiveCamera(32, 1, 0.1, 30);
+    camera.position.z = 6;
+    camera.updateMatrixWorld(true);
+    const box = new Box3().setFromObject(scene.root).getSize(new Vector3());
+    const touch = (x: number, y: number) => {
+      const point = new Vector3(x, y, 0.041).project(camera);
+      const raw = scene.screenPoint((point.x + 1) / 2, (1 - point.y) / 2, camera);
+      return raw && { x: Math.round(raw.x * 20) / 20, y: Math.round(raw.y * 20) / 20 };
+    };
+    // Body left half's centre is the bottom half of the raw panel; the right half is its top.
+    expect(touch(-box.x / 4, 0)).toEqual({ x: 0.5, y: 0.75 });
+    expect(touch(box.x / 4, 0)).toEqual({ x: 0.5, y: 0.25 });
+    // Raw X runs down the hinge.
+    expect(touch(box.x / 4, 0.55)).toEqual({ x: 0.25, y: 0.25 });
+    scene.setAngle(0);
+    scene.setActiveDisplay("cover");
+    expect(touch(box.x / 4, 0.55)).toEqual({ x: 0.5, y: 0.25 });
+    scene.dispose();
+  });
+
+  it("builds an iPhone-styled body and samples the feed in raw panel space", () => {
+    const scene = duo();
+    const back = scene.root.getObjectByName("right-back") as Mesh;
+    expect((back.material as MeshPhysicalMaterial).color.getHex()).toBe(0x424b5d);
+    const lenses = scene.root.getObjectsByProperty("name", "camera-lens");
+    expect(lenses).toHaveLength(2);
+    const surface = scene.root.getObjectByName("continuous-inner-screen") as Mesh;
+    const positions = surface.geometry.getAttribute("position");
+    const uvs = surface.geometry.getAttribute("uv");
+    surface.geometry.computeBoundingBox();
+    const { min, max } = surface.geometry.boundingBox!;
+    // The body's bottom right corner samples the raw panel's top right.
+    let corner = 0;
+    for (let i = 1; i < positions.count; i++)
+      if (positions.getX(i) - positions.getY(i) > positions.getX(corner) - positions.getY(corner))
+        corner = i;
+    expect(positions.getX(corner)).toBeCloseTo(max.x, 1);
+    expect(positions.getY(corner)).toBeCloseTo(min.y, 1);
+    expect(
+      [uvs.getX(corner), uvs.getY(corner)].map((value) => Math.round(value * 10) / 10),
+    ).toEqual([1, 1]);
+    scene.dispose();
   });
 });

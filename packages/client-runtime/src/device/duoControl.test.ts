@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vite-plus/test";
-import { createDuoControl, type DuoCommand } from "./duoControl.ts";
+import { createDuoControl, duoHingeAngle, type DuoCommand } from "./duoControl.ts";
 afterEach(() => vi.useRealTimers());
 
 it("keeps a failed send visible, including a disconnect while draining queued motion", () => {
@@ -72,4 +72,12 @@ it("drops queued commands on failure, timeout and disconnect; late replies canno
   queue.enqueue({ control: "angle", value: Infinity });
   expect(send).toHaveBeenCalledTimes(3);
   queue.clear();
+});
+
+it("shows the hub-reported hinge, falls back to the streamed display, and ignores hubs without a hinge", () => {
+  expect(duoHingeAngle({ supportsHingeAngle: true, hingeAngle: 80, screenId: 1 })).toBe(80);
+  expect(duoHingeAngle({ supportsHingeAngle: true, screenId: 1 })).toBe(0);
+  expect(duoHingeAngle({ supportsHingeAngle: true, screenId: 3 })).toBe(180);
+  expect(duoHingeAngle({ supportsHingeAngle: false, hingeAngle: 90 })).toBeNull();
+  expect(duoHingeAngle(null)).toBeNull();
 });
