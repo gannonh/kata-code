@@ -41,9 +41,9 @@ const state = path.join(root, 'hosts', owner);
 const run = (command, args, options = {}) => spawnSync(command, args, { encoding: 'utf8', timeout: 30000, ...options });
 const xcodeTimeout = 30000;
 // simctl can start xcodebuild children that outlive a killed wrapper, so a timeout kills the whole process group.
-const runXcodeTool = (command, args) => new Promise(resolve => {
+const runXcodeTool = (command, args, timeout = xcodeTimeout) => new Promise(resolve => {
   const child = spawn(command, args, { detached: true, stdio: 'ignore' });
-  const timer = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, xcodeTimeout);
+  const timer = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch {} }, timeout);
   child.once('error', () => { clearTimeout(timer); resolve(null); });
   child.once('exit', status => { clearTimeout(timer); resolve(status); });
 });
@@ -142,7 +142,8 @@ async function install(name, version, entry) {
 }
 (async () => {
   // Exit 69 means Xcode still needs its first launch, which simctl would start and block on.
-  const needsFirstLaunch = process.platform === 'darwin' && await runXcodeTool('xcodebuild', ['-checkFirstLaunchStatus']) === 69;
+  // The short status timeout keeps both checks inside the caller's 45 s SSH deadline.
+  const needsFirstLaunch = process.platform === 'darwin' && await runXcodeTool('xcodebuild', ['-checkFirstLaunchStatus'], 5000) === 69;
   const ios = process.platform === 'darwin' && !needsFirstLaunch && await runXcodeTool('xcrun', ['simctl', 'help']) === 0;
   const android = run('adb', ['version']).status === 0;
   const iosReason = needsFirstLaunch ? 'Xcode has not finished its first launch. Run sudo xcodebuild -runFirstLaunch on the device host.' : 'iOS needs macOS with Xcode and working xcrun simctl.';
