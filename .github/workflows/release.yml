@@ -549,10 +549,10 @@ jobs:
 
   # One job per platform and architecture (see release-desktop.yml), each on
   # hardware of its own architecture, and each gated only on what it consumes:
-  # every platform needs the JS bundle, and the Windows jobs also need the
-  # same-arch Linux job, whose CLI archive they embed as the WSL runtime. Every
-  # job builds the desktop app; all but macOS x64 also build the CLI archive
-  # for their platform, so a target either ships fully or not at all.
+  # every platform needs the JS bundle. Every job builds the desktop app; all
+  # but macOS x64 also build the CLI archive for their platform, so a target
+  # either ships fully or not at all. Windows is parked: its jobs live in
+  # .github/disabled/release-windows.yml (docs/operations/supported-platforms.md).
   desktop_mac_arm64:
     name: Desktop macOS arm64
     needs: [preflight, relay_public_config, build_bundle]
@@ -654,58 +654,6 @@ jobs:
       resource_key: linux-arm64
       cli_archive: true
 
-  # The Windows jobs embed the same-arch Linux CLI archive as the WSL runtime.
-  # `!cancelled()` (not `!failure()`) still lets them start when that Linux job
-  # failed; the download step inside then fails this single platform if the
-  # archive is missing.
-  desktop_win_x64:
-    name: Desktop Windows x64
-    needs: [preflight, relay_public_config, build_bundle, desktop_linux_x64]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build_bundle.result == 'success' }}
-    uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
-    with:
-      version: ${{ needs.preflight.outputs.version }}
-      ref: ${{ needs.preflight.outputs.ref }}
-      release_channel: ${{ needs.preflight.outputs.release_channel }}
-      dry_run: ${{ needs.preflight.outputs.dry_run == 'true' }}
-      clerk_publishable_key: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
-      clerk_jwt_template: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
-      clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
-      relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
-      label: Windows x64
-      runner: windows-2025
-      platform: win
-      target: nsis
-      arch: x64
-      rust_target: x86_64-pc-windows-msvc
-      resource_key: win32-x64
-      cli_archive: true
-
-  desktop_win_arm64:
-    name: Desktop Windows arm64
-    needs: [preflight, relay_public_config, build_bundle, desktop_linux_arm64]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build_bundle.result == 'success' }}
-    uses: ./.github/workflows/release-desktop.yml
-    secrets: inherit
-    with:
-      version: ${{ needs.preflight.outputs.version }}
-      ref: ${{ needs.preflight.outputs.ref }}
-      release_channel: ${{ needs.preflight.outputs.release_channel }}
-      dry_run: ${{ needs.preflight.outputs.dry_run == 'true' }}
-      clerk_publishable_key: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
-      clerk_jwt_template: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
-      clerk_cli_oauth_client_id: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
-      relay_url: ${{ needs.relay_public_config.outputs.relay_url }}
-      label: Windows arm64
-      runner: windows-11-arm
-      platform: win
-      target: nsis
-      arch: arm64
-      rust_target: aarch64-pc-windows-msvc
-      resource_key: win32-arm64
-      cli_archive: true
-
   # npm gets the same bytes as the GitHub Release: the launcher plus one
   # package per CLI archive. Preview publishes too, under the `preview`
   # dist-tag, which nothing resolves unless asked for by name.
@@ -721,10 +669,8 @@ jobs:
         desktop_mac_arm64,
         desktop_linux_x64,
         desktop_linux_arm64,
-        desktop_win_x64,
-        desktop_win_arm64,
       ]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.quality.result == 'success' && needs.test.result == 'success' && needs.test_server.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' && needs.desktop_win_x64.result == 'success' && needs.desktop_win_arm64.result == 'success' }}
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.quality.result == 'success' && needs.test.result == 'success' && needs.test_server.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' }}
     runs-on: ubuntu-24.04 # ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -783,11 +729,9 @@ jobs:
         desktop_mac_x64,
         desktop_linux_x64,
         desktop_linux_arm64,
-        desktop_win_x64,
-        desktop_win_arm64,
         publish_cli,
       ]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_mac_x64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' && needs.desktop_win_x64.result == 'success' && needs.desktop_win_arm64.result == 'success' && needs.publish_cli.result == 'success' }}
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.desktop_mac_arm64.result == 'success' && needs.desktop_mac_x64.result == 'success' && needs.desktop_linux_x64.result == 'success' && needs.desktop_linux_arm64.result == 'success' && needs.publish_cli.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -873,21 +817,6 @@ jobs:
             fi
           done
 
-      - name: Merge Windows updater manifests
-        if: needs.preflight.outputs.release_channel != 'preview'
-        run: |
-          shopt -s nullglob
-          for x64_manifest in release-assets/*-win-x64.yml; do
-            arm64_manifest="${x64_manifest%-x64.yml}-arm64.yml"
-            merged_manifest="${x64_manifest%-win-x64.yml}.yml"
-            if [[ -f "$arm64_manifest" ]]; then
-              node scripts/merge-update-manifests.ts --platform win "$x64_manifest" "$arm64_manifest" "$merged_manifest"
-              rm -f "$x64_manifest" "$arm64_manifest"
-            else
-              mv "$x64_manifest" "$merged_manifest"
-            fi
-          done
-
       - name: Prepare release assets
         run: |
           node scripts/prepare-github-release.ts \
@@ -907,7 +836,6 @@ jobs:
             echo 'release-assets/*.dmg'
             echo 'release-assets/*.zip'
             echo 'release-assets/*.AppImage'
-            echo 'release-assets/*.exe'
             if [[ "${{ needs.preflight.outputs.release_channel }}" != "preview" ]]; then
               echo 'release-assets/*.blockmap'
               echo 'release-assets/*.yml'

@@ -27,11 +27,11 @@ This document covers the unified release workflow for stable and nightly desktop
 - Runs lint, typecheck, and tests alongside artifact builds. Publishing waits for every check.
 - Reads the shared production Kata Code Connect relay URL and Clerk client configuration before packaging clients.
 - Builds the platform-independent JS (server bundle, web client, Electron main) once in the `build_bundle` job and hands it to every platform job as the `js-bundle` artifact; the platform jobs only package it, so no runner rebuilds it.
-- Builds six desktop artifacts in parallel for both channels, each as its own job (`desktop_<platform>_<arch>`, one call of `release-desktop.yml`) on hardware of its own architecture, gated only on the bundle (the Windows jobs also wait for the same-arch Linux job, whose CLI archive they embed as the WSL runtime):
+- Builds four desktop artifacts in parallel for both channels, each as its own job (`desktop_<platform>_<arch>`, one call of `release-desktop.yml`) on hardware of its own architecture, gated only on the bundle:
   - macOS `arm64` DMG
   - macOS `x64` DMG
   - Linux `x64` and `arm64` AppImage
-  - Windows `x64` and `arm64` NSIS installer
+- Windows releases are parked. The Windows jobs live in `.github/disabled/release-windows.yml`; [supported platforms](./supported-platforms.md#windows) explains how to turn them back on.
 - Publishes one GitHub Release with all produced files.
   - Renames desktop installers to stable platform and architecture names, rewrites updater
     manifests to reference those names, and adds a platform download table to the release body.
@@ -40,12 +40,12 @@ This document covers the unified release workflow for stable and nightly desktop
   - Nightly runs are always GitHub prereleases and never marked latest.
   - Automatically generated release notes are pinned to the previous tag in the same channel, so stable compares to the previous stable tag and nightly compares to the previous nightly tag.
 - Includes Electron auto-update metadata (for example `latest*.yml`, `nightly*.yml`, and `*.blockmap`) in release assets.
-- Builds a self-contained CLI archive per platform (`katacode-<version>-<platform>-<arch>.tar.gz`, `.zip` on Windows) in the same job as that target's desktop artifact and attaches them to the GitHub Release with a `SHA256SUMS` file, on every channel, for five targets: macOS arm64, Linux x64 and arm64, Windows x64 and arm64. Every archive is built, signed, and smoke-tested on hardware of its own architecture. There is no macOS x64 archive: Node single-executables are unsupported on x64 macOS (the SEA docs list macOS as arm64 only) and the binary segfaults on start; the x64 desktop app is Electron and unaffected.
-  - The archive holds the server as a Node single-executable (`scripts/build-cli-archive.ts`), so unpacking it needs neither Node, npm, nor a compiler. It is the only form in which Kata Code manages a runtime: the desktop's SSH environments, the boot service, `katacode update`, and the install scripts all download and verify this archive against `SHA256SUMS`. The npm packages exist for people who run `npx @kata-sh/code-cli` or `npm install -g @kata-sh/code-cli` and carry the same archive contents. Product-managed runtimes do not install from npm. The `curl | sh` installers are `scripts/install.sh` and `scripts/install.ps1`; invoke their published copies through the raw URLs in [Install Kata Code](../user/install.md).
+- Builds a self-contained CLI archive per platform (`katacode-<version>-<platform>-<arch>.tar.gz`) in the same job as that target's desktop artifact and attaches them to the GitHub Release with a `SHA256SUMS` file, on every channel, for three targets: macOS arm64, Linux x64 and arm64. Every archive is built, signed, and smoke-tested on hardware of its own architecture. There is no macOS x64 archive: Node single-executables are unsupported on x64 macOS (the SEA docs list macOS as arm64 only) and the binary segfaults on start; the x64 desktop app is Electron and unaffected.
+  - The archive holds the server as a Node single-executable (`scripts/build-cli-archive.ts`), so unpacking it needs neither Node, npm, nor a compiler. It is the only form in which Kata Code manages a runtime: the desktop's SSH environments, the boot service, `katacode update`, and the install scripts all download and verify this archive against `SHA256SUMS`. The npm packages exist for people who run `npx @kata-sh/code-cli` or `npm install -g @kata-sh/code-cli` and carry the same archive contents. Product-managed runtimes do not install from npm. The `curl | sh` installer is `scripts/install.sh` (the Windows `scripts/install.ps1` is parked); invoke its published copy through the raw URLs in [Install Kata Code](../user/install.md).
   - The executable is built with a Node that supports `--build-sea` (`VP_NODE_VERSION=26.8.2`, kept in step with `SEA_NODE_VERSION` in `apps/server/vite.config.ts`), while the repo stays on `engines.node`.
-  - macOS archives are signed with the Developer ID certificate and notarized when the Apple secrets are present (ad hoc otherwise, which still runs from `curl`/`tar` installs). Windows executables use the same Azure Trusted Signing setup as the installer. Every native addon in the macOS archive is signed too, since the hardened runtime refuses unsigned libraries.
+  - macOS archives are signed with the Developer ID certificate and notarized when the Apple secrets are present (ad hoc otherwise, which still runs from `curl`/`tar` installs). Every native addon in the macOS archive is signed too, since the hardened runtime refuses unsigned libraries.
   - Each archive is extracted and executed on its build runner (`scripts/smoke-cli-archive.ts`) before it is uploaded.
-- Publishes the CLI to npm with OIDC trusted publishing from the same workflow file, as the same bytes the GitHub Release carries: `scripts/build-npm-platform-packages.ts` unpacks the five CLI archives into `@kata-sh/code-cli-<platform>-<arch>` packages. Each package sets `os` and `cpu`, so npm installs only the matching package. The script also generates the `@kata-sh/code-cli` launcher, whose `bin/katacode.js` lists the platform packages as `optionalDependencies` and runs the installed executable. `npx @kata-sh/code-cli` needs Node only to run the launcher. `node apps/server/scripts/cli.ts publish` publishes the platform packages first and the launcher last, after a `--dry-run` pass over all packages.
+- Publishes the CLI to npm with OIDC trusted publishing from the same workflow file, as the same bytes the GitHub Release carries: `scripts/build-npm-platform-packages.ts` unpacks the three CLI archives into `@kata-sh/code-cli-<platform>-<arch>` packages. Each package sets `os` and `cpu`, so npm installs only the matching package. The script also generates the `@kata-sh/code-cli` launcher, whose `bin/katacode.js` lists the platform packages as `optionalDependencies` and runs the installed executable. `npx @kata-sh/code-cli` needs Node only to run the launcher. `node apps/server/scripts/cli.ts publish` publishes the platform packages first and the launcher last, after a `--dry-run` pass over all packages.
   - stable releases publish npm dist-tag `latest`
   - nightly releases publish npm dist-tag `nightly`
   - preview releases publish npm dist-tag `preview`, which nothing resolves unless asked for by name
@@ -358,6 +358,9 @@ once on the server machine. Also test manual and desktop-managed guidance when a
 
 ### Windows payload topology and update validation
 
+Windows releases are parked ([supported platforms](./supported-platforms.md#windows)). The
+invariants below still hold for any Windows build and apply again once Windows is re-enabled.
+
 Windows packages the bundled server and only its runtime-external/native
 dependency closure in `resources/server.asar`. Native modules and helper
 executables declared as unpacked by that archive must be present at the matching
@@ -408,10 +411,10 @@ The workflow runs `node scripts/build-npm-platform-packages.ts` on the downloade
 `node apps/server/scripts/cli.ts publish --packages-dir npm-packages`, which runs `npm publish` on
 each `@kata-sh/code-cli-<platform>-<arch>.tgz` and finally on `@kata-sh/code-cli.tgz`, the launcher. The script publishes
 tarballs it built itself rather than directories: `npm publish <dir>` strips `node_modules/` from the
-tarball no matter what `files` says, and the executable loads its native addons from there. Six
+tarball no matter what `files` says, and the executable loads its native addons from there. Four
 packages are published per release: `@kata-sh/code-cli`, `@kata-sh/code-cli-darwin-arm64`,
-`@kata-sh/code-cli-linux-arm64`, `@kata-sh/code-cli-linux-x64`,
-`@kata-sh/code-cli-win32-arm64`, and `@kata-sh/code-cli-win32-x64`.
+`@kata-sh/code-cli-linux-arm64`, and `@kata-sh/code-cli-linux-x64`. The
+`@kata-sh/code-cli-win32-*` packages stay on npm at their last version while Windows is parked.
 
 Checklist:
 
@@ -510,6 +513,9 @@ Notes:
   to the desktop packager when configured.
 
 ## 3) Azure Trusted Signing setup (Windows)
+
+Windows releases are parked, so no release run signs with these secrets. Keep them for re-enabling
+Windows ([supported platforms](./supported-platforms.md#windows)).
 
 Required secrets used by the workflow:
 

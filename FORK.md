@@ -69,9 +69,9 @@ No compatibility shims for the previous upstream env prefix, home directory, or 
 
 ## Workflows
 
-Active: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, and `.github/workflows/deploy-relay.yml` (`ubuntu-24.04`, `macos-15`, `windows-2025`; `@kata-sh/code-*` filters).
+Active: `.github/workflows/ci.yml`, `.github/workflows/release.yml`, and `.github/workflows/deploy-relay.yml` (`ubuntu-24.04`, `macos-15`; `@kata-sh/code-*` filters).
 
-Parked under `.github/disabled/` until a later phase: mobile EAS, AUR, PR size, issue labels, web preview.
+Parked under `.github/disabled/` until a later phase: mobile EAS, AUR, PR size, issue labels, web preview, and the Windows release jobs ([supported platforms](docs/operations/supported-platforms.md)).
 
 ## Upstream preservation
 
