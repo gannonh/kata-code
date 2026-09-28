@@ -512,7 +512,7 @@ describe("upstream preservation CLI", () => {
     expect(validateInventory(inventory, repositoryRoot).entries).toHaveLength(31);
     expect(() =>
       validateInventory({ ...inventory, entries: withoutEntry }, repositoryRoot),
-    ).toThrow("Inventory must contain exactly 31 entries; found 30.");
+    ).toThrow("Inventory must contain exactly 29 entries; found 28.");
   });
 
   it("rejects skip metadata added to the inventory", () => {
