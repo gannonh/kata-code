@@ -1,13 +1,13 @@
 import { Box3, Mesh, PerspectiveCamera, Texture, Vector3 } from "three";
 import { describe, expect, it } from "vite-plus/test";
-import { createAndroidFoldScene } from "./androidFoldScene.ts";
+import { createFoldScene } from "./foldScene.ts";
 import { phoneDisplayLayout } from "./phoneScene.ts";
 import { sceneDigest } from "./sceneDigest.test-util.ts";
 
 describe("Android fold scene", () => {
   it("moves one physical half around the hinge while preserving both screen halves", () => {
     const texture = new Texture();
-    const scene = createAndroidFoldScene(
+    const scene = createFoldScene(
       texture,
       phoneDisplayLayout({ width: 2200, height: 1840, orientation: "landscape_left" }, 2200, 1840),
       180,
@@ -39,7 +39,7 @@ describe("Android fold scene", () => {
 
   it("maps touches on each open half and the closed cover to the live frame", () => {
     const texture = new Texture();
-    const scene = createAndroidFoldScene(texture, phoneDisplayLayout(null, 2200, 1840), 180);
+    const scene = createFoldScene(texture, phoneDisplayLayout(null, 2200, 1840), 180);
     const camera = new PerspectiveCamera(32, 1, 0.1, 30);
     camera.position.z = 6;
     camera.updateMatrixWorld(true);
@@ -62,7 +62,7 @@ describe("Android fold scene", () => {
       [2076, 2152],
       [2208, 1840],
     ] as const) {
-      const scene = createAndroidFoldScene(
+      const scene = createFoldScene(
         texture,
         phoneDisplayLayout(null, width, height),
         180,
@@ -88,7 +88,7 @@ describe("Android fold scene", () => {
       [2208, 1840],
     ] as const) {
       for (const orientation of ["portrait", "portrait_upside_down"] as const) {
-        const scene = createAndroidFoldScene(
+        const scene = createFoldScene(
           texture,
           phoneDisplayLayout({ width, height, orientation }, width, height),
           180,

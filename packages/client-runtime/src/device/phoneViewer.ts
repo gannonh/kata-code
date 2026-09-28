@@ -20,10 +20,10 @@ import {
 import { createImportedPhoneScene, loadDeviceModel } from "./modelScene.ts";
 import { createPhoneScene, phoneDisplayLayout } from "./phoneScene.ts";
 import {
-  createAndroidFoldScene,
+  createFoldScene,
   DEFAULT_FOLD_INNER_ASPECT,
   isFoldInnerAspect,
-} from "./androidFoldScene.ts";
+} from "./foldScene.ts";
 import { createRenderScheduler } from "./renderScheduler.ts";
 import { createDeviceMotion } from "./deviceMotion.ts";
 import { createDeviceFraming } from "./deviceFraming.ts";
@@ -110,7 +110,7 @@ export function createPhoneViewer(options: {
   const rawAspect = () => options.source.width / options.source.height;
   let foldAspect = isFoldInnerAspect(rawAspect()) ? rawAspect() : DEFAULT_FOLD_INNER_ASPECT;
   const createFoldScene = (angle: number, displayLayout = layout) =>
-    createAndroidFoldScene(texture, displayLayout, angle, foldAspect);
+    createFoldScene(texture, displayLayout, angle, foldAspect);
   /** The hinge angle currently on screen, including an unfinished turn. */
   const visibleFoldAngle = (fallback: number) => {
     if (!foldTurn) return fallback;
@@ -118,7 +118,7 @@ export function createPhoneViewer(options: {
     const eased = progress * progress * (3 - 2 * progress);
     return foldTurn.from + (foldTurn.to - foldTurn.from) * eased;
   };
-  let phone: ReturnType<typeof createPhoneScene> | ReturnType<typeof createAndroidFoldScene> =
+  let phone: ReturnType<typeof createPhoneScene> | ReturnType<typeof createFoldScene> =
     foldAngle !== null && profile.id.startsWith("android")
       ? createFoldScene(foldAngle)
       : createPhoneScene(texture, layout, profile);
