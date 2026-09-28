@@ -341,7 +341,7 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
           const profile = command.options.env?.GEMINI_HOME;
           if (!profile) return yield* Effect.die("Expected a disposable validation profile.");
           profiles.add(profile);
-          const helper = command.args[0] === "-e";
+          const helper = command.args.includes("-e");
           // The runtime unpacks straight into the disposable profile.
           if (!helper) expect(command.options.env?.TMPDIR).toBe(profile);
           const output = yield* Queue.unbounded<Uint8Array>();
