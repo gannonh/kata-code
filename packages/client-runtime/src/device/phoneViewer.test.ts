@@ -436,6 +436,28 @@ it("folds an iPhone Duo body to the hub's hinge pose and rests it facing the str
   viewer.dispose();
 });
 
+it("folds a retained viewer whose hinge angle arrives before its iPhone Duo profile", () => {
+  const { viewer, draw, state } = fixture(IOS_PHONE_SHAPE);
+  const screen = {
+    width: 1206,
+    height: 2622,
+    orientation: "portrait",
+    screenId: 1,
+    supportsHingeAngle: true,
+    hingeAngle: 0,
+    hingePose: "closed",
+  } as const;
+  // DevicePhoneViewport applies the fold angle effect before the screen and profile effect.
+  viewer.setFoldAngle(0);
+  viewer.setScreen(screen, IPHONE_DUO_SHAPE);
+  draw(100);
+  const phone = state.frames.at(-1)!.phone!;
+  expect(phone.getObjectByName("hinge-spine")).toBeDefined();
+  expect(phone.getObjectByName("cover-screen")!.visible).toBe(true);
+  expect(state.frames.at(-1)!.displayAngle).toBe(0);
+  viewer.dispose();
+});
+
 it("keeps a single-screen iPhone flat when it is handed a hinge angle", () => {
   const { viewer, draw, state } = fixture(IOS_PHONE_SHAPE);
   const before = state.frames.at(-1)!.phone;

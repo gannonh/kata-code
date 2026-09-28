@@ -126,8 +126,8 @@ export function createPhoneViewer(options: {
     return isFoldInnerAspect(width / height) ? width / height : null;
   };
   let foldAspect = innerFrameAspect() ?? DEFAULT_FOLD_INNER_ASPECT;
-  const buildFoldScene = (angle: number, displayLayout = layout) =>
-    createFoldScene(texture, displayLayout, angle, foldAspect, foldBody(profile) ?? "android");
+  const buildFoldScene = (angle: number, displayLayout = layout, shape = profile) =>
+    createFoldScene(texture, displayLayout, angle, foldAspect, foldBody(shape) ?? "android");
   /** The hinge angle currently on screen, including an unfinished turn. */
   const visibleFoldAngle = (fallback: number) => {
     if (!foldTurn) return fallback;
@@ -286,6 +286,19 @@ export function createPhoneViewer(options: {
         phone.dispose();
         phone = buildFoldScene(angle, next);
         scene.add(phone.root);
+      } else if (
+        !imported &&
+        !("setAngle" in phone) &&
+        foldAngle !== null &&
+        foldBody(nextProfile)
+      ) {
+        // A hinge angle that arrived before its foldable profile folds the new body.
+        scene.remove(phone.root);
+        phone.dispose();
+        phone = buildFoldScene(foldAngle, next, nextProfile);
+        scene.add(phone.root);
+        orientationTurn = null;
+        orientationAngle = 0;
       } else if (
         !imported &&
         !("setAngle" in phone) &&
