@@ -58,13 +58,15 @@ Source builds sign in against the Clerk development instance `upward-terrier-81`
 (`upward-terrier-81.clerk.accounts.dev`). `KATACODE_CLERK_PUBLISHABLE_KEY` is a `pk_test_` key for
 that instance. `KATACODE_RELAY_URL` points at the production relay, `https://relay.kata.sh`.
 
-This pairing is intended. The production relay trusts the same development instance: the GitHub
-`production` environment variables that `.github/workflows/deploy-relay.yml` passes to the relay
-set `CLERK_PUBLISHABLE_KEY` to the same `upward-terrier-81` key and `CLERK_CLI_OAUTH_CLIENT_ID` to
-the same CLI OAuth client as the 1Password Environment. Tokens from a source build are therefore
-valid at `https://relay.kata.sh`. It stays this way until KAT-3511 moves Connect to a production
-Clerk instance. When that lands, update the publishable key and CLI client ID in both places
-together.
+This pairing is intended. The production relay trusts the same development instance. The relay
+authenticates with `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` from the GitHub `production`
+environment (see `.github/workflows/deploy-relay.yml`), and that publishable key is the same
+`upward-terrier-81` key as the 1Password Environment. The `production` variable
+`CLERK_CLI_OAUTH_CLIENT_ID` also matches the source-build CLI client. Tokens from a source build are
+therefore valid at `https://relay.kata.sh`. It stays this way until KAT-3511 moves Connect to a
+production Clerk instance. When that lands, change the publishable key, the `CLERK_SECRET_KEY`
+secret, and the CLI client ID together, in GitHub and in the 1Password Environment. A publishable
+key and secret key from different instances make the relay reject every token.
 
 ## Link a source worktree
 
