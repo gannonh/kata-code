@@ -39,9 +39,24 @@ In Clerk's OAuth applications settings:
 1. Create a public OAuth application for the Kata Code CLI, using authorization-code exchange with PKCE.
 2. Allow the redirect URI `http://127.0.0.1:34338/callback`.
 3. Enable the `openid`, `profile`, `email`, and `offline_access` scopes.
-4. Enable **Device authorization grant** on the application. Headless and SSH authorization use
-   it, and Clerk only advertises the device endpoint once it is on. The feature is in beta and
-   Clerk enables it per account on request.
+4. Enable **Device authorization grant** on the application. Headless and SSH authorization
+   (`katacode connect link --headless`) use it. The instance discovery document can list the
+   `device_code` grant while the application still has it off. In that state
+   `POST /oauth/device_authorization` returns HTTP 400 `invalid_grant` ("The requested OAuth 2.0
+   Client does not have the 'urn:ietf:params:oauth:grant-type:device_code' grant"). If the
+   dashboard does not show the toggle, set it through the Backend API with the instance's secret
+   key:
+
+   ```sh
+   curl -X PATCH "https://api.clerk.com/v1/oauth_applications/<oauth application id>" \
+     -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"device_authorization_grant_enabled":true}'
+   ```
+
+   `GET` the same URL and confirm `device_authorization_grant_enabled` is `true`. The application
+   id starts with `oa_`, and it is different from the public client ID.
+
 5. Set `KATACODE_CLERK_CLI_OAUTH_CLIENT_ID` to the generated public client ID in local and release
    build environments.
 

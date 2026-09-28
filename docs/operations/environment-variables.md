@@ -52,6 +52,22 @@ and confirm the service account can read the Environment.
 
 Process environment variables override 1Password for the same key.
 
+## Clerk instance and relay
+
+Source builds sign in against the Clerk development instance `upward-terrier-81`
+(`upward-terrier-81.clerk.accounts.dev`). `KATACODE_CLERK_PUBLISHABLE_KEY` is a `pk_test_` key for
+that instance. `KATACODE_RELAY_URL` points at the production relay, `https://relay.kata.sh`.
+
+This pairing is intended. The production relay trusts the same development instance. The relay
+authenticates with `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` from the GitHub `production`
+environment (see `.github/workflows/deploy-relay.yml`), and that publishable key is the same
+`upward-terrier-81` key as the 1Password Environment. The `production` variable
+`CLERK_CLI_OAUTH_CLIENT_ID` also matches the source-build CLI client. Tokens from a source build are
+therefore valid at `https://relay.kata.sh`. It stays this way until KAT-3511 moves Connect to a
+production Clerk instance. When that lands, change the publishable key, the `CLERK_SECRET_KEY`
+secret, and the CLI client ID together, in GitHub and in the 1Password Environment. A publishable
+key and secret key from different instances make the relay reject every token.
+
 ## Link a source worktree
 
 A linked worktree uses its own `.katacode` data directory. Run the source Connect launcher from
@@ -61,8 +77,8 @@ that worktree so authorization and relay state use the same directory as `vp run
 vp run connect link --headless
 ```
 
-Open the printed URL in a browser, complete Kata Code authorization, and enter the one-time code in
-the terminal. Restart the worktree's development server after the command succeeds. Server startup
+Open the printed URL in a browser signed in to Kata Code, check that the page shows the one-time code
+the terminal printed, and approve. Restart the worktree's development server after the command succeeds. Server startup
 creates the local link proof, provisions the managed endpoint, and stores the relay configuration.
 
 Inspect or remove the worktree link with the same launcher:
