@@ -398,7 +398,8 @@ export function createPhoneViewer(options: {
       // A loaded model owns the scene; install() reads foldAngle if it is removed.
       if (imported) return;
       const folding = next !== null && foldBody(profile) !== null;
-      if (!folding && !("setAngle" in phone)) return;
+      // A single-screen body ignores a hinge angle.
+      if (next !== null && !folding) return;
       if (!folding || !("setAngle" in phone)) {
         scene.remove(phone.root);
         phone.dispose();
