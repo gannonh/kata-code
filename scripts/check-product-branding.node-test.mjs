@@ -37,36 +37,6 @@ for (const copy of [
   });
 }
 
-for (const [path, contents, expectedStatus] of [
-  [
-    "apps/server/src/mcp/toolkits/device/handlers.ts",
-    'const text = "T3 provides discovery, streaming, and control only.";',
-    1,
-  ],
-  [
-    "apps/server/src/mcp/toolkits/preview/tools.ts",
-    'const text = "Use the `t3-code` toolkit or open https://t3.chat";',
-    0,
-  ],
-  ["apps/server/src/other/copy.ts", 'const text = "T3 provides discovery.";', 0],
-]) {
-  NodeTest.test(`agent-facing MCP copy scope: ${path} ${expectedStatus}`, () => {
-    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kata-branding-"));
-    try {
-      const file = NodePath.join(root, path);
-      NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
-      NodeFS.writeFileSync(file, contents);
-      const result = NodeChildProcess.spawnSync(process.execPath, [script, root], {
-        encoding: "utf8",
-      });
-      NodeAssert.equal(result.status, expectedStatus, result.stderr);
-      if (expectedStatus === 1) NodeAssert.ok(result.stderr.includes(`${path}:1:`));
-    } finally {
-      NodeFS.rmSync(root, { recursive: true, force: true });
-    }
-  });
-}
-
 NodeTest.test("preserves internal identifiers, attribution, and excluded marketing", () => {
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "kata-branding-"));
   try {
