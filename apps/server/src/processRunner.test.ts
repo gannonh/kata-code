@@ -80,18 +80,6 @@ const runWith =
       ),
     );
 
-const runBytesWith =
-  (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) =>
-  (input: ProcessRunner.ProcessRunInput) =>
-    Effect.service(ProcessRunner.ProcessRunner).pipe(
-      Effect.flatMap((runner) => runner.runBytes(input)),
-      Effect.provide(
-        ProcessRunner.layer.pipe(
-          Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)),
-        ),
-      ),
-    );
-
 describe("runProcess", () => {
   it.effect("collects stdout through an injected ChildProcessSpawner", () =>
     Effect.gen(function* () {
@@ -275,100 +263,6 @@ describe("runProcess", () => {
       expect(result.stdout).toBe("exactly");
     }),
   );
-
-  it.effect("wipes collected byte chunks when output exceeds the limit", () => {
-    const first = new TextEncoder().encode("first");
-    const overflow = new TextEncoder().encode("overflow");
-    const spawner = makeSpawner(() =>
-      Effect.succeed(makeHandle({ stdout: Stream.make(first, overflow) })),
-    );
-
-    return Effect.gen(function* () {
-      const error = yield* runBytesWith(spawner)({
-        command: "fake",
-        args: ["overflow"],
-        maxOutputBytes: first.byteLength,
-      }).pipe(Effect.flip);
-
-      expect(error._tag).toBe("ProcessOutputLimitError");
-      expect(Array.from(first)).toEqual(Array.from({ length: first.length }, () => 0));
-      expect(Array.from(overflow)).toEqual(Array.from({ length: overflow.length }, () => 0));
-    });
-  });
-
-  it.effect("wipes partial byte output when interrupted by timeout", () => {
-    const partial = new TextEncoder().encode("partial-token");
-    const spawner = makeSpawner(() =>
-      Effect.succeed(
-        makeHandle({
-          stdout: Stream.make(partial).pipe(Stream.concat(Stream.never)),
-          exitCode: Effect.never,
-        }),
-      ),
-    );
-
-    return Effect.gen(function* () {
-      const fiber = yield* runBytesWith(spawner)({
-        command: "fake",
-        args: ["timeout"],
-        timeout: "50 millis",
-      }).pipe(Effect.flip, Effect.forkScoped);
-      yield* Effect.yieldNow;
-      yield* TestClock.adjust("50 millis");
-      const error = yield* Fiber.join(fiber);
-
-      expect(error._tag).toBe("ProcessTimeoutError");
-      expect(Array.from(partial)).toEqual(Array.from({ length: partial.length }, () => 0));
-    });
-  });
-
-  it.effect("wipes completed byte output when exit-code reading fails", () => {
-    const output = new TextEncoder().encode("completed-token");
-    const cause = PlatformError.systemError({
-      _tag: "Unknown",
-      module: "ChildProcessSpawner",
-      method: "exitCode",
-    });
-    const spawner = makeSpawner(() =>
-      Effect.succeed(
-        makeHandle({
-          stdout: Stream.make(output),
-          exitCode: Effect.fail(cause),
-        }),
-      ),
-    );
-
-    return Effect.gen(function* () {
-      const error = yield* runBytesWith(spawner)({
-        command: "fake",
-        args: ["exit-code-error"],
-      }).pipe(Effect.flip);
-
-      expect(error._tag).toBe("ProcessReadError");
-      expect(Array.from(output)).toEqual(Array.from({ length: output.length }, () => 0));
-    });
-  });
-
-  it.effect("wipes completed byte output while waiting for an exit code times out", () => {
-    const output = new TextEncoder().encode("completed-token");
-    const spawner = makeSpawner(() =>
-      Effect.succeed(makeHandle({ stdout: Stream.make(output), exitCode: Effect.never })),
-    );
-
-    return Effect.gen(function* () {
-      const fiber = yield* runBytesWith(spawner)({
-        command: "fake",
-        args: ["exit-code-timeout"],
-        timeout: "50 millis",
-      }).pipe(Effect.flip, Effect.forkScoped);
-      yield* Effect.yieldNow;
-      yield* TestClock.adjust("50 millis");
-      const error = yield* Fiber.join(fiber);
-
-      expect(error._tag).toBe("ProcessTimeoutError");
-      expect(Array.from(output)).toEqual(Array.from({ length: output.length }, () => 0));
-    });
-  });
 
   it.effect("fails fast on output limit before timeout for long-running output", () =>
     Effect.gen(function* () {

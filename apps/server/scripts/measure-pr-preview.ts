@@ -43,7 +43,6 @@ const measuredProcess = Layer.effect(
             }),
           ),
         ),
-      runBytes: () => Effect.die("unused binary process runner"),
     });
   }),
 ).pipe(Layer.provide(VcsProcess.layer), Layer.provide(NodeServices.layer));

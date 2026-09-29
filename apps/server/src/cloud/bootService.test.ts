@@ -163,7 +163,6 @@ const makeHarness = Effect.fn("test.make_boot_service_harness")(function* (
     active: true,
   };
   const runner = ProcessRunner.ProcessRunner.of({
-    runBytes: () => Effect.die("unused binary process runner"),
     run: Effect.fn("test.run_boot_service_command")(function* (
       input: ProcessRunner.ProcessRunInput,
     ) {

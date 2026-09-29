@@ -236,7 +236,6 @@ it.effect(
       const github = yield* GitHubCli.make.pipe(
         Effect.provide(Layer.merge(GitHubGraphQlBudget.layer, SourceControlRateLimit.layer)),
         Effect.provideService(VcsProcess.VcsProcess, {
-          runBytes: () => Effect.die("unexpected binary process execution"),
           run: (input) =>
             Effect.sync(() => {
               commands.push(input);

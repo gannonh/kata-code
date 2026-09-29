@@ -1495,7 +1495,6 @@ it.effect(
         Effect.provideService(
           VcsProcess.VcsProcess,
           VcsProcess.VcsProcess.of({
-            runBytes: () => Effect.die("unexpected binary process execution"),
             run: (input) => {
               if (input.args[0] !== "fetch") return git.run(input);
               const url = input.args[2];

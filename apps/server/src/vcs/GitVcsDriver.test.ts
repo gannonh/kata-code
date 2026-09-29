@@ -277,7 +277,6 @@ it.effect("checkpoint capture refuses a truncated nested repository listing", ()
                 input.args.includes("--others") ? { ...result, stdoutTruncated: true } : result,
               ),
             ),
-        runBytes: () => Effect.die("unused binary process runner"),
       }),
     );
 
@@ -317,7 +316,6 @@ it.effect("checkpoint recovery refuses excessive candidates before probing", () 
             }),
           );
         },
-        runBytes: () => Effect.die("unused binary process runner"),
       }),
     );
     const result = yield* Effect.result(
@@ -383,7 +381,6 @@ it.effect.each([
               );
             });
           },
-          runBytes: () => Effect.die("unused binary process runner"),
         }),
       );
       const captureDriver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
@@ -396,7 +393,6 @@ it.effect.each([
                 return Effect.void;
               }),
             ),
-          runBytes: () => Effect.die("unused binary process runner"),
         }),
       );
       const captureStore = yield* makeCaptureStore(captureDriver, cwd);
@@ -504,7 +500,6 @@ for (const blockedPhase of ["discovery", "probe", "retry"] as const) {
               }),
             );
           },
-          runBytes: () => Effect.die("unused binary process runner"),
         }),
       );
       const captureStore = yield* makeCaptureStore(captureDriver, cwd);
@@ -549,7 +544,6 @@ it.effect("checkpoint recovery preserves interruption and removes the private in
             ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
             : liveProcess.run(input);
         },
-        runBytes: () => Effect.die("unused binary process runner"),
       }),
     );
     const fiber = yield* captureDriver.checkpoints
@@ -721,7 +715,6 @@ it.effect("checkpoint capture keeps the legacy path when Git lacks add --sparse"
     const originalIndex = yield* fs.readFile(path.join(cwd, ".git/index"));
     const captureDriver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
       Effect.provideService(VcsProcess.VcsProcess, {
-        runBytes: (input) => liveProcess.runBytes(input),
         run: (input) => {
           if (input.args.includes("-h"))
             return Effect.succeed({
@@ -782,7 +775,6 @@ for (const indexMode of ["normal", "flags", "sparse"] as const) {
         const originalIndex = yield* fs.readFile(path.join(cwd, ".git/index"));
         const captureDriver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
           Effect.provideService(VcsProcess.VcsProcess, {
-            runBytes: (input) => liveProcess.runBytes(input),
             run: (input) =>
               liveProcess.run(
                 input.args.includes("ls-files")
@@ -865,7 +857,6 @@ it.effect("checkpoint capture preserves racy edits made after resetting the inde
     const originalIndexMtime = (yield* fileSystem.stat(indexPath)).mtime;
     const captureDriver = yield* GitVcsDriver.makeVcsDriverShape().pipe(
       Effect.provideService(VcsProcess.VcsProcess, {
-        runBytes: (input) => liveProcess.runBytes(input),
         run: Effect.fn(function* (input: VcsProcess.VcsProcessInput) {
           const result = yield* liveProcess.run(input);
           if (input.args.includes("read-tree") && input.args.includes("--reset")) {

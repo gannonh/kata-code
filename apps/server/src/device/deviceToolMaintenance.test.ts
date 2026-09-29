@@ -113,7 +113,6 @@ it.effect("maintenance failures retain safe context and the original process res
       const error = yield* run("/tools", process.execPath, "hub").pipe(
         Effect.provideService(ProcessRunner.ProcessRunner, {
           run: () => Effect.succeed(output),
-          runBytes: () => Effect.die("unused binary process runner"),
         }),
         Effect.flip,
       );

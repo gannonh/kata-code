@@ -96,7 +96,7 @@
     {
       "id": "retained-process-credential-behavior",
       "title": "Retained process and VCS behavior",
-      "retainedOutcome": "Kata process execution and VCS binary handling remain stable while provider environment boundaries are checked separately.",
+      "retainedOutcome": "Kata process execution and VCS command handling remain stable while provider environment boundaries are checked separately.",
       "ownerPaths": ["apps/server/src/processRunner.ts", "apps/server/src/vcs/VcsProcess.ts"],
       "specRefs": ["docs/upstream/kat-3297-intake.md", "docs/upstream/kat-3297-decisions.tsv"],
       "evidence": {

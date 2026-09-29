@@ -309,7 +309,6 @@ const processGroupRunner = (
   groups: ReadonlyMap<number, { readonly pgid: number; readonly tpgid: number }>,
   calls: Array<string> = [],
 ): ProcessRunner.ProcessRunner["Service"] => ({
-  runBytes: () => Effect.die("unused binary process runner"),
   run: (input) =>
     Effect.sync(() => {
       calls.push(input.args.join(" "));
@@ -1163,7 +1162,6 @@ it.layer(
         "\n",
       );
       const processRunner: ProcessRunner.ProcessRunner["Service"] = {
-        runBytes: () => Effect.die("unused binary process runner"),
         run: (input) =>
           Effect.sync(() => {
             runCalls.push({ command: input.command, args: input.args });
@@ -1225,7 +1223,6 @@ it.layer(
       let failSnapshots = false;
       let failedCalls = 0;
       const processRunner: ProcessRunner.ProcessRunner["Service"] = {
-        runBytes: () => Effect.die("unused binary process runner"),
         run: () =>
           Effect.sync(() => {
             if (failSnapshots) failedCalls += 1;
@@ -1433,7 +1430,6 @@ it.layer(
     Effect.gen(function* () {
       const fallbackCalls: Array<number> = [];
       const processRunner: ProcessRunner.ProcessRunner["Service"] = {
-        runBytes: () => Effect.die("Unexpected binary process execution"),
         run: () =>
           Clock.currentTimeMillis.pipe(
             Effect.map((now) => {

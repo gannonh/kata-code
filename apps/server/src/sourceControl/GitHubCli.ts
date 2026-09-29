@@ -344,11 +344,6 @@ export class GitHubCli extends Context.Service<
       readonly cwd: string;
     }) => Effect.Effect<void, GitHubCliError>;
 
-    readonly withAuthTokenBytes: <A, E, R>(
-      input: { readonly cwd: string },
-      use: (token: Uint8Array) => Effect.Effect<A, E, R>,
-    ) => Effect.Effect<A, E | GitHubCliError, R>;
-
     readonly createRepository: (input: {
       readonly cwd: string;
       readonly repository: string;
@@ -397,49 +392,6 @@ const RawGitHubBranchPageSchema = Schema.Array(RawGitHubBranchSchema);
 function includedJsonBody(stdout: string): string {
   const firstArray = stdout.indexOf("[");
   return firstArray >= 0 ? stdout.slice(firstArray).trim() : stdout.trim();
-}
-
-function trimAsciiWhitespace(bytes: Uint8Array): Uint8Array {
-  let start = 0;
-  let end = bytes.byteLength;
-  while (start < end && bytes[start]! <= 0x20) start += 1;
-  while (end > start && bytes[end - 1]! <= 0x20) end -= 1;
-  return bytes.subarray(start, end);
-}
-
-function useAuthTokenBytes<A, E, R>(
-  process: Pick<VcsProcess.VcsProcess["Service"], "runBytes">,
-  input: { readonly cwd: string },
-  use: (token: Uint8Array) => Effect.Effect<A, E, R>,
-): Effect.Effect<A, E | GitHubCliError, R> {
-  return Effect.acquireUseRelease(
-    process
-      .runBytes({
-        operation: "GitHubCli.withAuthTokenBytes",
-        command: "gh",
-        args: ["auth", "token", "--hostname", "github.com"],
-        cwd: input.cwd,
-        timeoutMs: DEFAULT_TIMEOUT_MS,
-        maxOutputBytes: 64 * 1024,
-      })
-      .pipe(Effect.mapError((error) => fromVcsError({ command: "gh", cwd: input.cwd }, error))),
-    (result): Effect.Effect<A, E | GitHubCliAuthenticationError, R> => {
-      const token = trimAsciiWhitespace(result.stdout);
-      if (token.byteLength > 0) return use(token);
-      return Effect.fail(
-        new GitHubCliAuthenticationError({
-          command: "gh",
-          cwd: input.cwd,
-          cause: "GitHub CLI output omitted.",
-        }),
-      );
-    },
-    (result) =>
-      Effect.sync(() => {
-        result.stdout.fill(0);
-        result.stderr.fill(0);
-      }),
-  );
 }
 
 function includesNextLink(stdout: string): boolean {
@@ -846,7 +798,6 @@ export const make = Effect.gen(function* () {
         ),
         Effect.asVoid,
       ),
-    withAuthTokenBytes: (input, use) => useAuthTokenBytes(process, input, use),
     createRepository: (input) =>
       execute({
         cwd: input.cwd,

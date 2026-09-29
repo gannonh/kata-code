@@ -46,7 +46,6 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     let refinements = 0;
     let refinementFails = false;
     const processRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
-      runBytes: () => Effect.die("Unexpected binary process execution"),
       run: (input) =>
         Effect.sync(() => {
           calls.push(input.args);
@@ -133,7 +132,6 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     const calls: Array<ReadonlyArray<string>> = [];
     let rootAttempts = 0;
     const processRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
-      runBytes: () => Effect.die("Unexpected binary process execution"),
       run: (input) =>
         Effect.sync(() => {
           calls.push(input.args);
