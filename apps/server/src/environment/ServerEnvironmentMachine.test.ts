@@ -19,7 +19,6 @@ const runMock = vi.fn<ProcessRunner.ProcessRunner["Service"]["run"]>();
 const ProcessRunnerTest = Layer.succeed(
   ProcessRunner.ProcessRunner,
   ProcessRunner.ProcessRunner.of({
-    runBytes: () => Effect.die("Unexpected binary process execution"),
     run: (input) => runMock(input),
   }),
 );

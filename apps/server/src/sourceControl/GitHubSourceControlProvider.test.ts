@@ -35,7 +35,6 @@ it.effect("uses the enterprise quota for a current-repository default branch rea
     const provider = yield* GitHubSourceControlProvider.make.pipe(
       Effect.provide(GitHubCli.layer),
       Effect.provideService(VcsProcess.VcsProcess, {
-        runBytes: () => Effect.die("unused binary process runner"),
         run: (input) =>
           Effect.sync(() => {
             if (input.args[1] !== "rate_limit") return processResult("main");

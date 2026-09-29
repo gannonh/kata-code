@@ -32,21 +32,18 @@ const quotaOutput = (remaining = 5000, resetAt = "2099-01-01T00:00:00Z") =>
   );
 
 const mockRun = vi.fn<VcsProcess.VcsProcess["Service"]["run"]>();
-const mockRunBytes = vi.fn<VcsProcess.VcsProcess["Service"]["runBytes"]>();
 
 const layer = GitHubCli.layer.pipe(
   Layer.provide(
     Layer.mock(VcsProcess.VcsProcess)({
       run: (input) =>
         input.args[1] === "rate_limit" ? Effect.succeed(quotaOutput()) : mockRun(input),
-      runBytes: mockRunBytes,
     }),
   ),
 );
 
 afterEach(() => {
   mockRun.mockReset();
-  mockRunBytes.mockReset();
 });
 
 it.effect("shares quota checks, preserves the reserve, and resumes after reset", () =>
@@ -59,7 +56,6 @@ it.effect("shares quota checks, preserves the reserve, and resumes after reset",
     );
     const gh = yield* GitHubCli.make.pipe(
       Effect.provideService(VcsProcess.VcsProcess, {
-        runBytes: () => Effect.die("unused binary process runner"),
         run: (input) =>
           Effect.sync(() => {
             if (input.args[1] === "rate_limit") {
@@ -118,7 +114,6 @@ describe("GitHubCli.layer", () => {
       let reads = 0;
       const gh = yield* GitHubCli.make.pipe(
         Effect.provideService(VcsProcess.VcsProcess, {
-          runBytes: () => Effect.die("unused binary process runner"),
           run: (input) =>
             Effect.sync(() => {
               if (input.args[1] === "rate_limit")
@@ -696,7 +691,7 @@ describe("GitHubCli.layer", () => {
     }).pipe(Effect.provide(layer)),
   );
 
-  it.effect("lists branches with pagination and acquires token bytes without a string API", () =>
+  it.effect("lists branches with pagination", () =>
     Effect.gen(function* () {
       mockRun.mockReturnValueOnce(
         Effect.succeed(
@@ -706,11 +701,6 @@ describe("GitHubCli.layer", () => {
           ),
         ),
       );
-      const stdout = new TextEncoder().encode(" sentinel-token \n");
-      const stderr = new TextEncoder().encode("ignored warning");
-      mockRunBytes.mockReturnValueOnce(
-        Effect.succeed({ exitCode: ChildProcessSpawner.ExitCode(0), stdout, stderr }),
-      );
 
       const gh = yield* GitHubCli.GitHubCli;
       const branches = yield* gh.listBranches({
@@ -718,48 +708,10 @@ describe("GitHubCli.layer", () => {
         repository: "octocat/private-repo",
         page: 2,
       });
-      let tokenBytes: Uint8Array | undefined;
-      const token = yield* gh.withAuthTokenBytes({ cwd: "/repo" }, (bytes) => {
-        tokenBytes = bytes;
-        return Effect.succeed(new TextDecoder().decode(bytes));
-      });
 
       expect(branches).toEqual({ branches: ["main", "release"], page: 2, hasMore: true });
-      expect(token).toBe("sentinel-token");
-      expect(Array.from(tokenBytes ?? [])).toEqual(
-        Array.from({ length: "sentinel-token".length }, () => 0),
-      );
-      expect(Array.from(stdout)).toEqual(Array.from({ length: stdout.length }, () => 0));
-      expect(Array.from(stderr)).toEqual(Array.from({ length: stderr.length }, () => 0));
-      expect(mockRunBytes).toHaveBeenCalledWith({
-        operation: "GitHubCli.withAuthTokenBytes",
-        command: "gh",
-        args: ["auth", "token", "--hostname", "github.com"],
-        cwd: "/repo",
-        timeoutMs: 30_000,
-        maxOutputBytes: 64 * 1024,
-      });
     }).pipe(Effect.provide(layer)),
   );
-
-  it.effect("wipes process buffers when GitHub returns an empty token", () => {
-    const stdout = new TextEncoder().encode(" \n");
-    const stderr = new TextEncoder().encode("ignored warning");
-    mockRunBytes.mockReturnValueOnce(
-      Effect.succeed({ exitCode: ChildProcessSpawner.ExitCode(0), stdout, stderr }),
-    );
-
-    return Effect.gen(function* () {
-      const gh = yield* GitHubCli.GitHubCli;
-      const error = yield* gh
-        .withAuthTokenBytes({ cwd: "/repo" }, () => Effect.void)
-        .pipe(Effect.flip);
-
-      expect(error._tag).toBe("GitHubCliAuthenticationError");
-      expect(Array.from(stdout)).toEqual(Array.from({ length: stdout.length }, () => 0));
-      expect(Array.from(stderr)).toEqual(Array.from({ length: stderr.length }, () => 0));
-    }).pipe(Effect.provide(layer));
-  });
 
   it.effect("checks GitHub authentication without exposing command output", () =>
     Effect.gen(function* () {
