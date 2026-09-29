@@ -32,7 +32,6 @@ it.effect("failed installation cleans staging and exposes only a safe failure me
     const error = yield* ensureDeviceHub(baseDir).pipe(
       Effect.provideService(ProcessRunner.ProcessRunner, {
         run: () => Effect.succeed(result),
-        runBytes: () => Effect.die("unused binary process runner"),
       }),
       Effect.flip,
     );

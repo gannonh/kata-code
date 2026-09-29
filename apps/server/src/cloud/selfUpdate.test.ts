@@ -56,7 +56,6 @@ const makeHarness = Effect.fn("test.make_self_update_harness")(function* (
   const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "katacode-self-update-test-" });
   const order: string[] = [];
   const runner = ProcessRunner.ProcessRunner.of({
-    runBytes: () => Effect.die("unused binary process runner"),
     run: (input) =>
       Effect.gen(function* () {
         if (input.command === "tar") {

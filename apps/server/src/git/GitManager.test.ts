@@ -526,8 +526,6 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
     Effect.die(`Unexpected branch discovery for ${input.repository}`);
   const assertAuthenticated: GitHubCli.GitHubCli["Service"]["assertAuthenticated"] = (input) =>
     Effect.die(`Unexpected GitHub authentication check from ${input.cwd}`);
-  const withAuthTokenBytes: GitHubCli.GitHubCli["Service"]["withAuthTokenBytes"] = () =>
-    Effect.die("Unexpected GitHub token request");
 
   return {
     service: {
@@ -535,7 +533,6 @@ function createGitHubCliWithFakeGh(scenario: FakeGhScenario = {}): {
       listRepositories,
       listBranches,
       assertAuthenticated,
-      withAuthTokenBytes,
       listOpenPullRequests: (input) =>
         execute({
           cwd: input.cwd,

@@ -1096,7 +1096,7 @@ describe("upstream preservation CLI", () => {
         executionTreeCheck: () => undefined,
       });
 
-    it("retires only the parked Android checks and paths", () => {
+    it("retires only the parked Android checks and paths, and unfreezes the URL handler test", () => {
       expect([...RETIREMENTS.checks.keys()]).toEqual([
         "mobile-android-asset-live-evidence",
         "mobile-android-fab-inset",
@@ -1105,7 +1105,38 @@ describe("upstream preservation CLI", () => {
         "apps/mobile/src/lib/materialYouTheme.ts",
         "apps/mobile/src/lib/materialYouTheme.test.ts",
       ]);
-      expect(RETIREMENTS.unfrozenTrustedPaths.size).toBe(0);
+      expect([...RETIREMENTS.unfrozenTrustedPaths.keys()]).toEqual([
+        "apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts",
+      ]);
+      const urlHandler = PRESERVATION_CHECKS.find(
+        (check) => check.id === "desktop-url-handler-backend-routes",
+      );
+      expect(urlHandler?.ownerPaths).toEqual([
+        "apps/desktop/src/app/DesktopLinuxUrlHandler.ts",
+        "apps/desktop/src/backend/DesktopBackendManager.ts",
+      ]);
+      expect(urlHandler?.commands[0]?.requiredPaths).toEqual([
+        "apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts",
+        "apps/desktop/src/backend/DesktopBackendManager.test.ts",
+      ]);
+      expect(urlHandler?.commands[0]?.trustedPaths).toEqual([
+        "apps/desktop/src/backend/DesktopBackendManager.test.ts",
+      ]);
+      const processCheck = PRESERVATION_CHECKS.find(
+        (check) => check.id === "retained-process-credential-behavior",
+      );
+      expect(processCheck?.ownerPaths).toEqual([
+        "apps/server/src/processRunner.ts",
+        "apps/server/src/vcs/VcsProcess.ts",
+      ]);
+      expect(processCheck?.commands[0]?.requiredPaths).toEqual([
+        "apps/server/src/processRunner.test.ts",
+        "apps/server/src/vcs/VcsProcess.test.ts",
+      ]);
+      expect(processCheck?.commands[0]?.trustedPaths).toEqual([
+        "apps/server/src/processRunner.test.ts",
+        "apps/server/src/vcs/VcsProcess.test.ts",
+      ]);
       expect(PRESERVATION_CONTRACT.length).toBe(32);
       expect(PRESERVATION_CHECKS.length).toBe(30);
       const theme = PRESERVATION_CHECKS.find(

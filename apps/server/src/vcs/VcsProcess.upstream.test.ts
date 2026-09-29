@@ -41,7 +41,6 @@ const captureProcessResult = (
       ProcessRunner.ProcessRunner,
       ProcessRunner.ProcessRunner.of({
         run: () => result,
-        runBytes: () => Effect.die("unused binary process runner"),
       }),
     ),
     Effect.flatMap((service) => service.run(baseInput)),
@@ -123,7 +122,6 @@ describe("VcsProcess.run", () => {
               Effect.sync(() => {
                 attempts += 1;
               }).pipe(Effect.andThen(Effect.fail(failure))),
-            runBytes: () => Effect.die("unused binary process runner"),
           }),
         );
         const error = yield* service
@@ -206,7 +204,6 @@ describe("VcsProcess.run", () => {
                   stderrInvalidUtf8: false,
                 };
               }),
-            runBytes: () => Effect.die("unused binary process runner"),
           }),
         );
         const fiber = yield* service

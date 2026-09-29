@@ -49,17 +49,10 @@ export interface VcsProcessOutput {
   readonly stderrInvalidUtf8?: boolean;
 }
 
-export interface VcsProcessBytesOutput {
-  readonly exitCode: ChildProcessSpawner.ExitCode;
-  readonly stdout: Uint8Array;
-  readonly stderr: Uint8Array;
-}
-
 export class VcsProcess extends Context.Service<
   VcsProcess,
   {
     readonly run: (input: VcsProcessInput) => Effect.Effect<VcsProcessOutput, VcsError>;
-    readonly runBytes: (input: VcsProcessInput) => Effect.Effect<VcsProcessBytesOutput, VcsError>;
   }
 >()("@kata-sh/code-cli/vcs/VcsProcess") {}
 
@@ -219,72 +212,6 @@ export const make = Effect.gen(function* () {
     } satisfies VcsProcessOutput;
   });
 
-  const runBytes = Effect.fn("VcsProcess.runBytes")(function* (input: VcsProcessInput) {
-    const baseError = {
-      operation: input.operation,
-      command: input.command,
-      cwd: input.cwd,
-      argumentCount: input.args.length,
-    };
-    const result = yield* processRunner
-      .runBytes({
-        command: input.command,
-        args: input.args,
-        cwd: input.cwd,
-        ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
-        ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
-        env: composeChildEnv(input),
-        envMode: "replace",
-        timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
-      })
-      .pipe(
-        Effect.mapError(
-          Match.valueTags({
-            ProcessSpawnError: (error) =>
-              VcsProcessSpawnError.fromProcessSpawnError(baseError, error),
-            ProcessOutputLimitError: (error) =>
-              new VcsProcessOutputLimitError({
-                ...baseError,
-                stream: error.stream,
-                maxBytes: error.maxBytes,
-                observedBytes: error.observedBytes,
-              }),
-            ProcessTimeoutError: (error) =>
-              VcsProcessTimeoutError.fromProcessTimeoutError(baseError, error),
-            ProcessStdinError: (error) =>
-              new VcsProcessStdinWriteError({
-                ...baseError,
-                stdinBytes: error.stdinBytes,
-                cause: error.cause,
-              }),
-            ProcessReadError: (error) =>
-              new VcsProcessOutputReadError({
-                ...baseError,
-                stream: error.stream,
-                cause: error.cause,
-              }),
-          }),
-        ),
-      );
-    if (result.code === null) {
-      result.stdout.fill(0);
-      result.stderr.fill(0);
-      return yield* new VcsProcessMissingExitCodeError(baseError);
-    }
-    if (!input.allowNonZeroExit && result.code !== 0) {
-      const stderr = new TextDecoder().decode(result.stderr);
-      result.stdout.fill(0);
-      result.stderr.fill(0);
-      return yield* VcsProcessExitError.fromProcessExit(
-        baseError,
-        { exitCode: result.code, stderr, stderrTruncated: false },
-        classifyNonZeroExit(input.command, stderr),
-      );
-    }
-    return { exitCode: result.code, stdout: result.stdout, stderr: result.stderr };
-  });
-
   const run = Effect.fn("VcsProcess.run")(function* (input: VcsProcessInput) {
     const bounded = vcsProcesses.withPermits(1)(runUnbounded(input));
     if (
@@ -310,7 +237,7 @@ export const make = Effect.gen(function* () {
     return yield* input.command === "gh" ? githubProcesses.withPermits(1)(bounded) : bounded;
   });
 
-  return VcsProcess.of({ run, runBytes });
+  return VcsProcess.of({ run });
 });
 
 export const layer = Layer.effect(VcsProcess, make).pipe(Layer.provide(ProcessRunner.layer));
