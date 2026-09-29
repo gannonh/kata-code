@@ -47,6 +47,11 @@ const excludedDirectories = new Set([
   "__fixtures__",
   "fixtures",
 ]);
+// Agent-facing MCP copy is read by models and echoed to users, so a standalone
+// upstream product name is a finding there. The match is case-sensitive so
+// lowercase identifiers such as the `t3-code` server name and `t3.chat` URLs pass.
+const agentFacingCopyDirectory = "apps/server/src/mcp/";
+const agentFacingCopyPattern = /\bT3\b/g;
 const findings = [];
 
 function scan(directory) {
@@ -62,9 +67,11 @@ function scan(directory) {
       continue;
     const path = NodePath.relative(root, file).split("\\").join("/");
     const contents = NodeFS.readFileSync(file, "utf8");
-    for (const match of contents.matchAll(
+    const patterns = [
       /\bT3\s+(?:Code|Connect|Server|account|threads?|environment|backend|runtime|preview|needs|with)\b/gi,
-    )) {
+    ];
+    if (path.startsWith(agentFacingCopyDirectory)) patterns.push(agentFacingCopyPattern);
+    for (const match of patterns.flatMap((pattern) => [...contents.matchAll(pattern)])) {
       const line = contents.slice(0, match.index).split("\n").length;
       const sourceLine = contents.split("\n")[line - 1].trim();
       if (
