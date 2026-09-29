@@ -114,8 +114,12 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
     this.setModelCalls.push(model);
   };
 
+  /** Set by tests that need a send suspended while it prepares its message. */
+  public permissionModeGate?: Promise<void>;
+
   readonly setPermissionMode = async (mode: PermissionMode): Promise<void> => {
     this.setPermissionModeCalls.push(mode);
+    await this.permissionModeGate;
   };
 
   readonly setMaxThinkingTokens = async (maxThinkingTokens: number | null): Promise<void> => {
@@ -3328,6 +3332,91 @@ describe("ClaudeAdapterLive", () => {
 
       assert.equal(harness.query.closeCalls, 1);
       assert.equal(yield* adapter.hasSession(session.threadId), false);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("interruptTurn closes the session at once when interrupt rejects", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+      harness.query.interrupt = () => Promise.reject(new Error("control channel closed"));
+
+      // No TestClock adjustment: waiting out the 3 second grace would hang here.
+      yield* adapter.interruptTurn(session.threadId);
+
+      assert.equal(harness.query.closeCalls, 1);
+      assert.equal(yield* adapter.hasSession(session.threadId), false);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("fails a send that is still in flight when Stop shuts the prompt queue", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "hello",
+        attachments: [],
+      });
+      harness.query.interrupt = async () => {
+        harness.query.emit({
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: false,
+          errors: ["Error: Request was aborted."],
+          session_id: "sdk-session",
+          uuid: "result-interrupted",
+        } as unknown as SDKMessage);
+      };
+
+      // The second send passes requireSession, then suspends while it switches
+      // the permission mode. Stop runs to completion before it resumes.
+      let releaseGate: () => void = () => {};
+      harness.query.permissionModeGate = new Promise<void>((resolve) => {
+        releaseGate = resolve;
+      });
+      const sendFiber = yield* adapter
+        .sendTurn({
+          threadId: session.threadId,
+          input: "steer",
+          attachments: [],
+          interactionMode: "plan",
+        })
+        .pipe(Effect.result, Effect.forkChild);
+      while (harness.query.setPermissionModeCalls.length === 0) {
+        yield* Effect.yieldNow;
+      }
+
+      yield* adapter.interruptTurn(session.threadId);
+      assert.equal(harness.query.closeCalls, 1);
+
+      releaseGate();
+      const sendResult = yield* Fiber.join(sendFiber);
+      assert.equal(sendResult._tag, "Failure");
+      if (sendResult._tag === "Failure") {
+        assert.equal(sendResult.failure._tag, "ProviderAdapterSessionClosedError");
+      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

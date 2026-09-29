@@ -5266,13 +5266,22 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
 
     if (steeringTurnState === null) context.turnStartMessageIds.push(turnId);
     yield* updateResumeCursor(context);
-    yield* Queue.offer(context.promptQueue, {
+    // A send that passed requireSession before Stop can reach here after Stop
+    // shut the queue. offer answers false then; without this check the message
+    // vanishes while the send reports success.
+    const queued = yield* Queue.offer(context.promptQueue, {
       type: "message",
       message:
         steeringTurnState === null
           ? { ...message, uuid: turnId as NonNullable<SDKUserMessage["uuid"]> }
           : message,
     }).pipe(Effect.mapError((cause) => toRequestError(input.threadId, "turn/start", cause)));
+    if (!queued) {
+      return yield* new ProviderAdapterSessionClosedError({
+        provider: PROVIDER,
+        threadId: input.threadId,
+      });
+    }
 
     return {
       threadId: context.session.threadId,
@@ -5305,12 +5314,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (context.stopped || !context.turnState || !interrupt) return;
     const settled = yield* Deferred.make<void>();
     context.interruptedTurnSettled = settled;
+    // Wait for the abort only after interrupt() was accepted. A rejected
+    // interrupt means no graceful cancellation began, so Stop closes at once.
     yield* Effect.tryPromise(interrupt).pipe(
-      Effect.ignore,
       Effect.andThen(Deferred.await(settled)),
       Effect.timeoutOption(CLAUDE_INTERRUPT_GRACE),
+      Effect.ignore,
+      Effect.ensuring(
+        Effect.sync(() => {
+          context.interruptedTurnSettled = undefined;
+        }),
+      ),
     );
-    context.interruptedTurnSettled = undefined;
   });
 
   const readThread: ClaudeAdapterShape["readThread"] = Effect.fn("readThread")(
