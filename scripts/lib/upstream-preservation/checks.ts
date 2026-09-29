@@ -529,6 +529,14 @@ const URL_HANDLER_ICON_PORT: Retirement = {
     "KAT-3568 ports upstream #8673 onto the Linux URL handler; the test re-freezes at its new bytes.",
 };
 
+// KAT-3555 deletes the sandbox-era byte credential path and its cases from these two test files.
+// The unfreeze ends with that PR, which re-freezes the files at their new bytes.
+const BYTE_PATH_REMOVAL: Retirement = {
+  issue: "KAT-3547",
+  reason:
+    "KAT-3555 deletes the byte credential path cases; the tests re-freeze at their new bytes.",
+};
+
 export const RETIREMENTS: RetirementTables = {
   checks: new Map([
     ["mobile-android-asset-live-evidence", ANDROID_PARKED],
@@ -540,6 +548,8 @@ export const RETIREMENTS: RetirementTables = {
   ]),
   unfrozenTrustedPaths: new Map([
     ["apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts", URL_HANDLER_ICON_PORT],
+    ["apps/server/src/processRunner.test.ts", BYTE_PATH_REMOVAL],
+    ["apps/server/src/vcs/VcsProcess.test.ts", BYTE_PATH_REMOVAL],
   ]),
 };
 

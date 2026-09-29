@@ -1077,7 +1077,7 @@ describe("upstream preservation CLI", () => {
         executionTreeCheck: () => undefined,
       });
 
-    it("retires only the parked Android checks and paths, and unfreezes the URL handler test", () => {
+    it("retires only the parked Android checks and paths, and unfreezes the URL handler and process tests", () => {
       expect([...RETIREMENTS.checks.keys()]).toEqual([
         "mobile-android-asset-live-evidence",
         "mobile-android-fab-inset",
@@ -1088,6 +1088,8 @@ describe("upstream preservation CLI", () => {
       ]);
       expect([...RETIREMENTS.unfrozenTrustedPaths.keys()]).toEqual([
         "apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts",
+        "apps/server/src/processRunner.test.ts",
+        "apps/server/src/vcs/VcsProcess.test.ts",
       ]);
       const urlHandler = PRESERVATION_CHECKS.find(
         (check) => check.id === "desktop-url-handler-backend-routes",
@@ -1103,6 +1105,18 @@ describe("upstream preservation CLI", () => {
       expect(urlHandler?.commands[0]?.trustedPaths).toEqual([
         "apps/desktop/src/backend/DesktopBackendManager.test.ts",
       ]);
+      const processCheck = PRESERVATION_CHECKS.find(
+        (check) => check.id === "retained-process-credential-behavior",
+      );
+      expect(processCheck?.ownerPaths).toEqual([
+        "apps/server/src/processRunner.ts",
+        "apps/server/src/vcs/VcsProcess.ts",
+      ]);
+      expect(processCheck?.commands[0]?.requiredPaths).toEqual([
+        "apps/server/src/processRunner.test.ts",
+        "apps/server/src/vcs/VcsProcess.test.ts",
+      ]);
+      expect(processCheck?.commands[0]?.trustedPaths).toEqual([]);
       expect(PRESERVATION_CONTRACT.length).toBe(31);
       expect(PRESERVATION_CHECKS.length).toBe(29);
       const theme = PRESERVATION_CHECKS.find(
