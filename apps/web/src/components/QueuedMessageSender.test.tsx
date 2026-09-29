@@ -6,6 +6,7 @@ import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { useQueuedMessageStore, type QueuedComposerMessage } from "../queuedMessageStore";
+import { useUsageLimitsSpendStore } from "../usageLimitsSpendStore";
 import { sendQueuedMessage } from "./chat/sendQueuedMessage";
 import { QueuedMessageSender } from "./QueuedMessageSender";
 
@@ -85,6 +86,7 @@ const queue = () => useQueuedMessageStore.getState().queuesByThreadKey[threadKey
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   useQueuedMessageStore.setState({ queuesByThreadKey: {}, lastDispatchByThreadKey: {} });
+  useUsageLimitsSpendStore.setState({ spendsByThreadKey: {} });
   io.thread = null;
   io.run.mockReset().mockResolvedValue({ _tag: "Success", value: undefined });
   io.upload.mockReset().mockResolvedValue(undefined);
@@ -180,6 +182,24 @@ describe("QueuedMessageSender", () => {
 });
 
 describe("sendQueuedMessage", () => {
+  // ChatView keys its open /usage-limits panel on this count, so a change closes it.
+  it("reports the spend so an open usage-limits panel for the thread closes", async () => {
+    const message = enqueue();
+
+    await sendQueuedMessage(threadRef, message.id);
+
+    expect(useUsageLimitsSpendStore.getState().spendsByThreadKey).toEqual({ [threadKey]: 1 });
+  });
+
+  it("leaves the usage-limits panel open when the send fails", async () => {
+    io.run.mockResolvedValueOnce({ _tag: "Failure", cause: Cause.fail(new Error("offline")) });
+    const message = enqueue();
+
+    await sendQueuedMessage(threadRef, message.id);
+
+    expect(useUsageLimitsSpendStore.getState().spendsByThreadKey).toEqual({});
+  });
+
   it("saves a mode changed before queueing, then starts the turn", async () => {
     io.shell = { ...io.shell, runtimeMode: "approval-required" };
     const message = enqueue();
