@@ -111,3 +111,48 @@ These advance to `d2c9281b8`:
 - the live-tree `currentUpstreamSha` in `scripts/check-upstream-preservation.test.ts`
 
 `baselineUpstreamSha` stays at its historical pin (`ab099178a`, the pin of `d62d138f6`), and the original root stays `6a687ee43`. `FORK.md` now lists `d15210cd3` as the previous accounted-for pin.
+
+## Changed retained outcomes
+
+The trusted checker from base `aeed6ffbb` reports four changed retained outcomes:
+
+| Check                                | Changed owner                                              | Disposition                                                                                                                                                      |
+| ------------------------------------ | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `product-identity-release-ownership` | `FORK.md`                                                  | TAKE: the pin advances to `d2c9281b8`; the identity tables are unchanged                                                                                         |
+| `connect-wire-identity`              | `FORK.md`                                                  | TAKE: the same pin-only edit                                                                                                                                     |
+| `state-isolation`                    | `FORK.md`                                                  | TAKE: the same pin-only edit                                                                                                                                     |
+| `connect-early-access-waitlist`      | `apps/web/src/components/clerk/T3ConnectSidebarSignIn.tsx` | TAKE: upstream #14127 moves the account pages into `T3ConnectAccountPages.tsx`; the early-access sign-in menu and the Kata Code Connect page label are unchanged |
+
+## Independent review
+
+An independent Opus review covered all 12 upstream commits and both ranges: upstream to merge, and base to merge. It found no blocker. The merge changes only paths in upstream's 49. Of those, 30 carry upstream's patch exactly, and 15 match it once the Kata renames are applied. The review read the remaining 4 in full: the lockfile, the manifest, `ConnectionsSettings.tsx`, and `T3ConnectSidebarSignIn.tsx`.
+
+It also confirmed four things:
+
+- No `T3CODE_BITBUCKET` reference remains.
+- Every settings path the server sends to clients redacts both Bitbucket tokens.
+- `threadPullRequestCompatibility` is untouched.
+- The manifest has exactly one `claude-sonnet-5-5`.
+
+It raised three notes:
+
+- Against a server that predates this merge, a Bitbucket save reports success but stores nothing. This is upstream behavior, filed as KAT-3565.
+- The manifest bump protects Kata's Sonnet 5.5 entry only until upstream publishes again. Filed as KAT-3564.
+- Skipping #8673 defers a Linux fix. Filed as KAT-3563.
+
+## Web verification
+
+Disposable stacks ran from `verify-katacode`: branch run `web-20260929-072303-786895cd` on `2b1b5a161`, and main run `web-20260929-072524-6ab508a1` on `aeed6ffbb`.
+
+1. Main shows only the `KATACODE_BITBUCKET_*` env-var hint for Bitbucket. The branch shows the credentials form.
+2. The branch form's fallback copy names `KATACODE_BITBUCKET_*`, and its status hint says "Add a Bitbucket token in Settings → Source Control."
+3. Saving an access token shows **Remove**. `settings.json` stores `••••••`, and the token is in `secrets/bitbucket-access-token.bin` (mode 0600).
+4. After a reload, the token stays saved and is not echoed back.
+5. **Remove** deletes the secret file and the settings entry.
+6. Settings search for "Bitbucket" finds **Bitbucket credentials**.
+7. Claude models list Sonnet 5.5 once, directly above Sonnet 5, after the server fetched upstream's live manifest (HTTP 200) and kept the newer bundle.
+8. Settings → Connections says Kata Code Connect, with no T3 copy.
+9. The Usage page renders without errors.
+10. The welcome wizard shows the Kata Code setup dialog.
+
+The Connect-environment removal dialog was not exercised live, because it needs a Clerk sign-in and a relay-managed environment. Its copy is covered by the branding check and by review. Screenshots and a 33 s video are on PR #317.
