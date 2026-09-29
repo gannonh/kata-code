@@ -1077,7 +1077,7 @@ describe("upstream preservation CLI", () => {
         executionTreeCheck: () => undefined,
       });
 
-    it("retires only the parked Android checks and paths, and unfreezes the URL handler test", () => {
+    it("retires only the parked Android checks and paths", () => {
       expect([...RETIREMENTS.checks.keys()]).toEqual([
         "mobile-android-asset-live-evidence",
         "mobile-android-fab-inset",
@@ -1086,9 +1086,7 @@ describe("upstream preservation CLI", () => {
         "apps/mobile/src/lib/materialYouTheme.ts",
         "apps/mobile/src/lib/materialYouTheme.test.ts",
       ]);
-      expect([...RETIREMENTS.unfrozenTrustedPaths.keys()]).toEqual([
-        "apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts",
-      ]);
+      expect(RETIREMENTS.unfrozenTrustedPaths.size).toBe(0);
       const urlHandler = PRESERVATION_CHECKS.find(
         (check) => check.id === "desktop-url-handler-backend-routes",
       );
@@ -1101,6 +1099,7 @@ describe("upstream preservation CLI", () => {
         "apps/desktop/src/backend/DesktopBackendManager.test.ts",
       ]);
       expect(urlHandler?.commands[0]?.trustedPaths).toEqual([
+        "apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts",
         "apps/desktop/src/backend/DesktopBackendManager.test.ts",
       ]);
       const processCheck = PRESERVATION_CHECKS.find(

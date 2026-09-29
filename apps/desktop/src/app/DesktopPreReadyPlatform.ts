@@ -11,7 +11,7 @@ import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 
 import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopAppBranding } from "./DesktopEnvironment.ts";
-import { renderUrlHandlerDesktopEntry } from "./DesktopLinuxUrlHandler.ts";
+import { renderUrlHandlerDesktopEntry, urlHandlerIconPath } from "./DesktopLinuxUrlHandler.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import { desktopUrlHandlerSchemes } from "@kata-sh/code-shared/branding";
 
@@ -69,6 +69,23 @@ export const make = Effect.gen(function* () {
           "applications",
         );
         NodeFS.mkdirSync(applicationsDir, { recursive: true });
+        const iconPath = Electron.app.isPackaged
+          ? urlHandlerIconPath(NodePath.posix.join, applicationsDir)
+          : undefined;
+        if (iconPath !== undefined) {
+          try {
+            NodeFS.mkdirSync(NodePath.posix.dirname(iconPath), { recursive: true });
+            NodeFS.copyFileSync(
+              NodePath.posix.join(
+                Electron.app.getAppPath(),
+                "apps/desktop/prod-resources/icon.png",
+              ),
+              iconPath,
+            );
+          } catch {
+            // Icon installation is optional; registration retries after readiness.
+          }
+        }
         NodeFS.writeFileSync(
           NodePath.posix.join(applicationsDir, linux.linuxDesktopEntryName),
           renderUrlHandlerDesktopEntry({
@@ -78,6 +95,7 @@ export const make = Effect.gen(function* () {
             }).displayName,
             execTarget: process.env.APPIMAGE?.trim() || process.execPath,
             schemes: desktopUrlHandlerSchemes(linux.isDevelopment),
+            ...(iconPath === undefined ? {} : { iconPath }),
           }),
           "utf8",
         );
