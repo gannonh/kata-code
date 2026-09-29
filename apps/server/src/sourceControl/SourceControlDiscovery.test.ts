@@ -423,7 +423,7 @@ it.effect("reports implemented tools separately from locally available executabl
             account: Option.none(),
             host: Option.some("bitbucket.org"),
             detail: Option.some(
-              "Set KATACODE_BITBUCKET_EMAIL and KATACODE_BITBUCKET_API_TOKEN, or KATACODE_BITBUCKET_ACCESS_TOKEN.",
+              "Add a Bitbucket token in Settings → Source Control, or set the KATACODE_BITBUCKET_* environment variables on the server.",
             ),
           }),
         },
