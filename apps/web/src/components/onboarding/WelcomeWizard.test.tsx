@@ -253,10 +253,11 @@ it("does not report a save failure when navigation fails after setup is saved", 
   );
 });
 
-it("keeps earlier thread counts when an import is retried after completion fails", async () => {
+it("does not double count threads when an import is retried after completion fails", async () => {
+  // The server reports threads imported by an earlier attempt as imported again.
   mocks.importThreads
     .mockResolvedValueOnce({ _tag: "Success", value: { importedCount: 28, skippedCount: 1 } })
-    .mockResolvedValueOnce({ _tag: "Success", value: { importedCount: 0, skippedCount: 1 } });
+    .mockResolvedValueOnce({ _tag: "Success", value: { importedCount: 28, skippedCount: 1 } });
   mocks.complete.mockRejectedValueOnce(new Error("settings unavailable"));
   const onDone = vi.fn();
   await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));
@@ -275,10 +276,11 @@ it("keeps earlier thread counts when an import is retried after completion fails
   );
 });
 
-it("reports the combined thread count when a retry imports the rest", async () => {
+it("reports the retry's thread count when a retry imports the rest", async () => {
+  // 28 threads from the first attempt plus the 1 that failed make 29 in the retry's report.
   mocks.importThreads
     .mockResolvedValueOnce({ _tag: "Success", value: { importedCount: 28, skippedCount: 1 } })
-    .mockResolvedValueOnce({ _tag: "Success", value: { importedCount: 1, skippedCount: 0 } });
+    .mockResolvedValueOnce({ _tag: "Success", value: { importedCount: 29, skippedCount: 0 } });
   mocks.complete.mockRejectedValueOnce(new Error("settings unavailable"));
   const onDone = vi.fn();
   await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));

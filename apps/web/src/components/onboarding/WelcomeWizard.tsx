@@ -999,6 +999,11 @@ function ImportStep({
   const [selectedPaths, setSelectedPaths] = useState<ReadonlySet<string> | null>(null);
   const importWarningRef = useRef("");
   const importedThreadCountRef = useRef(0);
+  // The server reports threads imported by earlier attempts again as imported, so keep
+  // only each project's latest counts instead of adding attempts together.
+  const threadCountsRef = useRef(
+    new Map<string, { readonly imported: number; readonly skipped: number }>(),
+  );
   const [landingProject, setLandingProject] = useState<ScopedProjectRef | null>(null);
   // Keep project creation attempts separate from completed history imports so both can retry.
   const importedProjectsRef = useRef(new Map<string, ScopedProjectRef>());
@@ -1093,8 +1098,6 @@ function ImportStep({
       importedProjects.size > 0
         ? selection.filter((candidate) => importedProjects.has(candidate.key)).length
         : 0;
-    let importedThreadCount = 0;
-    let skippedThreadCount = 0;
     const refreshEnvironments = new Set<EnvironmentId>();
     for (const candidate of selection) {
       const { environmentId } = candidate;
@@ -1154,8 +1157,10 @@ function ImportStep({
         return;
       }
       if (threadImportResult._tag === "Success") {
-        importedThreadCount += threadImportResult.value.importedCount;
-        skippedThreadCount += threadImportResult.value.skippedCount;
+        threadCountsRef.current.set(candidate.key, {
+          imported: threadImportResult.value.importedCount,
+          skipped: threadImportResult.value.skippedCount,
+        });
         if (threadImportResult.value.importedCount > 0) {
           projectsWithImportedHistoryRef.current.set(
             candidate.key,
@@ -1175,16 +1180,20 @@ function ImportStep({
       if (refreshEnvironments.has(scan.environmentId)) scan.refresh();
     }
     setIsImporting(false);
-    // A retry after a failed completion keeps the threads earlier attempts imported.
-    importedThreadCountRef.current += importedThreadCount;
-    const totalImportedThreadCount = importedThreadCountRef.current;
+    let importedThreadCount = 0;
+    let skippedThreadCount = 0;
+    for (const counts of threadCountsRef.current.values()) {
+      importedThreadCount += counts.imported;
+      skippedThreadCount += counts.skipped;
+    }
+    importedThreadCountRef.current = importedThreadCount;
     if (importedProjectsCount < selection.length) {
-      if (totalImportedThreadCount > 0 && skippedThreadCount > 0) {
-        importWarningRef.current = `Imported ${totalImportedThreadCount} ${totalImportedThreadCount === 1 ? "thread" : "threads"}. ${skippedThreadCount} ${skippedThreadCount === 1 ? "thread" : "threads"} could not be imported.`;
+      if (importedThreadCount > 0 && skippedThreadCount > 0) {
+        importWarningRef.current = `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}. ${skippedThreadCount} ${skippedThreadCount === 1 ? "thread" : "threads"} could not be imported.`;
       } else if (skippedThreadCount > 0) {
         importWarningRef.current = `${skippedThreadCount} ${skippedThreadCount === 1 ? "thread could" : "threads could"} not be imported.`;
-      } else if (totalImportedThreadCount > 0) {
-        importWarningRef.current = `Imported ${totalImportedThreadCount} ${totalImportedThreadCount === 1 ? "thread" : "threads"}. Some thread history could not be imported.`;
+      } else if (importedThreadCount > 0) {
+        importWarningRef.current = `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}. Some thread history could not be imported.`;
       } else {
         importWarningRef.current = "Could not import thread history.";
       }
