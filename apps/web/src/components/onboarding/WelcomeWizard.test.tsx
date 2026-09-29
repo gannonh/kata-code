@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { EnvironmentId, ProjectId } from "@kata-sh/code-contracts";
+import * as Cause from "effect/Cause";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
 const mocks = vi.hoisted(() => ({
@@ -11,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   toast: vi.fn(),
   projects: [] as Array<{ id: string; environmentId: string; workspaceRoot: string }>,
+  candidates: [] as Array<{ path: string; title: string; projectId: string }>,
 }));
 vi.mock("../../state/agentSessions", () => ({ agentSessionImport: "import" }));
 vi.mock("../../state/projects", () => ({ projectEnvironment: { create: "create" } }));
@@ -55,16 +57,12 @@ vi.mock("../../onboarding/useProjectScans", () => ({
       refresh: mocks.refresh,
       data: {
         truncated: false,
-        candidates: [
-          {
-            path: "/project",
-            title: "project",
-            projectId: "test-project",
-            threadCount: 29,
-            lastActiveAt: new Date().toISOString(),
-            sources: ["codex"],
-          },
-        ],
+        candidates: mocks.candidates.map((candidate) => ({
+          ...candidate,
+          threadCount: 29,
+          lastActiveAt: new Date().toISOString(),
+          sources: ["codex"],
+        })),
       },
     },
   ],
@@ -101,6 +99,7 @@ beforeEach(() => {
     value: () => [],
   });
   mocks.projects = [{ id: "test-project", environmentId: "test-env", workspaceRoot: "/project" }];
+  mocks.candidates = [{ path: "/project", title: "project", projectId: "test-project" }];
   mocks.complete.mockResolvedValue(undefined);
   mocks.refresh.mockResolvedValue(undefined);
   mocks.importThreads.mockResolvedValue({
@@ -293,4 +292,45 @@ it("reports the retry's thread count when a retry imports the rest", async () =>
     type: "success",
     title: "Imported 29 threads",
   });
+});
+
+it("keeps skipped threads in the warning when a retry selects different projects", async () => {
+  mocks.candidates = [
+    { path: "/project-a", title: "project-a", projectId: "project-a" },
+    { path: "/project-b", title: "project-b", projectId: "project-b" },
+  ];
+  mocks.projects = [
+    { id: "project-a", environmentId: "test-env", workspaceRoot: "/project-a" },
+    { id: "project-b", environmentId: "test-env", workspaceRoot: "/project-b" },
+  ];
+  let projectBAttempts = 0;
+  mocks.importThreads.mockImplementation(async ({ input }: { input: { projectId: string } }) => {
+    if (input.projectId === "project-a") {
+      return { _tag: "Success", value: { importedCount: 10, skippedCount: 2 } };
+    }
+    projectBAttempts += 1;
+    return projectBAttempts === 1
+      ? { _tag: "Failure", cause: Cause.fail(new Error("import failed")) }
+      : { _tag: "Success", value: { importedCount: 5, skippedCount: 0 } };
+  });
+  mocks.complete.mockRejectedValueOnce(new Error("settings unavailable"));
+  const onDone = vi.fn();
+  await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));
+  await click("Continue");
+  await click("Continue");
+  await click("Import 2 projects");
+  expect(onDone).not.toHaveBeenCalled();
+  const rowA = [...document.querySelectorAll("label")].find((element) =>
+    element.textContent?.includes("project-a"),
+  );
+  expect(rowA, "row project-a").toBeDefined();
+  await act(async () => rowA!.click());
+  await click("Import 1 project");
+  expect(onDone).toHaveBeenCalledOnce();
+  expect(mocks.toast).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      type: "warning",
+      description: "Imported 15 threads. 2 threads could not be imported.",
+    }),
+  );
 });

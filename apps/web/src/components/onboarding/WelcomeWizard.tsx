@@ -1187,7 +1187,8 @@ function ImportStep({
       skippedThreadCount += counts.skipped;
     }
     importedThreadCountRef.current = importedThreadCount;
-    if (importedProjectsCount < selection.length) {
+    // Threads skipped in an earlier attempt still count when the retry selects other projects.
+    if (importedProjectsCount < selection.length || skippedThreadCount > 0) {
       if (importedThreadCount > 0 && skippedThreadCount > 0) {
         importWarningRef.current = `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}. ${skippedThreadCount} ${skippedThreadCount === 1 ? "thread" : "threads"} could not be imported.`;
       } else if (skippedThreadCount > 0) {
