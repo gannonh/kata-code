@@ -977,12 +977,26 @@ export const MAC_FILE_EXCLUSIONS = [
   "!**/node_modules/node-pty/prebuilds/win32-*/**/*",
   "!**/node_modules/node-pty/third_party/conpty/**/*",
 ] as const;
-// Linux builds node-pty from source, so every prebuild in the package is for
-// another platform (58 MB of it Windows debug symbols).
+// node-pty 1.2 ships a prebuild for every platform in one package (58 MB of it
+// Windows debug symbols). Its install script only checks that the host's own
+// prebuild exists and compiles from source only when it is missing, so darwin
+// and win32 are dead weight in a Linux app. The Linux architectures are
+// handled per target in resolveLinuxFileExclusions.
 export const LINUX_FILE_EXCLUSIONS = [
   ...MAC_FILE_EXCLUSIONS,
   "!**/node_modules/node-pty/prebuilds/darwin-*/**/*",
 ] as const;
+
+// A Linux app loads only its own architecture's pty.node. An omitted or
+// universal arch keeps both Linux prebuilds, matching resolveMacFileExclusions.
+export function resolveLinuxFileExclusions(arch?: typeof BuildArch.Type) {
+  if (arch === undefined || arch === "universal") {
+    return [...LINUX_FILE_EXCLUSIONS];
+  }
+
+  const unusedArch = arch === "arm64" ? "x64" : "arm64";
+  return [...LINUX_FILE_EXCLUSIONS, `!**/node_modules/node-pty/prebuilds/linux-${unusedArch}/**/*`];
+}
 
 // node-pty publishes both Darwin prebuilds in one package. Single-architecture
 // apps only need the native target; universal apps need both. An omitted arch
@@ -2736,7 +2750,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       ...(platform === "mac"
         ? resolveMacFileExclusions(arch)
         : platform === "linux" && arch !== undefined
-          ? LINUX_FILE_EXCLUSIONS
+          ? resolveLinuxFileExclusions(arch)
           : []),
     ],
     directories: {
@@ -3367,6 +3381,10 @@ export const validateWindowsPackagedPayload = Effect.fn(
       );
     }
     const members = parseWslRuntimeArchiveMembers(listing.stdout);
+    // Without appVersion this validates the source-tree archive. Production
+    // always passes appVersion; the checker-owned build-desktop-artifact.test.ts
+    // still exercises this branch, so it stays until Windows packaging returns
+    // (KAT-3513) or that suite is retired (KAT-3535).
     if (input.appVersion === undefined) {
       const forbiddenMember = members.find((member) =>
         WSL_RUNTIME_ARCHIVE_EXCLUDED_PREFIXES.some((prefix) => member.startsWith(prefix)),

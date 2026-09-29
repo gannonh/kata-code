@@ -59,6 +59,7 @@ import {
   resolveDesktopUpdateChannel,
   resolveDesktopWebAssetBrand,
   resolveResourceMonitorRustTargets,
+  resolveLinuxFileExclusions,
   resolveWindowsServerAsarIgnoreGlobs,
   resourceMonitorExecutableName,
   resolveGitHubPublishConfig,
@@ -616,6 +617,17 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         false,
         "x64",
       );
+      const targetedLinuxArm64 = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        "arm64",
+      );
       const win = yield* createBuildConfig(
         "win",
         "nsis",
@@ -710,6 +722,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual(targetedLinux.files, [
         ...DESKTOP_FILE_EXCLUSIONS,
         ...LINUX_FILE_EXCLUSIONS,
+        "!**/node_modules/node-pty/prebuilds/linux-arm64/**/*",
+      ]);
+      assert.deepStrictEqual(targetedLinuxArm64.files, [
+        ...DESKTOP_FILE_EXCLUSIONS,
+        ...LINUX_FILE_EXCLUSIONS,
+        "!**/node_modules/node-pty/prebuilds/linux-x64/**/*",
       ]);
       assert.deepStrictEqual(win.files, DESKTOP_FILE_EXCLUSIONS);
       assert.deepStrictEqual(winWithoutWslRuntime.files, win.files);
@@ -731,6 +749,61 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "!**/node_modules/node-pty/prebuilds/darwin-*/**/*",
     ]);
   });
+
+  it("excludes the other Linux architecture's node-pty prebuild", () => {
+    assert.deepStrictEqual(resolveLinuxFileExclusions("x64"), [
+      ...LINUX_FILE_EXCLUSIONS,
+      "!**/node_modules/node-pty/prebuilds/linux-arm64/**/*",
+    ]);
+    assert.deepStrictEqual(resolveLinuxFileExclusions("arm64"), [
+      ...LINUX_FILE_EXCLUSIONS,
+      "!**/node_modules/node-pty/prebuilds/linux-x64/**/*",
+    ]);
+    assert.deepStrictEqual(resolveLinuxFileExclusions("universal"), [...LINUX_FILE_EXCLUSIONS]);
+    assert.deepStrictEqual(resolveLinuxFileExclusions(), [...LINUX_FILE_EXCLUSIONS]);
+  });
+
+  // Applies the Linux build config's `files` exclusions to a node-pty 1.2
+  // package listing, the way electron-builder filters the staged app, so the
+  // surviving prebuilds are exactly what the Linux app ships.
+  for (const arch of ["x64", "arm64"] as const) {
+    it.effect(`ships only the linux-${arch} node-pty prebuild in a Linux ${arch} app`, () =>
+      Effect.gen(function* () {
+        const config = yield* createBuildConfig(
+          "linux",
+          "AppImage",
+          "1.2.3",
+          false,
+          false,
+          undefined,
+          undefined,
+          false,
+          arch,
+        );
+        const nodePtyFiles = [
+          "darwin-arm64/pty.node",
+          "darwin-arm64/spawn-helper",
+          "darwin-x64/pty.node",
+          "darwin-x64/spawn-helper",
+          "linux-arm64/pty.node",
+          "linux-x64/pty.node",
+          "win32-arm64/conpty.node",
+          "win32-arm64/conpty/OpenConsole.exe",
+          "win32-x64/conpty.node",
+          "win32-x64/conpty/OpenConsole.exe",
+        ].map((file) => `node_modules/node-pty/prebuilds/${file}`);
+        const exclusions = (config.files as ReadonlyArray<string>)
+          .filter((glob) => glob.startsWith("!"))
+          .map((glob) => glob.slice(1));
+
+        const shipped = nodePtyFiles.filter(
+          (file) => !exclusions.some((glob) => NodePath.matchesGlob(file, glob)),
+        );
+
+        assert.deepStrictEqual(shipped, [`node_modules/node-pty/prebuilds/linux-${arch}/pty.node`]);
+      }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+    );
+  }
 
   it("unpacks native binaries while keeping their JavaScript and metadata archived", () => {
     for (const file of [
@@ -1283,10 +1356,15 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
               expectWslRuntime: true,
             }).pipe(Effect.flip);
 
+            const stem = wslRuntimeArchiveStem(WINDOWS_PAYLOAD_FIXTURE_VERSION, targetArch);
             assert.instanceOf(error, WindowsPackagedPayloadValidationError);
             assert.equal(error.reason, "wsl-runtime-invalid");
+            assert.deepStrictEqual(error.missingFiles, [
+              `${stem}/node_modules/node-pty/build/Release/pty.node`,
+              `${stem}/node_modules/node-pty/prebuilds/linux-${targetArch}/pty.node`,
+            ]);
           }),
-        ),
+        ).pipe(Effect.provideService(HostProcessPlatform, "linux")),
     );
   }
 
