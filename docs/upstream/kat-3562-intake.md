@@ -156,3 +156,9 @@ Disposable stacks ran from `verify-katacode`: branch run `web-20260929-072303-78
 10. The welcome wizard shows the Kata Code setup dialog.
 
 The Connect-environment removal dialog was not exercised live, because it needs a Clerk sign-in and a relay-managed environment. Its copy is covered by the branding check and by review. Screenshots and a 33 s video are on PR #317.
+
+## Main sync
+
+Before landing, `origin/main` advanced one commit, from `aeed6ffbb` to `8a41706397b2bedb4b9dfc0bdd19eb14d6b04f58` (KAT-3546 / #316). That commit changes only `.agents/skills/rebase-kata-upstream/references/history.md` and `.agents/skills/verify-katacode/SKILL.md`.
+
+Merge commit `dc39360c81e26290435fcb66e64a9788e3f80de0` (parents `4b29fc98d` and `8a4170639`) brings the branch up to date with no conflicts. The Kata base for verification is now `8a4170639`. No product, workflow, inventory, or checker file changed, so the changed retained outcomes stay the same four.
