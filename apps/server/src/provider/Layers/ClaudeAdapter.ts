@@ -5198,47 +5198,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       });
     }
 
-    const turnId = steeringTurnState?.turnId ?? TurnId.make(yield* randomUUIDv4);
-    if (steeringTurnState === null) {
-      const turnState: ClaudeTurnState = {
-        turnId,
-        startedAt: yield* nowIso,
-        assistantTextBlocks: new Map(),
-        assistantTextBlockOrder: [],
-        capturedProposedPlanKeys: new Set(),
-        latestAssistantUsage: undefined,
-        compactedSinceLatestAssistantUsage: false,
-        hasSubagents: false,
-        nextSyntheticAssistantBlockIndex: -1,
-        authenticationFailureMessage: undefined,
-        rejectedRateLimitTypes: new Set(),
-        latestAssistantRateLimited: false,
-        emittedThinkingText: false,
-        thinkingSnapshotIds: new Set(),
-      };
-
-      const updatedAt = yield* nowIso;
-      context.turnState = turnState;
-      context.session = {
-        ...context.session,
-        status: "running",
-        activeTurnId: turnId,
-        updatedAt,
-      };
-
-      const turnStartedStamp = yield* makeEventStamp();
-      yield* offerRuntimeEvent({
-        type: "turn.started",
-        eventId: turnStartedStamp.eventId,
-        provider: PROVIDER,
-        createdAt: turnStartedStamp.createdAt,
-        threadId: context.session.threadId,
-        turnId,
-        payload: modelSelection?.model ? { model: modelSelection.model } : {},
-        providerRefs: {},
-      });
-    }
-
     // Re-scan on every send: skills are added and switched off mid-session,
     // and the scan is a few directory reads. A skill switched off via
     // skillOverrides, or reserved for the agent with `user-invocable: false`,
@@ -5264,11 +5223,64 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       ),
     });
 
+    // Everything that can suspend is done. A send that passed requireSession
+    // before Stop must not start a turn on a stopped session: Stop already
+    // emitted session.exited, so a turn.started here would never complete. The
+    // check and the state change below run without yielding, so Stop cannot
+    // slip between them. Stop reaching the later yields still finds the turn
+    // state set and completes it as interrupted.
+    const turnId = steeringTurnState?.turnId ?? TurnId.make(yield* randomUUIDv4);
+    const startedAt = yield* nowIso;
+    const updatedAt = yield* nowIso;
+    if (context.stopped) {
+      return yield* new ProviderAdapterSessionClosedError({
+        provider: PROVIDER,
+        threadId: input.threadId,
+      });
+    }
+    if (steeringTurnState === null) {
+      const turnState: ClaudeTurnState = {
+        turnId,
+        startedAt,
+        assistantTextBlocks: new Map(),
+        assistantTextBlockOrder: [],
+        capturedProposedPlanKeys: new Set(),
+        latestAssistantUsage: undefined,
+        compactedSinceLatestAssistantUsage: false,
+        hasSubagents: false,
+        nextSyntheticAssistantBlockIndex: -1,
+        authenticationFailureMessage: undefined,
+        rejectedRateLimitTypes: new Set(),
+        latestAssistantRateLimited: false,
+        emittedThinkingText: false,
+        thinkingSnapshotIds: new Set(),
+      };
+
+      context.turnState = turnState;
+      context.session = {
+        ...context.session,
+        status: "running",
+        activeTurnId: turnId,
+        updatedAt,
+      };
+
+      const turnStartedStamp = yield* makeEventStamp();
+      yield* offerRuntimeEvent({
+        type: "turn.started",
+        eventId: turnStartedStamp.eventId,
+        provider: PROVIDER,
+        createdAt: turnStartedStamp.createdAt,
+        threadId: context.session.threadId,
+        turnId,
+        payload: modelSelection?.model ? { model: modelSelection.model } : {},
+        providerRefs: {},
+      });
+    }
+
     if (steeringTurnState === null) context.turnStartMessageIds.push(turnId);
     yield* updateResumeCursor(context);
-    // A send that passed requireSession before Stop can reach here after Stop
-    // shut the queue. offer answers false then; without this check the message
-    // vanishes while the send reports success.
+    // Stop can still shut the queue during the yields above. offer answers false
+    // then; without this check the message vanishes while the send reports success.
     const queued = yield* Queue.offer(context.promptQueue, {
       type: "message",
       message:

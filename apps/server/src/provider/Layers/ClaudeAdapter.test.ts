@@ -3365,63 +3365,86 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
-  it.effect("fails a send that is still in flight when Stop shuts the prompt queue", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const adapter = yield* ClaudeAdapter;
-      const session = yield* adapter.startSession({
-        threadId: THREAD_ID,
-        provider: ProviderDriverKind.make("claudeAgent"),
-        runtimeMode: "full-access",
-      });
-      yield* adapter.sendTurn({
-        threadId: session.threadId,
-        input: "hello",
-        attachments: [],
-      });
-      harness.query.interrupt = async () => {
-        harness.query.emit({
-          type: "result",
-          subtype: "error_during_execution",
-          is_error: false,
-          errors: ["Error: Request was aborted."],
-          session_id: "sdk-session",
-          uuid: "result-interrupted",
-        } as unknown as SDKMessage);
-      };
+  for (const scenario of [
+    { name: "while a turn is running", firstTurnRunning: true },
+    { name: "between turns", firstTurnRunning: false },
+  ] as const) {
+    it.effect(`fails a send in flight when Stop closes the session ${scenario.name}`, () => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+        if (scenario.firstTurnRunning) {
+          yield* adapter.sendTurn({ threadId: session.threadId, input: "hello", attachments: [] });
+        } else {
+          yield* sendCompletedClaudeTurn(adapter, harness, session.threadId, "hello");
+        }
+        harness.query.interrupt = async () => {
+          harness.query.emit({
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: false,
+            errors: ["Error: Request was aborted."],
+            session_id: "sdk-session",
+            uuid: "result-interrupted",
+          } as unknown as SDKMessage);
+        };
 
-      // The second send passes requireSession, then suspends while it switches
-      // the permission mode. Stop runs to completion before it resumes.
-      let releaseGate: () => void = () => {};
-      harness.query.permissionModeGate = new Promise<void>((resolve) => {
-        releaseGate = resolve;
-      });
-      const sendFiber = yield* adapter
-        .sendTurn({
-          threadId: session.threadId,
-          input: "steer",
-          attachments: [],
-          interactionMode: "plan",
-        })
-        .pipe(Effect.result, Effect.forkChild);
-      while (harness.query.setPermissionModeCalls.length === 0) {
+        // The second send passes requireSession, then suspends while it switches
+        // the permission mode. Stop runs to completion before it resumes.
+        let releaseGate: () => void = () => {};
+        harness.query.permissionModeGate = new Promise<void>((resolve) => {
+          releaseGate = resolve;
+        });
+        const sendFiber = yield* adapter
+          .sendTurn({
+            threadId: session.threadId,
+            input: "second",
+            attachments: [],
+            interactionMode: "plan",
+          })
+          .pipe(Effect.result, Effect.forkChild);
+        while (harness.query.setPermissionModeCalls.length === 0) {
+          yield* Effect.yieldNow;
+        }
+
+        // The stream is a shared queue, so a running first turn still has its own
+        // turn.started waiting in it; a second one would be the phantom start.
+        const eventTypes: Array<string> = [];
+        const eventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.runForEach((event) => Effect.sync(() => void eventTypes.push(event.type))),
+          Effect.forkChild,
+        );
         yield* Effect.yieldNow;
-      }
 
-      yield* adapter.interruptTurn(session.threadId);
-      assert.equal(harness.query.closeCalls, 1);
+        yield* adapter.interruptTurn(session.threadId);
+        assert.equal(harness.query.closeCalls, 1);
 
-      releaseGate();
-      const sendResult = yield* Fiber.join(sendFiber);
-      assert.equal(sendResult._tag, "Failure");
-      if (sendResult._tag === "Failure") {
-        assert.equal(sendResult.failure._tag, "ProviderAdapterSessionClosedError");
-      }
-    }).pipe(
-      Effect.provideService(Random.Random, makeDeterministicRandomService()),
-      Effect.provide(harness.layer),
-    );
-  });
+        releaseGate();
+        const sendResult = yield* Fiber.join(sendFiber);
+        assert.equal(sendResult._tag, "Failure");
+        if (sendResult._tag === "Failure") {
+          assert.equal(sendResult.failure._tag, "ProviderAdapterSessionClosedError");
+        }
+
+        // The rejected send must not announce a turn on the stopped session.
+        yield* Effect.yieldNow;
+        yield* Fiber.interrupt(eventsFiber);
+        assert.equal(eventTypes.includes("session.exited"), true);
+        assert.equal(
+          eventTypes.filter((type) => type === "turn.started").length,
+          scenario.firstTurnRunning ? 1 : 0,
+        );
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    });
+  }
 
   it.effect("keeps the session available when process close fails", () => {
     const harness = makeHarness();
