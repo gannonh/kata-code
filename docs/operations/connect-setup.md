@@ -145,6 +145,82 @@ codesign --verify --deep --strict "/Applications/Kata Code (Alpha).app"
 codesign -d --entitlements :- "/Applications/Kata Code (Alpha).app"
 ```
 
+## Production Clerk instance
+
+Released builds, the hosted web app, TestFlight builds, and the production relay all authenticate
+against one Clerk instance. The relay verifies tokens with the `CLERK_PUBLISHABLE_KEY` and
+`CLERK_SECRET_KEY` of the GitHub `production` environment, so every client must use a publishable
+key from the same instance. A key pair from different instances makes the relay reject every token.
+The 1Password Environment feeds source builds against the same relay, so it moves with the relay.
+
+Clerk's [production deployment guide](https://clerk.com/docs/guides/development/deployment/production)
+is the reference. Set up the instance in this order and swap the keys last, so nothing depends on
+the instance before it works.
+
+1. **Clone the development instance.** In the Clerk Dashboard, open the instance switcher and
+   select **Create production instance**, then **Clone development instance**. Cloning copies
+   authentication and theme settings. Clerk does not copy SSO connections, integrations, or paths.
+2. **Add the DNS records.** The instance's **Domains** page lists the CNAME records for `kata.sh`
+   (typically `clerk`, `accounts`, and the mail and DKIM records). `kata.sh` DNS is on Cloudflare
+   and has a proxied wildcard `*.kata.sh` A record. Add every Clerk record as an explicit CNAME with
+   the proxy off (**DNS only**), or the wildcard shadows it. Select **Verify configuration** once
+   the records resolve. Propagation can take up to 48 hours, and Clerk issues certificates after
+   verification.
+3. **Add each social provider's own OAuth credentials.** Production cannot use Clerk's shared
+   development credentials. Without them the provider's authorize URL has no `client_id` and
+   sign-in fails. Google is the only provider enabled. Its OAuth client lives in the Google Cloud
+   project `kata-code` (owner `gannon@gannonh.dev`):
+   - Google Auth Platform: External audience, scopes `openid`, `email`, `profile` only, publishing
+     status **In production** (Testing mode blocks every Google account that is not a listed test
+     user). Branding uses `https://kata.sh` and `https://kata.sh/privacy` and needs no Google
+     verification while it has no logo or sensitive scopes.
+   - Client: type **Web application**, authorized redirect URI
+     `https://clerk.kata.sh/v1/oauth_callback`.
+   - In Clerk, **User & authentication > SSO connections > Google**, enter the client ID and secret.
+
+   Check it: the `external_verification_redirect_url` from
+   `POST https://clerk.kata.sh/v1/client/sign_ins` with `strategy=oauth_google` must contain a
+   `client_id` parameter.
+
+4. **Check what the clone carried over.** The clone copied the `kata-relay` JWT template and
+   **Access mode: Waitlist**. It did not copy the CLI OAuth application, the iOS app, or the native
+   redirect allowlist. Recreate them:
+   - the [CLI OAuth application](#cli-oauth-application), public, with redirect URIs
+     `http://127.0.0.1:34338/callback` and `https://app.kata.sh/connect/callback`, scopes
+     `openid profile email offline_access`, and **Device authorization grant**. The Backend API
+     creates it (`POST /v1/oauth_applications`, with `redirect_uris` and without `callback_url`)
+     and enabled the device grant on production without a Clerk support request.
+   - the Native API iOS app `ZBZKKWF95G.com.katacode.app`. Clerk also adds
+     `com.katacode.app://callback` to the redirect allowlist. Add `katacode://app/` and
+     `katacode-dev://app/` too.
+   - **Access mode** set to **Waitlist** (see [Early access waitlist](#early-access-waitlist)).
+     Without it, any client sign-in screen can create an account.
+5. **Create a smoke-test user.** The relay deploy runs `CLERK_SMOKE_USER_ID` against the instance.
+   Create a user in the production instance, `kata-code-smoke@kata.sh`, and set the `production`
+   variable and the 1Password Environment to its ID. Production rejects Backend API session
+   creation, so the smoke test signs the user in with a sign-in token through the Frontend API.
+6. **Swap the keys together.** Changing only some of them leaves the relay rejecting tokens.
+
+   ```sh
+   gh variable set CLERK_PUBLISHABLE_KEY --env production --repo gannonh/kata-code   # pk_live_...
+   gh variable set CLERK_CLI_OAUTH_CLIENT_ID --env production --repo gannonh/kata-code
+   gh variable set CLERK_SMOKE_USER_ID --env production --repo gannonh/kata-code
+   gh secret set CLERK_SECRET_KEY --env production --repo gannonh/kata-code           # sk_live_...
+   ```
+
+   Update `KATACODE_CLERK_PUBLISHABLE_KEY`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`,
+   `KATACODE_CLERK_CLI_OAUTH_CLIENT_ID`, `CLERK_CLI_OAUTH_CLIENT_ID`, and `CLERK_SMOKE_USER_ID` in
+   the 1Password Environment to match. `op` can only read Environments, so edit them in the
+   1Password app. Then run the **Deploy Kata Code Connect relay** workflow.
+
+7. **Verify on released builds.** Sign in fresh on a desktop nightly, the hosted web app, and a
+   TestFlight build, and pair an environment through `https://relay.kata.sh` from each. Run
+   `katacode` CLI sign-in through the browser (PKCE) and headless (device grant).
+
+Development-instance users and their sessions do not carry over. Clients sign in again and re-pair.
+Move to production before the first invited users sign up. Migrating users later means exporting
+them and remapping any relay data keyed on their Clerk user IDs.
+
 ## Early access waitlist
 
 Kata Code Connect is invite-gated. Clients show **Request early access**, which submits the email to
