@@ -207,3 +207,88 @@ it("keeps setup open when saving completion fails and preserves the import warni
     }),
   );
 });
+
+it("keeps both import buttons disabled while setup completion saves after nothing imports", async () => {
+  mocks.importThreads.mockResolvedValue({
+    _tag: "Success",
+    value: { importedCount: 0, skippedCount: 1 },
+  });
+  let finishSaving = () => {};
+  mocks.complete.mockReturnValue(
+    new Promise<void>((resolve) => {
+      finishSaving = resolve;
+    }),
+  );
+  const onDone = vi.fn();
+  await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));
+  await click("Continue");
+  await click("Continue");
+  await click("Import 1 project");
+  const disabled = (label: string) =>
+    [...document.querySelectorAll("button")].find(
+      (element) => element.textContent?.trim() === label,
+    )?.disabled;
+  expect(mocks.complete).toHaveBeenCalledOnce();
+  expect(disabled("Importing…")).toBe(true);
+  expect(disabled("Do not import projects")).toBe(true);
+  await act(async () => finishSaving());
+  expect(onDone).toHaveBeenCalledOnce();
+  expect(mocks.importThreads).toHaveBeenCalledOnce();
+});
+
+it("does not report a save failure when navigation fails after setup is saved", async () => {
+  const onDone = vi.fn().mockRejectedValue(new Error("navigation failed"));
+  await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));
+  await click("Continue");
+  await click("Continue");
+  await click("Import 1 project");
+  expect(mocks.complete).toHaveBeenCalledOnce();
+  expect(mocks.toast).toHaveBeenCalledWith({
+    type: "error",
+    title: "Could not open your workspace",
+    description: "Setup finished and your settings were saved. Reload to continue.",
+  });
+  expect(mocks.toast).not.toHaveBeenCalledWith(
+    expect.objectContaining({ title: "Could not finish setup" }),
+  );
+});
+
+it("keeps earlier thread counts when an import is retried after completion fails", async () => {
+  mocks.importThreads
+    .mockResolvedValueOnce({ _tag: "Success", value: { importedCount: 28, skippedCount: 1 } })
+    .mockResolvedValueOnce({ _tag: "Success", value: { importedCount: 0, skippedCount: 1 } });
+  mocks.complete.mockRejectedValueOnce(new Error("settings unavailable"));
+  const onDone = vi.fn();
+  await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));
+  await click("Continue");
+  await click("Continue");
+  await click("Import 1 project");
+  expect(onDone).not.toHaveBeenCalled();
+  await click("Import 1 project");
+  expect(mocks.importThreads).toHaveBeenCalledTimes(2);
+  expect(onDone).toHaveBeenCalledOnce();
+  expect(mocks.toast).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      type: "warning",
+      description: "Imported 28 threads. 1 thread could not be imported.",
+    }),
+  );
+});
+
+it("reports the combined thread count when a retry imports the rest", async () => {
+  mocks.importThreads
+    .mockResolvedValueOnce({ _tag: "Success", value: { importedCount: 28, skippedCount: 1 } })
+    .mockResolvedValueOnce({ _tag: "Success", value: { importedCount: 1, skippedCount: 0 } });
+  mocks.complete.mockRejectedValueOnce(new Error("settings unavailable"));
+  const onDone = vi.fn();
+  await act(async () => root.render(<WelcomeWizard localAvailable onDone={onDone} />));
+  await click("Continue");
+  await click("Continue");
+  await click("Import 1 project");
+  await click("Import 1 project");
+  expect(onDone).toHaveBeenCalledOnce();
+  expect(mocks.toast).toHaveBeenLastCalledWith({
+    type: "success",
+    title: "Imported 29 threads",
+  });
+});

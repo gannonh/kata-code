@@ -155,7 +155,16 @@ export function WelcomeWizard({
             toastManager.close(completionErrorToastIdRef.current);
             completionErrorToastIdRef.current = null;
           }
-          await onDone(projectRef);
+          try {
+            await onDone(projectRef);
+          } catch {
+            // Settings are saved; only opening the workspace failed. Do not report a save failure.
+            toastManager.add({
+              type: "error",
+              title: "Could not open your workspace",
+              description: "Setup finished and your settings were saved. Reload to continue.",
+            });
+          }
           if (importWarning) {
             toastManager.add({
               type: "warning",
@@ -1051,11 +1060,15 @@ function ImportStep({
       projectsWithImportedHistoryRef.current,
       importedProjectsRef.current,
     );
+    setIsImporting(true);
     if (projectRef === undefined) {
-      void onDone(undefined, importWarningRef.current, importedThreadCountRef.current);
+      void onDone(undefined, importWarningRef.current, importedThreadCountRef.current).then(
+        (completed) => {
+          if (!completed) setIsImporting(false);
+        },
+      );
       return;
     }
-    setIsImporting(true);
     setLandingProject(projectRef);
   };
 
@@ -1067,7 +1080,6 @@ function ImportStep({
     }
     setIsImporting(true);
     importWarningRef.current = "";
-    importedThreadCountRef.current = 0;
     lastImportSelectionRef.current = selection.map((candidate) => candidate.key);
     const importGeneration = importGenerationRef.current;
     const importedProjects = importedProjectsRef.current;
@@ -1163,14 +1175,16 @@ function ImportStep({
       if (refreshEnvironments.has(scan.environmentId)) scan.refresh();
     }
     setIsImporting(false);
-    importedThreadCountRef.current = importedThreadCount;
+    // A retry after a failed completion keeps the threads earlier attempts imported.
+    importedThreadCountRef.current += importedThreadCount;
+    const totalImportedThreadCount = importedThreadCountRef.current;
     if (importedProjectsCount < selection.length) {
-      if (importedThreadCount > 0 && skippedThreadCount > 0) {
-        importWarningRef.current = `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}. ${skippedThreadCount} ${skippedThreadCount === 1 ? "thread" : "threads"} could not be imported.`;
+      if (totalImportedThreadCount > 0 && skippedThreadCount > 0) {
+        importWarningRef.current = `Imported ${totalImportedThreadCount} ${totalImportedThreadCount === 1 ? "thread" : "threads"}. ${skippedThreadCount} ${skippedThreadCount === 1 ? "thread" : "threads"} could not be imported.`;
       } else if (skippedThreadCount > 0) {
         importWarningRef.current = `${skippedThreadCount} ${skippedThreadCount === 1 ? "thread could" : "threads could"} not be imported.`;
-      } else if (importedThreadCount > 0) {
-        importWarningRef.current = `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}. Some thread history could not be imported.`;
+      } else if (totalImportedThreadCount > 0) {
+        importWarningRef.current = `Imported ${totalImportedThreadCount} ${totalImportedThreadCount === 1 ? "thread" : "threads"}. Some thread history could not be imported.`;
       } else {
         importWarningRef.current = "Could not import thread history.";
       }
