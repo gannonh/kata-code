@@ -61,6 +61,7 @@ const makeHandlerLayer = (
     readonly environment?: Record<string, unknown>;
     readonly updateDesktopDatabaseExitCode?: number;
     readonly updateDesktopDatabaseStalled?: boolean;
+    readonly updateDesktopDatabaseMissing?: boolean;
     readonly updateDesktopDatabaseStarted?: Deferred.Deferred<void>;
     readonly xdgMimeExitCode?: number;
     readonly writeError?: PlatformError.PlatformError;
@@ -128,6 +129,16 @@ const makeHandlerLayer = (
               args: childProcess.args,
             });
             const isCacheRefresh = childProcess.command === "update-desktop-database";
+            if (isCacheRefresh && input.updateDesktopDatabaseMissing === true) {
+              return Effect.fail(
+                PlatformError.systemError({
+                  _tag: "NotFound",
+                  module: "ChildProcess",
+                  method: "spawn",
+                  description: "spawn update-desktop-database ENOENT",
+                }),
+              );
+            }
             const handle = mockProcess(
               isCacheRefresh
                 ? (input.updateDesktopDatabaseExitCode ?? 0)
@@ -373,11 +384,13 @@ describe("DesktopLinuxUrlHandler", () => {
   });
 
   it.effect("never fails startup when registration cannot complete", () => {
+    const desktopDatabaseMissing = emptyRecording();
     const desktopDatabaseFailed = emptyRecording();
     const xdgMimeFailed = emptyRecording();
     const writeFailed = emptyRecording();
 
     return Effect.gen(function* () {
+      yield* runRegister(desktopDatabaseMissing, { updateDesktopDatabaseMissing: true });
       yield* runRegister(desktopDatabaseFailed, { updateDesktopDatabaseExitCode: 1 });
       yield* runRegister(xdgMimeFailed, { xdgMimeExitCode: 1 });
       yield* runRegister(writeFailed, {
@@ -390,6 +403,10 @@ describe("DesktopLinuxUrlHandler", () => {
         }),
       });
 
+      assert.deepEqual(
+        desktopDatabaseMissing.commands.map(({ command }) => command),
+        ["update-desktop-database", "xdg-mime", "xdg-mime"],
+      );
       assert.deepEqual(
         desktopDatabaseFailed.commands.map(({ command }) => command),
         ["update-desktop-database", "xdg-mime", "xdg-mime"],
