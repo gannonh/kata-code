@@ -169,15 +169,23 @@ the instance before it works.
 3. **Add each social provider's own OAuth credentials.** Production cannot use Clerk's shared
    development credentials. Create an OAuth app with each provider and enter its client ID and
    secret under **User & authentication > Social connections**.
-4. **Check what the clone carried over.** Recreate anything missing using the sections above:
-   - JWT template `kata-relay` with `{ "aud": "kata-code-relay" }`
-   - the [CLI OAuth application](#cli-oauth-application), including **Device authorization grant**
-     (a Clerk support request on each instance) and the `http://127.0.0.1:34338/callback` redirect
-   - the Native API iOS app `ZBZKKWF95G.com.katacode.app`, and the desktop redirects
+4. **Check what the clone carried over.** The clone copied the `kata-relay` JWT template and
+   **Access mode: Waitlist**. It did not copy the CLI OAuth application, the iOS app, or the native
+   redirect allowlist. Recreate them:
+   - the [CLI OAuth application](#cli-oauth-application), public, with redirect URIs
+     `http://127.0.0.1:34338/callback` and `https://app.kata.sh/connect/callback`, scopes
+     `openid profile email offline_access`, and **Device authorization grant**. The Backend API
+     creates it (`POST /v1/oauth_applications`, with `redirect_uris` and without `callback_url`)
+     and enabled the device grant on production without a Clerk support request.
+   - the Native API iOS app `ZBZKKWF95G.com.katacode.app`. Clerk also adds
+     `com.katacode.app://callback` to the redirect allowlist. Add `katacode://app/` and
+     `katacode-dev://app/` too.
    - **Access mode** set to **Waitlist** (see [Early access waitlist](#early-access-waitlist)).
      Without it, any client sign-in screen can create an account.
 5. **Create a smoke-test user.** The relay deploy runs `CLERK_SMOKE_USER_ID` against the instance.
-   Create a user in the production instance and set the `production` variable to its ID.
+   Create a user in the production instance, `kata-code-smoke@kata.sh`, and set the `production`
+   variable and the 1Password Environment to its ID. Production rejects Backend API session
+   creation, so the smoke test signs the user in with a sign-in token through the Frontend API.
 6. **Swap the keys together.** Changing only some of them leaves the relay rejecting tokens.
 
    ```sh
@@ -187,8 +195,10 @@ the instance before it works.
    gh secret set CLERK_SECRET_KEY --env production --repo gannonh/kata-code           # sk_live_...
    ```
 
-   Update `KATACODE_CLERK_PUBLISHABLE_KEY` and `KATACODE_CLERK_CLI_OAUTH_CLIENT_ID` in the
-   1Password Environment to match, then redeploy the production relay.
+   Update `KATACODE_CLERK_PUBLISHABLE_KEY`, `CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`,
+   `KATACODE_CLERK_CLI_OAUTH_CLIENT_ID`, `CLERK_CLI_OAUTH_CLIENT_ID`, and `CLERK_SMOKE_USER_ID` in
+   the 1Password Environment to match. `op` can only read Environments, so edit them in the
+   1Password app. Then run the **Deploy Kata Code Connect relay** workflow.
 
 7. **Verify on released builds.** Sign in fresh on a desktop nightly, the hosted web app, and a
    TestFlight build, and pair an environment through `https://relay.kata.sh` from each. Run

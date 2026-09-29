@@ -54,19 +54,20 @@ Process environment variables override 1Password for the same key.
 
 ## Clerk instance and relay
 
-Source builds sign in against the Clerk development instance `upward-terrier-81`
-(`upward-terrier-81.clerk.accounts.dev`). `KATACODE_CLERK_PUBLISHABLE_KEY` is a `pk_test_` key for
-that instance. `KATACODE_RELAY_URL` points at the production relay, `https://relay.kata.sh`.
+Source builds, released builds, and the production relay all sign in against the Clerk production
+instance for `kata.sh` (Frontend API `clerk.kata.sh`). `KATACODE_CLERK_PUBLISHABLE_KEY` is a
+`pk_live_` key for it. `KATACODE_RELAY_URL` points at the production relay, `https://relay.kata.sh`.
 
-This pairing is intended. The production relay trusts the same development instance. The relay
-authenticates with `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` from the GitHub `production`
-environment (see `.github/workflows/deploy-relay.yml`), and that publishable key is the same
-`upward-terrier-81` key as the 1Password Environment. The `production` variable
-`CLERK_CLI_OAUTH_CLIENT_ID` also matches the source-build CLI client. Tokens from a source build are
-therefore valid at `https://relay.kata.sh`. It stays this way until KAT-3511 moves Connect to a
-production Clerk instance. When that lands, change the publishable key, the `CLERK_SECRET_KEY`
-secret, and the CLI client ID together, in GitHub and in the 1Password Environment. A publishable
-key and secret key from different instances make the relay reject every token.
+The relay authenticates with `CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` from the GitHub
+`production` environment (see `.github/workflows/deploy-relay.yml`), which are the same instance as
+the 1Password Environment. The `production` variable `CLERK_CLI_OAUTH_CLIENT_ID` matches the
+source-build CLI client. Change the publishable key, the `CLERK_SECRET_KEY` secret, and the CLI
+client ID together, in GitHub and in the 1Password Environment. A publishable key and secret key
+from different instances make the relay reject every token. See
+[Production Clerk instance](./connect-setup.md#production-clerk-instance) for setup.
+
+The earlier development instance (`upward-terrier-81.clerk.accounts.dev`) is no longer used by any
+released or source build.
 
 ## Link a source worktree
 
