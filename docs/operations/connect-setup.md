@@ -167,8 +167,21 @@ the instance before it works.
    the records resolve. Propagation can take up to 48 hours, and Clerk issues certificates after
    verification.
 3. **Add each social provider's own OAuth credentials.** Production cannot use Clerk's shared
-   development credentials. Create an OAuth app with each provider and enter its client ID and
-   secret under **User & authentication > Social connections**.
+   development credentials. Without them the provider's authorize URL has no `client_id` and
+   sign-in fails. Google is the only provider enabled. Its OAuth client lives in the Google Cloud
+   project `kata-code` (owner `gannon@gannonh.dev`):
+   - Google Auth Platform: External audience, scopes `openid`, `email`, `profile` only, publishing
+     status **In production** (Testing mode blocks every Google account that is not a listed test
+     user). Branding uses `https://kata.sh` and `https://kata.sh/privacy` and needs no Google
+     verification while it has no logo or sensitive scopes.
+   - Client: type **Web application**, authorized redirect URI
+     `https://clerk.kata.sh/v1/oauth_callback`.
+   - In Clerk, **User & authentication > SSO connections > Google**, enter the client ID and secret.
+
+   Check it: the `external_verification_redirect_url` from
+   `POST https://clerk.kata.sh/v1/client/sign_ins` with `strategy=oauth_google` must contain a
+   `client_id` parameter.
+
 4. **Check what the clone carried over.** The clone copied the `kata-relay` JWT template and
    **Access mode: Waitlist**. It did not copy the CLI OAuth application, the iOS app, or the native
    redirect allowlist. Recreate them:
