@@ -76,51 +76,61 @@ export async function exchangeClerkDpopToken(
   };
 }
 
-export interface RedeemSignInTicketInput {
+const clerkFrontendApiQuery = `__clerk_api_version=${ClerkFrontendApiVersion}&_is_native=1`;
+
+export interface SignInWithTicketInput {
   readonly frontendApiUrl: string;
   readonly ticket: string;
-  readonly jwtTemplate: string;
   readonly fetchImpl?: typeof fetch;
 }
 
-export interface RedeemSignInTicketResult {
+export interface SmokeSession {
   readonly sessionId: string;
-  readonly jwt: string;
+  readonly clientToken: string;
 }
 
 /**
  * Backend API `POST /v1/sessions` only works on development instances, so the smoke test signs
  * in through the Frontend API with a Backend API sign-in token, which production accepts.
  */
-export async function redeemSignInTicket(
-  input: RedeemSignInTicketInput,
-): Promise<RedeemSignInTicketResult> {
-  const fetchImpl = input.fetchImpl ?? fetch;
-  const query = `__clerk_api_version=${ClerkFrontendApiVersion}&_is_native=1`;
-  const signInResponse = await fetchImpl(`${input.frontendApiUrl}/v1/client/sign_ins?${query}`, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ strategy: "ticket", ticket: input.ticket }),
-  });
-  const clientToken = signInResponse.headers.get("authorization");
-  const signIn = (await signInResponse.json()) as {
+export async function signInWithTicket(input: SignInWithTicketInput): Promise<SmokeSession> {
+  const response = await (input.fetchImpl ?? fetch)(
+    `${input.frontendApiUrl}/v1/client/sign_ins?${clerkFrontendApiQuery}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ strategy: "ticket", ticket: input.ticket }),
+    },
+  );
+  const clientToken = response.headers.get("authorization");
+  const signIn = (await response.json()) as {
     readonly response?: { readonly status?: string; readonly created_session_id?: string };
   };
   const sessionId = signIn.response?.created_session_id;
-  if (!signInResponse.ok || signIn.response?.status !== "complete" || !sessionId || !clientToken) {
-    throw new Error(`Clerk sign-in ticket was not accepted (${signInResponse.status}).`);
+  if (!response.ok || signIn.response?.status !== "complete" || !sessionId || !clientToken) {
+    throw new Error(`Clerk sign-in ticket was not accepted (${response.status}).`);
   }
-  const tokenResponse = await fetchImpl(
-    `${input.frontendApiUrl}/v1/client/sessions/${sessionId}/tokens/${input.jwtTemplate}?${query}`,
-    { method: "POST", headers: { authorization: clientToken } },
+  return { sessionId, clientToken };
+}
+
+export interface FetchSessionJwtInput extends SmokeSession {
+  readonly frontendApiUrl: string;
+  readonly jwtTemplate: string;
+  readonly fetchImpl?: typeof fetch;
+}
+
+export async function fetchSessionJwt(input: FetchSessionJwtInput): Promise<string> {
+  const response = await (input.fetchImpl ?? fetch)(
+    `${input.frontendApiUrl}/v1/client/sessions/${input.sessionId}/tokens/${input.jwtTemplate}?${clerkFrontendApiQuery}`,
+    { method: "POST", headers: { authorization: input.clientToken } },
   );
-  const token = (await tokenResponse.json()) as { readonly jwt?: string };
-  if (!tokenResponse.ok || !token.jwt) {
+  const token = (await response.json()) as { readonly jwt?: string };
+  if (!response.ok || !token.jwt) {
     throw new Error(
-      `Clerk did not return a JWT for the relay smoke template (${tokenResponse.status}).`,
+      `Clerk did not return a JWT for the relay smoke template (${response.status}).`,
     );
   }
-  return { sessionId, jwt: token.jwt };
+  return token.jwt;
 }
 
 async function runClerkDpopSmoke(input: {
@@ -131,17 +141,19 @@ async function runClerkDpopSmoke(input: {
   readonly jwtTemplate: string;
 }): Promise<ExchangeClerkDpopTokenResult> {
   const clerk = createClerkClient({ secretKey: input.secretKey });
+  const frontendApiUrl = clerkFrontendApiUrlFromPublishableKey(input.publishableKey);
   const signInToken = await clerk.signInTokens.createSignInToken({
     userId: input.smokeUserId,
     expiresInSeconds: 60,
   });
-  const session = await redeemSignInTicket({
-    frontendApiUrl: clerkFrontendApiUrlFromPublishableKey(input.publishableKey),
-    ticket: signInToken.token,
-    jwtTemplate: input.jwtTemplate,
-  });
+  const session = await signInWithTicket({ frontendApiUrl, ticket: signInToken.token });
   try {
-    return await exchangeClerkDpopToken({ relayUrl: input.relayUrl, clerkToken: session.jwt });
+    const clerkToken = await fetchSessionJwt({
+      ...session,
+      frontendApiUrl,
+      jwtTemplate: input.jwtTemplate,
+    });
+    return await exchangeClerkDpopToken({ relayUrl: input.relayUrl, clerkToken });
   } finally {
     await clerk.sessions.revokeSession(session.sessionId);
   }
