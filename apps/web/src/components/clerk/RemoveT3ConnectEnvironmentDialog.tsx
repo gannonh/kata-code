@@ -44,24 +44,27 @@ export function RemoveT3ConnectEnvironmentDialog({
         <AlertDialogPopup>
           <AlertDialogHeader>
             <AlertDialogTitle>Remove {shownLabel} from this device?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This forgets its pairing, credentials, and cached threads here.
-            </AlertDialogDescription>
-            <AlertDialogDescription>
-              It stays on your Kata Code Connect account and keeps its host space. Deregister it in{" "}
-              {openAccountPage ? (
-                <InlineButton
-                  onClick={() => {
-                    onCancel();
-                    openAccountPage();
-                  }}
-                >
-                  Kata Code Connect settings
-                </InlineButton>
-              ) : (
-                "Kata Code Connect settings"
-              )}{" "}
-              to free it.
+            {/* One description: Base UI points aria-describedby at a single description id, so
+                two separate descriptions would announce only the last. */}
+            <AlertDialogDescription render={<div />} className="flex flex-col gap-2">
+              <p>This forgets its pairing, credentials, and cached threads here.</p>
+              <p>
+                It stays on your Kata Code Connect account and keeps its host space. Deregister it
+                in{" "}
+                {openAccountPage ? (
+                  <InlineButton
+                    onClick={() => {
+                      onCancel();
+                      openAccountPage();
+                    }}
+                  >
+                    Kata Code Connect settings
+                  </InlineButton>
+                ) : (
+                  "Kata Code Connect settings"
+                )}{" "}
+                to free it.
+              </p>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
