@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "@effect/vitest";
 
-import { exchangeClerkDpopToken } from "./clerk-dpop-smoke.ts";
+import { exchangeClerkDpopToken, redeemSignInTicket } from "./clerk-dpop-smoke.ts";
 
 describe("exchangeClerkDpopToken", () => {
   it("requests a DPoP-bound token with the Kata web client ID", async () => {
@@ -43,5 +43,48 @@ describe("exchangeClerkDpopToken", () => {
         fetchImpl,
       }),
     ).rejects.toThrow(/Relay DPoP token exchange failed/);
+  });
+});
+
+describe("redeemSignInTicket", () => {
+  it("signs in with the ticket and returns the session id and template JWT", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      if (String(input).includes("/v1/client/sign_ins")) {
+        return Response.json(
+          { response: { status: "complete", created_session_id: "sess_1" } },
+          { headers: { authorization: "client-jwt" } },
+        );
+      }
+      return Response.json({ jwt: "relay-jwt" });
+    });
+
+    const result = await redeemSignInTicket({
+      frontendApiUrl: "https://clerk.example.test",
+      ticket: "ticket-1",
+      jwtTemplate: "kata-relay",
+      fetchImpl,
+    });
+
+    expect(result).toEqual({ sessionId: "sess_1", jwt: "relay-jwt" });
+    expect(calls.map((call) => call.url)).toEqual([
+      "https://clerk.example.test/v1/client/sign_ins?__clerk_api_version=2025-11-10&_is_native=1",
+      "https://clerk.example.test/v1/client/sessions/sess_1/tokens/kata-relay?__clerk_api_version=2025-11-10&_is_native=1",
+    ]);
+    expect(String(calls[0]?.init?.body)).toBe("strategy=ticket&ticket=ticket-1");
+    expect(calls[1]?.init?.headers).toEqual({ authorization: "client-jwt" });
+  });
+
+  it("fails when Clerk rejects the ticket", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ errors: [{}] }, { status: 422 }));
+    await expect(
+      redeemSignInTicket({
+        frontendApiUrl: "https://clerk.example.test",
+        ticket: "bad",
+        jwtTemplate: "kata-relay",
+        fetchImpl,
+      }),
+    ).rejects.toThrow("Clerk sign-in ticket was not accepted (422).");
   });
 });

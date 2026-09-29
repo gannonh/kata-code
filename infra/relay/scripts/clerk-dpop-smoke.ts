@@ -9,7 +9,11 @@ import {
   RelayWebClientId,
 } from "@kata-sh/code-contracts/relay";
 
+import { clerkFrontendApiUrlFromPublishableKey } from "@kata-sh/code-shared/relayAuth";
+
 import { generateNodeDpopKeyPair, signNodeDpopProof } from "./dpop-node.ts";
+
+const ClerkFrontendApiVersion = "2025-11-10";
 
 export interface ExchangeClerkDpopTokenInput {
   readonly relayUrl: string;
@@ -72,40 +76,90 @@ export async function exchangeClerkDpopToken(
   };
 }
 
+export interface RedeemSignInTicketInput {
+  readonly frontendApiUrl: string;
+  readonly ticket: string;
+  readonly jwtTemplate: string;
+  readonly fetchImpl?: typeof fetch;
+}
+
+export interface RedeemSignInTicketResult {
+  readonly sessionId: string;
+  readonly jwt: string;
+}
+
+/**
+ * Backend API `POST /v1/sessions` only works on development instances, so the smoke test signs
+ * in through the Frontend API with a Backend API sign-in token, which production accepts.
+ */
+export async function redeemSignInTicket(
+  input: RedeemSignInTicketInput,
+): Promise<RedeemSignInTicketResult> {
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const query = `__clerk_api_version=${ClerkFrontendApiVersion}&_is_native=1`;
+  const signInResponse = await fetchImpl(`${input.frontendApiUrl}/v1/client/sign_ins?${query}`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ strategy: "ticket", ticket: input.ticket }),
+  });
+  const clientToken = signInResponse.headers.get("authorization");
+  const signIn = (await signInResponse.json()) as {
+    readonly response?: { readonly status?: string; readonly created_session_id?: string };
+  };
+  const sessionId = signIn.response?.created_session_id;
+  if (!signInResponse.ok || signIn.response?.status !== "complete" || !sessionId || !clientToken) {
+    throw new Error(`Clerk sign-in ticket was not accepted (${signInResponse.status}).`);
+  }
+  const tokenResponse = await fetchImpl(
+    `${input.frontendApiUrl}/v1/client/sessions/${sessionId}/tokens/${input.jwtTemplate}?${query}`,
+    { method: "POST", headers: { authorization: clientToken } },
+  );
+  const token = (await tokenResponse.json()) as { readonly jwt?: string };
+  if (!tokenResponse.ok || !token.jwt) {
+    throw new Error(
+      `Clerk did not return a JWT for the relay smoke template (${tokenResponse.status}).`,
+    );
+  }
+  return { sessionId, jwt: token.jwt };
+}
+
 async function runClerkDpopSmoke(input: {
   readonly relayUrl: string;
   readonly secretKey: string;
+  readonly publishableKey: string;
   readonly smokeUserId: string;
   readonly jwtTemplate: string;
 }): Promise<ExchangeClerkDpopTokenResult> {
   const clerk = createClerkClient({ secretKey: input.secretKey });
-  const session = await clerk.sessions.createSession({ userId: input.smokeUserId });
+  const signInToken = await clerk.signInTokens.createSignInToken({
+    userId: input.smokeUserId,
+    expiresInSeconds: 60,
+  });
+  const session = await redeemSignInTicket({
+    frontendApiUrl: clerkFrontendApiUrlFromPublishableKey(input.publishableKey),
+    ticket: signInToken.token,
+    jwtTemplate: input.jwtTemplate,
+  });
   try {
-    const tokenResult = await clerk.sessions.getToken(session.id, input.jwtTemplate);
-    if (!tokenResult.jwt) {
-      throw new Error("Clerk did not return a JWT for the relay smoke template.");
-    }
-    return await exchangeClerkDpopToken({
-      relayUrl: input.relayUrl,
-      clerkToken: tokenResult.jwt,
-    });
+    return await exchangeClerkDpopToken({ relayUrl: input.relayUrl, clerkToken: session.jwt });
   } finally {
-    await clerk.sessions.revokeSession(session.id);
+    await clerk.sessions.revokeSession(session.sessionId);
   }
 }
 
 if (import.meta.main) {
   const relayUrl = process.env.RELAY_URL?.trim();
   const secretKey = process.env.CLERK_SECRET_KEY?.trim();
+  const publishableKey = process.env.CLERK_PUBLISHABLE_KEY?.trim();
   const smokeUserId = process.env.CLERK_SMOKE_USER_ID?.trim();
   const jwtTemplate = process.env.CLERK_JWT_TEMPLATE?.trim();
-  if (!relayUrl || !secretKey || !smokeUserId || !jwtTemplate) {
+  if (!relayUrl || !secretKey || !publishableKey || !smokeUserId || !jwtTemplate) {
     process.stderr.write(
-      "Missing required environment variables: RELAY_URL, CLERK_SECRET_KEY, CLERK_SMOKE_USER_ID, CLERK_JWT_TEMPLATE.\n",
+      "Missing required environment variables: RELAY_URL, CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY, CLERK_SMOKE_USER_ID, CLERK_JWT_TEMPLATE.\n",
     );
     process.exit(1);
   }
-  runClerkDpopSmoke({ relayUrl, secretKey, smokeUserId, jwtTemplate })
+  runClerkDpopSmoke({ relayUrl, secretKey, publishableKey, smokeUserId, jwtTemplate })
     .then((result) => {
       process.stdout.write(
         `Relay Clerk DPoP smoke passed (scope=${result.scope}, expires_in=${result.expiresIn}).\n`,
