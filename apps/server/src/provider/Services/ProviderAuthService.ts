@@ -1,5 +1,7 @@
 // @effect-diagnostics deterministicKeys:off - FORK.md retains internal upstream service identifiers.
 import type {
+  ChatGptReconnectProfile,
+  ChatGptTransferredProfile,
   ProviderAuthRespondInput,
   ProviderAuthStartInput,
   ProviderAuthState,
@@ -14,6 +16,17 @@ import type * as Scope from "effect/Scope";
 export interface ProviderAuthController {
   /** Equal keys mean these instances share credentials on this environment. */
   readonly credentialBinding?: { readonly owner: "provider" | "t3"; readonly key: string };
+  readonly reconnectProfile?: (
+    methodId: string,
+  ) => Effect.Effect<ChatGptReconnectProfile | null, ProviderSetupError>;
+  readonly importProfile?: (
+    profile: ChatGptTransferredProfile,
+    stopSessions: Effect.Effect<void, ProviderSetupError>,
+  ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
+  readonly adoptCredentials?: (
+    update: Effect.Effect<void, ProviderSetupError>,
+    stopSessions: Effect.Effect<void, ProviderSetupError>,
+  ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
   readonly isChangingCredentials?: Effect.Effect<boolean>;
   readonly invalidate?: Effect.Effect<void>;
   readonly refreshMethods?: Effect.Effect<void>;
@@ -24,6 +37,8 @@ export interface ProviderAuthController {
     ownerSessionId: string,
     stopSessions?: Effect.Effect<void, ProviderSetupError>,
     methodId?: string,
+    returnUrl?: string,
+    callbackMode?: "server" | "client",
   ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
   readonly complete: (
     ownerSessionId: string,
@@ -50,6 +65,12 @@ interface ProviderAuthTarget {
 }
 
 export interface ProviderAuthServiceShape {
+  readonly reconnectProfile: (
+    input: ProviderAuthTarget & { methodId: string },
+  ) => Effect.Effect<ChatGptReconnectProfile | null, ProviderSetupError>;
+  readonly importProfile: (
+    input: ProviderAuthTarget & { profile: ChatGptTransferredProfile },
+  ) => Effect.Effect<ProviderAuthState, ProviderSetupError>;
   readonly start: (
     input: ProviderAuthStartInput,
     ownerSessionId: string,
