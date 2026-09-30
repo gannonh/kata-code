@@ -497,22 +497,41 @@ describe("upstream preservation CLI", () => {
     ).toThrow("exactly");
   });
 
-  it("requires the early-access inventory entry once its check is no longer pending", () => {
+  it("accepts an inventory with or without a pending check entry", () => {
     const inventory = JSON.parse(
       NodeFS.readFileSync(
         NodePath.join(repositoryRoot, "docs/upstream/retained-behavior.v1.json"),
         "utf8",
       ),
     ) as { entries: Array<{ id: string }> };
-    const withoutEntry = inventory.entries.filter(
-      (entry) => entry.id !== "connect-early-access-waitlist",
-    );
+    const pending = PRESERVATION_CONTRACT.find(
+      (check) => check.id === "model-manifest-newer-bundle",
+    )!;
+    const pendingEntry = {
+      id: pending.id,
+      title: pending.title,
+      retainedOutcome:
+        "The model manifest refresh keeps the bundled manifest when the fetched copy is an older edit.",
+      ownerPaths: [...pending.ownerPaths],
+      specRefs: [...pending.specRefs],
+      evidence: { kind: "automated", profile: "portable", verification: pending.id },
+    };
+    const withoutPending = inventory.entries.filter((entry) => entry.id !== pending.id);
 
-    expect(PENDING_INVENTORY_CHECKS.size).toBe(0);
-    expect(validateInventory(inventory, repositoryRoot).entries).toHaveLength(31);
+    expect([...PENDING_INVENTORY_CHECKS.keys()]).toEqual(["model-manifest-newer-bundle"]);
+    expect(
+      validateInventory({ ...inventory, entries: withoutPending }, repositoryRoot).entries,
+    ).toHaveLength(31);
+    expect(
+      validateInventory(
+        { ...inventory, entries: [...withoutPending, pendingEntry] },
+        repositoryRoot,
+      ).entries,
+    ).toHaveLength(32);
     expect(() =>
-      validateInventory({ ...inventory, entries: withoutEntry }, repositoryRoot),
-    ).toThrow("Inventory must contain exactly 29 entries; found 28.");
+      validateInventory({ ...inventory, entries: withoutPending.slice(1) }, repositoryRoot),
+    ).toThrow("Inventory must contain exactly 29 to 30 entries; found 28.");
+    expect(PRESERVATION_CHECKS.map((check) => check.id)).toContain(pending.id);
   });
 
   it("rejects skip metadata added to the inventory", () => {
@@ -1118,8 +1137,8 @@ describe("upstream preservation CLI", () => {
         "apps/server/src/processRunner.test.ts",
         "apps/server/src/vcs/VcsProcess.test.ts",
       ]);
-      expect(PRESERVATION_CONTRACT.length).toBe(31);
-      expect(PRESERVATION_CHECKS.length).toBe(29);
+      expect(PRESERVATION_CONTRACT.length).toBe(32);
+      expect(PRESERVATION_CHECKS.length).toBe(30);
       const theme = PRESERVATION_CHECKS.find(
         (check) => check.id === "mobile-theme-native-identity",
       );
