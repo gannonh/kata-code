@@ -61,6 +61,8 @@ const makeHarnessFor = Effect.fnUntraced(function* (
   let revoked = false;
   let refreshError: string | undefined;
   let omitRefreshToken = false;
+  let omitRefreshScope = false;
+  let omitInitialScope = false;
   let revocationStatus = 200;
   let codeError: string | undefined;
   const revocations: URLSearchParams[] = [];
@@ -139,7 +141,7 @@ const makeHarnessFor = Effect.fnUntraced(function* (
                     ...(omitRefreshToken ? {} : { refresh_token: `refresh-${refreshes}` }),
                     token_type: "Bearer",
                     expires_in: 3600,
-                    scope: grantScope,
+                    ...(omitRefreshScope ? {} : { scope: grantScope }),
                   }),
                 );
                 return;
@@ -186,7 +188,7 @@ const makeHarnessFor = Effect.fnUntraced(function* (
                   id_token: token,
                   token_type: "Bearer",
                   expires_in: 3600,
-                  scope: grantScope,
+                  ...(omitInitialScope ? {} : { scope: grantScope }),
                 }),
               );
               return;
@@ -362,6 +364,12 @@ const makeHarnessFor = Effect.fnUntraced(function* (
     },
     setOmitRefreshToken: (value: boolean) => {
       omitRefreshToken = value;
+    },
+    setOmitRefreshScope: (value: boolean) => {
+      omitRefreshScope = value;
+    },
+    setOmitInitialScope: (value: boolean) => {
+      omitInitialScope = value;
     },
     setRevocationStatus: (value: number) => {
       revocationStatus = value;
@@ -1038,7 +1046,7 @@ it.effect("returns successful desktop sign-in to the original Welcome step", () 
   ),
 );
 
-it.effect("retains the saved refresh token when renewal omits a rotated token", () =>
+it.effect("retains the saved refresh token and scopes when renewal omits both", () =>
   provision(
     Effect.gen(function* () {
       const h = yield* makeHarness;
@@ -1046,17 +1054,62 @@ it.effect("retains the saved refresh token when renewal omits a rotated token", 
       yield* h.phase("succeeded");
       yield* h.seedExpired;
       h.setOmitRefreshToken(true);
+      h.setOmitRefreshScope(true);
 
       const renewed = yield* h.auth.access;
       assert.strictEqual(renewed.accessToken, "access-1");
       assert.strictEqual(renewed.refreshToken, "initial-refresh");
+      assert.deepEqual(renewed.scopes, [
+        "openid",
+        "profile",
+        "email",
+        "offline_access",
+        "resource.invoke",
+        "chatgpt.tokens.use.direct",
+      ]);
+      assert.deepEqual(Option.getOrThrow(yield* h.auth.read).scopes, renewed.scopes);
       assert.strictEqual(Option.getOrThrow(yield* h.auth.read).refreshToken, "initial-refresh");
 
       yield* h.seedExpired;
       h.setOmitRefreshToken(false);
+      h.setOmitRefreshScope(false);
       const rotated = yield* h.auth.access;
       assert.strictEqual(rotated.refreshToken, "refresh-2");
       assert.strictEqual(h.exchanges.at(-1)?.get("refresh_token"), "initial-refresh");
+    }),
+  ),
+);
+
+it.effect("rejects an initial token response without scope", () =>
+  provision(
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      h.setOmitInitialScope(true);
+      yield* h.signIn;
+      assert.include((yield* h.phase("failed")).message!, "invalid token response");
+      assert.strictEqual(h.exchanges.length, 1);
+      assert.deepEqual(h.storedRecords(), []);
+      assert.isTrue(Option.isNone(yield* h.auth.read));
+    }),
+  ),
+);
+
+it.effect("persists explicitly reduced scopes from refresh responses", () =>
+  provision(
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* h.signIn;
+      yield* h.phase("succeeded");
+      yield* h.seedExpired;
+      h.declineSharing();
+
+      const result = yield* h.auth.access.pipe(Effect.result);
+      assert.strictEqual(result._tag, "Failure");
+      assert.deepEqual(Option.getOrThrow(yield* h.auth.read).scopes, [
+        "openid",
+        "profile",
+        "email",
+      ]);
     }),
   ),
 );

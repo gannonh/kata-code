@@ -37,7 +37,7 @@ const TokenResponse = Schema.Struct({
   id_token: Schema.optionalKey(Schema.String),
   token_type: Schema.String,
   expires_in: Schema.Int.check(Schema.isGreaterThan(0)),
-  scope: Schema.String,
+  scope: Schema.optionalKey(Schema.String),
   earliest_refresh_at: Schema.optionalKey(Schema.Union([Schema.Finite, Schema.String])),
 });
 const Record = Schema.Struct({
@@ -614,6 +614,11 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
           }),
         ),
       );
+      if (tokens.scope === undefined)
+        return yield* failure(
+          "exchange",
+          "ChatGPT returned an invalid token response. Sign in again.",
+        );
       if (!tokens.id_token)
         return yield* failure(
           "verify",
@@ -780,7 +785,7 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
             refreshToken: tokens.refresh_token ?? record.refreshToken,
             expiresAt: (yield* Clock.currentTimeMillis) + tokens.expires_in * 1000,
             earliestRefreshAt: earliest(tokens.earliest_refresh_at),
-            scopes: tokens.scope.split(/\s+/).filter(Boolean),
+            scopes: tokens.scope?.split(/\s+/).filter(Boolean) ?? record.scopes,
           };
           yield* save(record);
           if (!record.scopes.includes(REQUIRED_SCOPE))

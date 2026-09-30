@@ -197,3 +197,11 @@ Fresh review on `cd190a2ac04dff137c0e48f2d5e1f811af5478d7` found two further def
 - [Direct loopback callback validation](https://github.com/gannonh/kata-code/pull/332#discussion_r4148646423): an unrelated request consumes the listener before its state is checked. The repair validates the callback URL and state first, allowing the matching redirect to finish the same attempt after an invalid request.
 
 The owning Linear spec records both repairs before implementation. Mocked RPC and loopback regressions verify the boundaries without a live account or provider turn. Valid callback errors and single-use behavior remain covered.
+
+## Accepted refresh scope repair before landing
+
+Fresh [Codex review](https://github.com/gannonh/kata-code/pull/332#discussion_r4148814100) on `8dfcf2b0aefdc7ed46567cdeb09ad21eb0b6d17d` found that the shared token decoder requires `scope` on refresh responses. OAuth permits omitting it when the granted scopes are unchanged, so this rejects a successful renewal before saving the new access token.
+
+The accepted repair retains the saved scopes only when a refresh response omits them. Explicitly supplied scopes replace the saved scopes and remain subject to the required sharing-scope check. Initial sign-in validation is preserved. Mocked renewal and persistence coverage verifies the repair.
+
+During the broader local test run, one shell-overflow test timed out while several builds ran concurrently. It passed alone (264 ms test body), and the complete server suite then passed 209/209 serially at the same head. No source or timeout change was made for that retry.
