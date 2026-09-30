@@ -146,6 +146,7 @@ import {
   AntigravityInstallation,
   AntigravityInstallationError,
 } from "./provider/AntigravityInstallation.ts";
+import { CodexInstallation } from "./provider/CodexInstallation.ts";
 import type { ProviderInstance } from "./provider/ProviderDriver.ts";
 import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
 import { ProviderAdapterRequestError } from "./provider/Errors.ts";
@@ -541,6 +542,7 @@ const buildAppUnderTest = (options?: {
     providerAuth?: Partial<ProviderAuthService["Service"]>;
     providerInstanceRegistry?: Partial<ProviderInstanceRegistry["Service"]>;
     antigravityInstallation?: Partial<AntigravityInstallation["Service"]>;
+    codexInstallation?: Partial<CodexInstallation["Service"]>;
     serverSettings?: Partial<ServerSettings.ServerSettingsService["Service"]>;
     externalLauncher?: Partial<ExternalLauncher.ExternalLauncher["Service"]>;
     vcsDriver?: Partial<VcsDriver.VcsDriver["Service"]>;
@@ -839,6 +841,10 @@ const buildAppUnderTest = (options?: {
             getInstance: () => Effect.undefined,
             listInstances: Effect.succeed([]),
             ...options?.layers?.providerInstanceRegistry,
+          }),
+          Layer.mock(CodexInstallation)({
+            managedDirectory: "unused-test-codex-runtime",
+            ...options?.layers?.codexInstallation,
           }),
           Layer.mock(AntigravityInstallation)({
             managedDirectory: "unused-test-antigravity-runtime",
@@ -6867,6 +6873,129 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
       assert.equal(installStarts, 0);
       assert.equal(authCalls, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("protects ChatGPT profile transfer and handoff RPCs from read-only clients", () =>
+    Effect.gen(function* () {
+      let reconnectCalls = 0;
+      let importCalls = 0;
+      yield* buildAppUnderTest({
+        layers: {
+          providerAuth: {
+            reconnectProfile: () =>
+              Effect.sync(() => {
+                reconnectCalls += 1;
+                return null;
+              }),
+            importProfile: () =>
+              Effect.sync(() => {
+                importCalls += 1;
+                return providerSetupAuthState;
+              }),
+          },
+        },
+      });
+
+      const token = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "orchestration:read",
+      });
+      assert.equal(token.response.status, 200);
+      const ticketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+        headers: { authorization: `Bearer ${token.body.access_token ?? ""}` },
+      });
+      const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(ticketResponse);
+      const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+      const importProfile = {
+        registration: {
+          clientId: "oaiapp_test",
+          subject: "subject",
+          email: null,
+          connectionLabel: "Test",
+          sharingEnabled: true,
+        },
+        credentials: {
+          clientId: "oaiapp_test",
+          accessToken: "access-token",
+          refreshToken: "refresh-token",
+          idToken: "id-token",
+          issuer: "https://auth.openai.com",
+          expiresAt: 4_102_444_800_000,
+          earliestRefreshAt: null,
+          scopes: ["chatgpt.tokens.use.direct"],
+          subject: "subject",
+          email: null,
+        },
+      };
+      const handoff = {
+        instanceId: providerSetupInstanceId,
+        environmentId: testEnvironmentDescriptor.environmentId,
+        attemptId: "read-only-handoff",
+        returnUrl: "http://127.0.0.1:51234/auth/callback",
+        profile: null,
+      };
+
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* () {
+            const errors = [
+              yield* client[WS_METHODS.chatGptReconnectProfile]({
+                instanceId: providerSetupInstanceId,
+                methodId: "chatgpt-change-account",
+              }).pipe(Effect.flip),
+              yield* client[WS_METHODS.chatGptImportProfile]({
+                instanceId: providerSetupInstanceId,
+                profile: importProfile,
+              }).pipe(Effect.flip),
+              yield* client[WS_METHODS.chatGptHandoffSubscribe](handoff).pipe(
+                Stream.runHead,
+                Effect.flip,
+              ),
+            ];
+            for (const error of errors) {
+              assert.equal(error._tag, "EnvironmentAuthorizationError");
+              if (error._tag === "EnvironmentAuthorizationError") {
+                assert.equal(error.requiredScope, "orchestration:operate");
+              }
+            }
+          }),
+        ),
+      );
+      assert.equal(reconnectCalls, 0);
+      assert.equal(importCalls, 0);
+
+      const operatorToken = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "orchestration:read orchestration:operate",
+      });
+      assert.equal(operatorToken.response.status, 200);
+      const operatorTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+        headers: { authorization: `Bearer ${operatorToken.body.access_token ?? ""}` },
+      });
+      const { ticket: operatorTicket } = yield* responseJsonEffect<{
+        readonly ticket: string;
+      }>(operatorTicketResponse);
+      const operatorWsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(operatorTicket)}`;
+      yield* Effect.scoped(
+        withWsRpcClient(operatorWsUrl, (client) =>
+          Effect.gen(function* () {
+            assert.isNull(
+              yield* client[WS_METHODS.chatGptReconnectProfile]({
+                instanceId: providerSetupInstanceId,
+                methodId: "chatgpt-change-account",
+              }),
+            );
+            assert.deepEqual(
+              yield* client[WS_METHODS.chatGptImportProfile]({
+                instanceId: providerSetupInstanceId,
+                profile: importProfile,
+              }),
+              providerSetupAuthState,
+            );
+          }),
+        ),
+      );
+      assert.equal(reconnectCalls, 1);
+      assert.equal(importCalls, 1);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -17,6 +17,8 @@ import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import { subscribeChatGptHandoff } from "./provider/CodexChatGptHandoff.ts";
+import { subscribeCodexAuthCallback } from "./provider/CodexAuthCallback.ts";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   AuthAccessStreamError,
@@ -2835,6 +2837,30 @@ const makeWsRpcLayer = (
             WS_METHODS.providerAuthComplete,
             providerAuth.complete(input, currentSessionId),
             { "rpc.aggregate": "provider" },
+          ),
+        [WS_METHODS.chatGptReconnectProfile]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.chatGptReconnectProfile,
+            providerAuth.reconnectProfile(input),
+            { "rpc.aggregate": "provider" },
+          ),
+        [WS_METHODS.chatGptImportProfile]: (input) =>
+          observeRpcEffect(WS_METHODS.chatGptImportProfile, providerAuth.importProfile(input), {
+            "rpc.aggregate": "provider",
+          }),
+        [WS_METHODS.chatGptHandoffSubscribe]: (input) =>
+          observeRpcStream(
+            WS_METHODS.chatGptHandoffSubscribe,
+            subscribeChatGptHandoff(input, currentSessionId),
+            { "rpc.aggregate": "provider" },
+          ),
+        [WS_METHODS.codexAuthCallbackSubscribe]: (input) =>
+          observeRpcStream(
+            WS_METHODS.codexAuthCallbackSubscribe,
+            subscribeCodexAuthCallback(input),
+            {
+              "rpc.aggregate": "provider",
+            },
           ),
         [WS_METHODS.providerAuthCancel]: (input) =>
           observeRpcEffect(

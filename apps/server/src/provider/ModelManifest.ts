@@ -403,7 +403,11 @@ export const make = Effect.gen(function* () {
       Effect.timeout(FETCH_TIMEOUT_MS),
       Effect.catchCause(() => Effect.succeed(null)),
     );
-    if (fetched === null) return manifest;
+    // A CDN can still serve an earlier edit after a release. Apply the same
+    // freshness rule as the disk cache so it cannot undo bundled version gates.
+    if (fetched === null || manifestUpdatedAtMs(fetched) < manifestUpdatedAtMs(manifest)) {
+      return manifest;
+    }
 
     // Same rule as the disk load: a release can ship an edit the remote copy
     // has not received yet, so an older fetch must not replace newer data.

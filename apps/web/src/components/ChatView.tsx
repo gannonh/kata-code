@@ -1,3 +1,4 @@
+import { isChatGptUsageLimitError } from "@kata-sh/code-shared/usageLimits";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@kata-sh/code-shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@kata-sh/code-contracts";
@@ -9802,6 +9803,7 @@ export default function ChatView(props: ChatViewProps) {
               />
               <ThreadErrorBanner
                 error={visibleThreadError}
+                chatGptUsageLimit={isChatGptUsageLimitError(threadActivities, visibleThreadError)}
                 onDismiss={() => {
                   setThreadError(activeThread.id, null);
                   dismissThreadErrorBannerForSession(threadErrorBannerKey);
