@@ -75,7 +75,7 @@ it.effect(
   },
 );
 
-for (const entry of ["startup", "open-url"] as const) {
+for (const entry of ["startup", "open-url", "second-instance"] as const) {
   it.effect(`receives hosted web sign-in through the desktop ${entry} handler`, () =>
     Effect.gen(function* () {
       const port = yield* Effect.promise(async () => {
@@ -130,6 +130,7 @@ for (const entry of ["startup", "open-url"] as const) {
           listeners.get("open-url")!(event, link);
           assert.strictEqual(event.preventDefault.mock.calls.length, 1);
         }
+        if (entry === "second-instance") listeners.get("second-instance")!({}, ["katacode", link]);
         const delivery = readCodexAuthDelivery(yield* Effect.promise(() => delivered.promise));
         assert.strictEqual(delivery?.environmentId, request.environmentId);
         assert.strictEqual(delivery?.instanceId, request.instanceId);

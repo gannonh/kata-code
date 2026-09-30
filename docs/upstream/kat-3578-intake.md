@@ -68,7 +68,7 @@ A companion suite cannot absorb that. Taking the file would add a `ci.yml` allow
 - Upstream's provider-auth deep-link handling moves into `apps/desktop/src/app/DesktopProviderAuthLinks.ts`. It handles the hosted-web `katacode://auth/codex` handoff at startup and on `open-url`, and loads `katacode://app/...` return URLs into the main window on `open-url` and `second-instance`.
 - `DesktopApp.ts` registers it right after `clerk.configure`. `clerk.configure` interrupts a secondary instance, so the handlers run only in the primary instance, as upstream's did.
 - Upstream's three new cases move to `DesktopProviderAuthLinks.test.ts`, with Kata schemes and an added case that ignores `t3code-dev://app/welcome`.
-- On `second-instance` with a provider-auth link, Clerk's listener and the new listener both run, so the window is revealed twice. That is harmless.
+- On `second-instance`, which is how Linux delivers links, Clerk's base listener always reveals the main window. Upstream skips that reveal when the argv holds a provider-auth link. For a return link, the new listener reveals the window anyway. For a hosted-web handoff link, the desktop window comes forward first, and then `shell.openExternal` opens OpenAI's page in the browser, which normally takes focus. Kata accepts this divergence rather than changing the trusted `DesktopClerk.ts`. macOS delivers these links through `open-url` and is unaffected. The companion suite covers the handoff through startup, `open-url`, and `second-instance`.
 
 No `ci.yml` allowlist line changes.
 
@@ -115,3 +115,22 @@ These advance to `0fcd5f906`:
 - the live-tree `currentUpstreamSha` in `scripts/check-upstream-preservation.test.ts`
 
 `baselineUpstreamSha` stays at its historical pin, and the original root stays `6a687ee43`. `FORK.md` now lists `d2c9281b8` as the previous accounted-for pin.
+
+## Independent review
+
+An independent Opus review re-ran a plain three-way merge for all 156 upstream paths and compared it with candidate `86d917d58`. It read the 60 paths where the candidate differs and reviewed the candidate against Kata main. It found no blocker and dropped no Kata-only behavior.
+
+It confirmed:
+
+- the identity mapping and allowlists, and that sign-in registers a dynamic OpenAI client rather than a T3-owned one
+- the `KATACODE_CODEX_LAUNCH_ARGS` scrub, which also removes `OPENAI_API_KEY` and `OPENAI_BASE_URL`
+- the `DesktopProviderAuthLinks` equivalence with upstream's `configure`, and that `DesktopClerk.ts` and its test are byte-identical to the base
+- the `sendTurn` order, the routine and Linear OAuth relay layers, the scope checks on the four new RPC methods, and that the UsageService change never meets Kata's Cursor custom-endpoint guard
+- the `SettingsScopeContext.tsx` optimistic-file fix and the `WelcomeWizard.tsx` early-access controls
+
+Its findings:
+
+- **Should fix:** the Linux `second-instance` reveal described under "Trusted assertions". It is accepted as a divergence, and a `second-instance` handoff case is added to the companion suite.
+- **Note:** the Codex `clientInfo.name` change also applies to CLI-login sessions. Codex uses it as the request originator. A managed ChatGPT sign-in and turn is a live provider check, which the standing waiver covers on this run; it is not claimed as verified.
+- **Note:** `providerAuthReturnUrl` accepts only `https://app.kata.sh`, not `latest.` or `nightly.app.kata.sh`. This matches upstream, which accepts only `app.t3.codes`, and the channel hosts are served through `app.kata.sh`. The paste-the-redirect-URL fallback works everywhere.
+- **Note:** `FORK.md` in the merge commit links to intake files that arrive in the next commit. They land together.
