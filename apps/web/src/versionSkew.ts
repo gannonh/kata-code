@@ -118,6 +118,14 @@ export function supportsServerUpdateThreadContinuation(
   return serverConfig?.environment.capabilities.serverUpdateThreadContinuation === true;
 }
 
+/** True when the connected server stores Bitbucket credentials. Older servers
+    drop the `bitbucket` settings key and still report success. */
+export function supportsBitbucketCredentials(
+  serverConfig: Pick<ServerConfig, "environment"> | null | undefined,
+): boolean {
+  return serverConfig?.environment.capabilities.bitbucketCredentials === true;
+}
+
 /** The command to hand users whose server cannot update itself. */
 export function manualServerUpdateCommand(targetVersion: string): string {
   return `npx @kata-sh/code-cli@${targetVersion}`;

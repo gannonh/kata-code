@@ -478,6 +478,18 @@ const CONTRACT_CHECKS = [
     ],
   },
   {
+    id: "model-manifest-newer-bundle",
+    title: "Model manifest keeps a newer bundle",
+    evidenceKind: "automated",
+    evidenceProfile: "portable",
+    ownerPaths: ["apps/server/src/provider/ModelManifest.ts"],
+    specRefs: [
+      "apps/server/src/provider/ModelManifest.test.ts",
+      "docs/upstream/kat-3562-decisions.tsv",
+    ],
+    commands: [vpTestCommand(["apps/server/src/provider/ModelManifest.test.ts"])],
+  },
+  {
     id: "icon-composer-live-evidence",
     title: "macOS Icon Composer output",
     evidenceKind: "manual",

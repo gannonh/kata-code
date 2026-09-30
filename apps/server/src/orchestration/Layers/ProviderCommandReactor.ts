@@ -34,6 +34,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@kata-sh/code-shared/DrainableWorker";
+import { makeKeyedDrainableWorker } from "@kata-sh/code-shared/KeyedDrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
@@ -2055,7 +2056,12 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeDrainableWorker(processDomainEventSafely);
+  // One lane per thread: a thread's commands keep their order, and a slow Stop on
+  // one thread (Claude waits out its interrupt grace) does not hold up the others.
+  const worker = yield* makeKeyedDrainableWorker({
+    keyOf: (event: ProviderIntentEvent) => event.payload.threadId,
+    process: processDomainEventSafely,
+  });
 
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
     const pendingTitles = yield* findPendingThreadTitles().pipe(

@@ -628,8 +628,9 @@ jobs:
       resource_key: linux-x64
       cli_archive: true
 
-  # node-pty has no Linux prebuild and compiles from source, so the arm64 app
-  # and archive are built on arm64 hardware rather than cross-built.
+  # node-pty 1.2 ships a linux-arm64 prebuild and only compiles on install when
+  # the host's prebuild is missing. The arm64 app and archive are still built on
+  # arm64 hardware rather than cross-built.
   desktop_linux_arm64:
     name: Desktop Linux arm64
     needs: [preflight, relay_public_config, build_bundle]

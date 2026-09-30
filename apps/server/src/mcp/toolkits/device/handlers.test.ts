@@ -30,6 +30,14 @@ describe("device tool helpers", () => {
     expect(text).toContain("XCTest runner");
   });
 
+  it("names Kata Code, not the upstream product, in the remote-host guidance", () => {
+    const text = agentDeviceQuickStart(device);
+    expect(text).toContain(
+      "For remote hosts, arrange builds, app installation, and any Metro reverse forwarding yourself. Kata Code provides discovery, streaming, and control only.",
+    );
+    expect(text).not.toMatch(/\bT3\b/);
+  });
+
   it("uses the absolute launcher in every quick-start command", () => {
     const text = agentDeviceQuickStart(
       device,

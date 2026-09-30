@@ -330,6 +330,7 @@ import {
   useQueuedMessages,
   useQueuedMessageStore,
 } from "../queuedMessageStore";
+import { useUsageLimitsSpendStore } from "../usageLimitsSpendStore";
 import { sendQueuedMessage } from "./chat/sendQueuedMessage";
 import { type ReviewCommentContext } from "../reviewCommentContext";
 import { environmentCatalog } from "../connection/catalog";
@@ -3079,9 +3080,14 @@ export default function ChatView(props: ChatViewProps) {
   // answered question.
   const [usageLimitsPanel, setUsageLimitsPanel] = useState<{
     readonly key: string;
-    readonly threadKey: string;
     readonly now: number;
   } | null>(null);
+  // Turns started for this thread from anywhere, including a queued follow-up
+  // that sent in the background.
+  const usageLimitsSpends = useUsageLimitsSpendStore(
+    (state) => state.spendsByThreadKey[routeThreadKey] ?? 0,
+  );
+  const noteUsageLimitsSpend = useUsageLimitsSpendStore((state) => state.noteSpend);
   // Null while the provider list or the thread itself is unavailable, such as
   // during a reconnect; the panel then stays hidden rather than being dropped.
   // A pending approval or question is part of the key: once it is answered,
@@ -3094,6 +3100,7 @@ export default function ChatView(props: ChatViewProps) {
           activeProviderInstanceId,
           activeThread?.latestTurn?.turnId ?? "",
           activePendingApproval?.requestId ?? activePendingUserInput?.requestId ?? "",
+          usageLimitsSpends,
         ].join(":");
   // Drop the snapshot as soon as the thread or model changes so it cannot resurface stale.
   if (
@@ -3156,27 +3163,13 @@ export default function ChatView(props: ChatViewProps) {
           )
         : null;
     if (report && usageLimitsKey !== null) {
-      setUsageLimitsPanel({ key: usageLimitsKey, threadKey: routeThreadKey, now });
+      setUsageLimitsPanel({ key: usageLimitsKey, now });
       return true;
     }
     setUsageLimitsPanel(null);
     toastManager.add({ type: "info", title: "Usage limits are unavailable for this provider" });
     return false;
-  }, [
-    activeProviderInstanceId,
-    providerStatuses,
-    routeThreadKey,
-    usageLimitSources,
-    usageLimitsKey,
-  ]);
-  // Responses can resolve after navigating away; only the originating thread's panel clears.
-  const clearUsageLimitsFor = useCallback(
-    (threadKey: string) =>
-      setUsageLimitsPanel((current) =>
-        current !== null && current.threadKey === threadKey ? null : current,
-      ),
-    [],
-  );
+  }, [activeProviderInstanceId, providerStatuses, usageLimitSources, usageLimitsKey]);
   const {
     beginLocalDispatch,
     resetLocalDispatch,
@@ -7213,7 +7206,7 @@ export default function ChatView(props: ChatViewProps) {
           );
         }
       } else {
-        clearUsageLimitsFor(routeThreadKey);
+        noteUsageLimitsSpend(routeThreadKey);
       }
     } finally {
       sendInFlightRef.current = false;
@@ -8446,7 +8439,7 @@ export default function ChatView(props: ChatViewProps) {
         // The turn is under way and will spend quota, so that thread's limits
         // snapshot is stale. Uploads may have outlasted a navigation, so only
         // the sending thread's panel clears.
-        clearUsageLimitsFor(routeThreadKey);
+        noteUsageLimitsSpend(routeThreadKey);
         if (turnUsesAttachmentUploads) {
           releaseDraftAttachments(composerAttachmentsSnapshot);
         }
@@ -8999,7 +8992,7 @@ export default function ChatView(props: ChatViewProps) {
       }
 
       if (failure === null) {
-        clearUsageLimitsFor(routeThreadKey);
+        noteUsageLimitsSpend(routeThreadKey);
         acknowledgeActiveThreadWoke();
         sendInFlightRef.current = false;
         return true;
@@ -9037,7 +9030,7 @@ export default function ChatView(props: ChatViewProps) {
       startThreadTurn,
       environmentId,
       composerRef,
-      clearUsageLimitsFor,
+      noteUsageLimitsSpend,
       routeThreadKey,
     ],
   );

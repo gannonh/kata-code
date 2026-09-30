@@ -3,8 +3,10 @@ import { ExternalLinkIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useEnvironmentSettings } from "../../hooks/useSettings";
+import { useServerConfigs } from "../../state/entities";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { supportsBitbucketCredentials } from "../../versionSkew";
 import { Button, InlineButton } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -72,8 +74,30 @@ function TokenInput({
  * Bitbucket credentials for one environment: an access token or an Atlassian
  * account email + API token, never both. Tokens are write-only: the server
  * keeps them in its secret store and only reports whether each one is set.
+ *
+ * A server that predates the setting drops the `bitbucket` patch key and still
+ * reports success, so its form is replaced by an update notice instead of
+ * offering a save that would look like it worked.
  */
-export function BitbucketCredentialsSettings({
+export function BitbucketCredentialsSettings(props: {
+  readonly environmentId: EnvironmentId;
+  readonly onSaved: () => void;
+}) {
+  const serverConfig = useServerConfigs().get(props.environmentId) ?? null;
+  // Until the server config arrives its version is unknown, so show neither.
+  if (serverConfig === null) return null;
+  if (!supportsBitbucketCredentials(serverConfig)) {
+    return (
+      <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
+        This environment&apos;s server is too old to store Bitbucket credentials. Update it to add a
+        token here, or set the KATACODE_BITBUCKET_* environment variables on the server.
+      </p>
+    );
+  }
+  return <BitbucketCredentialsForm {...props} />;
+}
+
+function BitbucketCredentialsForm({
   environmentId,
   onSaved,
 }: {

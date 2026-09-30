@@ -190,11 +190,11 @@ const withRetainedRegressionWorktree = <A>(
         NodePath.join(temporaryRoot, relativePath),
       );
     }
-    // Checks added after currentSha own files that checkout lacks; carry today's copies.
     const addedContractPaths = [
       ...new Set(
         PRESERVATION_CONTRACT.flatMap((check) => [
           ...check.ownerPaths,
+          ...check.specRefs,
           ...check.commands.flatMap((command) => [
             ...command.requiredPaths,
             ...(command.trustedPaths ?? []),
@@ -497,7 +497,7 @@ describe("upstream preservation CLI", () => {
     ).toThrow("exactly");
   });
 
-  it("requires the early-access inventory entry once its check is no longer pending", () => {
+  it("requires the newer-bundle inventory entry once its check is no longer pending", () => {
     const inventory = JSON.parse(
       NodeFS.readFileSync(
         NodePath.join(repositoryRoot, "docs/upstream/retained-behavior.v1.json"),
@@ -505,14 +505,15 @@ describe("upstream preservation CLI", () => {
       ),
     ) as { entries: Array<{ id: string }> };
     const withoutEntry = inventory.entries.filter(
-      (entry) => entry.id !== "connect-early-access-waitlist",
+      (entry) => entry.id !== "model-manifest-newer-bundle",
     );
 
     expect(PENDING_INVENTORY_CHECKS.size).toBe(0);
-    expect(validateInventory(inventory, repositoryRoot).entries).toHaveLength(31);
+    expect(validateInventory(inventory, repositoryRoot).entries).toHaveLength(32);
     expect(() =>
       validateInventory({ ...inventory, entries: withoutEntry }, repositoryRoot),
-    ).toThrow("Inventory must contain exactly 29 entries; found 28.");
+    ).toThrow("Inventory must contain exactly 30 entries; found 29.");
+    expect(PRESERVATION_CHECKS.map((check) => check.id)).toContain("model-manifest-newer-bundle");
   });
 
   it("rejects skip metadata added to the inventory", () => {
@@ -1117,8 +1118,8 @@ describe("upstream preservation CLI", () => {
         "apps/server/src/processRunner.test.ts",
         "apps/server/src/vcs/VcsProcess.test.ts",
       ]);
-      expect(PRESERVATION_CONTRACT.length).toBe(31);
-      expect(PRESERVATION_CHECKS.length).toBe(29);
+      expect(PRESERVATION_CONTRACT.length).toBe(32);
+      expect(PRESERVATION_CHECKS.length).toBe(30);
       const theme = PRESERVATION_CHECKS.find(
         (check) => check.id === "mobile-theme-native-identity",
       );
