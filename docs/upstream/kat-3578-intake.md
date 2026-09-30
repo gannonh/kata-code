@@ -182,3 +182,9 @@ The repair restores the trusted file to current main bytes and retains upstream'
 The fresh [Codex review](https://github.com/gannonh/kata-code/pull/332#discussion_r4148286864) on `91496189dbe45221a6c863755bef21d5c8d2e310` found a one-way setup transition. In provider Settings, a managed Codex instance's Use existing CLI action changes `setupMode` to `existing`. The settings editor then removes `CodexSetupSection`, and the generic runtime editor hides `setupMode`. The same instance has no route back to managed setup or its saved ChatGPT connection.
 
 The accepted repair keeps a setup action visible for existing Codex instances. Use managed Codex switches the same instance back to managed setup, while the existing CLI runtime fields remain available. The action respects read-only Settings and leaves the onboarding path intact. The owning Linear spec records this repair before implementation. Final-head checks, a focused regression, and an independent browser round trip revalidate it before landing.
+
+## Accepted token renewal repair before landing
+
+The fresh [Codex review](https://github.com/gannonh/kata-code/pull/332#discussion_r4148493935) on `36d17e8c90eb79ac53d7971330312a2642e455dd` found that managed Codex rejects a successful renewal when the response omits `refresh_token`. The response schema permits that omission. [OAuth 2.0 section 6](https://www.rfc-editor.org/rfc/rfc6749#section-6) makes issuing a replacement refresh token optional.
+
+The accepted repair retains the saved refresh token when the response omits a replacement and saves a supplied rotated token. Bearer-token validation and revoked-token handling remain in place. The owning Linear spec records this repair before implementation. The mocked OAuth harness verifies successful access and a later renewal using the retained token; this does not require a live account or provider turn.

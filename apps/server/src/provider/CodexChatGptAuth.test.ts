@@ -60,6 +60,7 @@ const makeHarnessFor = Effect.fnUntraced(function* (
   let refreshes = 0;
   let revoked = false;
   let refreshError: string | undefined;
+  let omitRefreshToken = false;
   let revocationStatus = 200;
   let codeError: string | undefined;
   const revocations: URLSearchParams[] = [];
@@ -135,7 +136,7 @@ const makeHarnessFor = Effect.fnUntraced(function* (
                 response.end(
                   JSON.stringify({
                     access_token: `access-${refreshes}`,
-                    refresh_token: `refresh-${refreshes}`,
+                    ...(omitRefreshToken ? {} : { refresh_token: `refresh-${refreshes}` }),
                     token_type: "Bearer",
                     expires_in: 3600,
                     scope: grantScope,
@@ -350,6 +351,9 @@ const makeHarnessFor = Effect.fnUntraced(function* (
     revocations,
     setRefreshError: (value: string) => {
       refreshError = value;
+    },
+    setOmitRefreshToken: (value: boolean) => {
+      omitRefreshToken = value;
     },
     setRevocationStatus: (value: number) => {
       revocationStatus = value;
@@ -1019,6 +1023,29 @@ it.effect("returns successful desktop sign-in to the original Welcome step", () 
         h.callbackResponses[0]!.body,
         'href="katacode-dev://app/welcome#agents:test-environment"',
       );
+    }),
+  ),
+);
+
+it.effect("retains the saved refresh token when renewal omits a rotated token", () =>
+  provision(
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      yield* h.signIn;
+      yield* h.phase("succeeded");
+      yield* h.seedExpired;
+      h.setOmitRefreshToken(true);
+
+      const renewed = yield* h.auth.access;
+      assert.strictEqual(renewed.accessToken, "access-1");
+      assert.strictEqual(renewed.refreshToken, "initial-refresh");
+      assert.strictEqual(Option.getOrThrow(yield* h.auth.read).refreshToken, "initial-refresh");
+
+      yield* h.seedExpired;
+      h.setOmitRefreshToken(false);
+      const rotated = yield* h.auth.access;
+      assert.strictEqual(rotated.refreshToken, "refresh-2");
+      assert.strictEqual(h.exchanges.at(-1)?.get("refresh_token"), "initial-refresh");
     }),
   ),
 );

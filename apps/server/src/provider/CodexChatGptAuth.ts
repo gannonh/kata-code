@@ -758,13 +758,13 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
                   ),
             ),
           );
-          if (!tokens.refresh_token || tokens.token_type.toLowerCase() !== "bearer") {
+          if (tokens.token_type.toLowerCase() !== "bearer") {
             return yield* failure("refresh", "ChatGPT returned an invalid renewal. Sign in again.");
           }
           record = {
             ...record,
             accessToken: tokens.access_token,
-            refreshToken: tokens.refresh_token,
+            refreshToken: tokens.refresh_token ?? record.refreshToken,
             expiresAt: (yield* Clock.currentTimeMillis) + tokens.expires_in * 1000,
             earliestRefreshAt: earliest(tokens.earliest_refresh_at),
             scopes: tokens.scope.split(/\s+/).filter(Boolean),
