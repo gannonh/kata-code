@@ -963,9 +963,7 @@ export function EnvironmentProviderSettings({
               readOnly={readOnly}
               onEnable={() => updateProviderInstance(row, { ...row.instance, enabled: true })}
             />
-          ) : mode === "editor" &&
-            row.driver === "codex" &&
-            readCodexSetupMode(row.instance.config) === "managed" ? (
+          ) : mode === "editor" && row.driver === "codex" ? (
             <CodexSetupSection
               environmentId={environmentId}
               instanceId={row.instanceId}

@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { isValidElement, type ReactElement } from "react";
 import {
   DEFAULT_UNIFIED_SETTINGS,
   EnvironmentId,
@@ -228,6 +228,23 @@ describe("EnvironmentProviderSettings routing", () => {
     const panel = renderPanel({ targetInstanceId: customId });
     const editor = visitElements(panel, (element) => element.props.mode === "editor");
     expect(editor?.props.instanceId).toBe(customId);
+  });
+
+  it("keeps the Codex setup action visible for an existing CLI instance", () => {
+    atoms.providers = [provider()];
+    const panel = renderPanel();
+    const editor = visitElements(
+      panel,
+      (element) => element.props.instanceId === codexId && element.props.mode === "editor",
+    );
+
+    const setup = editor?.props.setup;
+    expect(isValidElement<Record<string, unknown>>(setup)).toBe(true);
+    if (!isValidElement<Record<string, unknown>>(setup)) {
+      throw new Error("Codex setup slot was not rendered");
+    }
+    expect(setup.props.mode).toBe("existing");
+    expect(editor?.props.runtime).toBeUndefined();
   });
 
   it.each([

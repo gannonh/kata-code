@@ -122,7 +122,22 @@ export function CodexSetupSection(props: CodexSetupSectionProps) {
           ) : null
         }
       />
-    ) : props.mode === "existing" ? null : props.provider?.setup === undefined ? (
+    ) : props.mode === "existing" ? (
+      <SettingsRow
+        title="Codex setup"
+        description="Using your existing Codex CLI."
+        control={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={props.readOnly}
+            onClick={() => props.onModeChange("managed")}
+          >
+            Use managed Codex
+          </Button>
+        }
+      />
+    ) : props.provider?.setup === undefined ? (
       props.presentation === "onboarding" ? (
         <CodexWelcomeCard
           title={props.displayName || props.provider?.displayName || "Codex"}
