@@ -13,6 +13,8 @@ const {
   setDesktopNameMock,
   mkdirSyncMock,
   writeFileSyncMock,
+  copyFileSyncMock,
+  appState,
 } = vi.hoisted(() => ({
   appendSwitchMock: vi.fn(),
   getSwitchValueMock: vi.fn(),
@@ -21,12 +23,18 @@ const {
   setDesktopNameMock: vi.fn(),
   mkdirSyncMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
+  copyFileSyncMock: vi.fn(),
+  appState: { isPackaged: true },
 }));
 
 vi.mock("electron", () => ({
   app: {
     setDesktopName: setDesktopNameMock,
     getVersion: () => "0.0.37",
+    get isPackaged() {
+      return appState.isPackaged;
+    },
+    getAppPath: () => "/tmp/.mount_Kata/resources/app.asar",
     commandLine: {
       appendSwitch: appendSwitchMock,
       getSwitchValue: getSwitchValueMock,
@@ -42,6 +50,7 @@ vi.mock("node:fs", () => ({
   readFileSync: () => "{}",
   mkdirSync: mkdirSyncMock,
   writeFileSync: writeFileSyncMock,
+  copyFileSync: copyFileSyncMock,
 }));
 
 import * as DesktopPreReadyPlatform from "./DesktopPreReadyPlatform.ts";
@@ -55,6 +64,8 @@ describe("DesktopPreReadyPlatform", () => {
     setDesktopNameMock.mockReset();
     mkdirSyncMock.mockReset();
     writeFileSyncMock.mockReset();
+    copyFileSyncMock.mockReset();
+    appState.isPackaged = true;
   });
 
   it.effect("preserves an explicit Linux password-store switch", () => {
@@ -85,6 +96,10 @@ describe("DesktopPreReadyPlatform", () => {
         getSwitchValueMock.mockReturnValue("");
         let desktopName = "t3code.desktop";
         let desktopEntry = previousEntry;
+        let iconCopy: { readonly source: string; readonly destination: string } | undefined;
+        copyFileSyncMock.mockImplementation((source: string, destination: string) => {
+          iconCopy = { source, destination };
+        });
         setDesktopNameMock.mockImplementation((name: string) => {
           desktopName = name;
         });
@@ -94,7 +109,11 @@ describe("DesktopPreReadyPlatform", () => {
 
         return Effect.scoped(
           Effect.gen(function* () {
-            const portalIdentity = Promise.resolve().then(() => ({ desktopName, desktopEntry }));
+            const portalIdentity = Promise.resolve().then(() => ({
+              desktopName,
+              desktopEntry,
+              iconCopy,
+            }));
             yield* Layer.build(
               DesktopPreReadyPlatform.layer.pipe(
                 Layer.provide(Layer.succeed(HostProcessPlatform, "linux")),
@@ -102,14 +121,58 @@ describe("DesktopPreReadyPlatform", () => {
             );
             const identity = yield* Effect.promise(() => portalIdentity);
             assert.equal(identity.desktopName, "t3code.desktop");
-            assert.include(identity.desktopEntry ?? "", 'Exec="/Applications/current.AppImage" %U');
-            assert.include(identity.desktopEntry ?? "", "Name=Kata Code (Alpha)");
-            assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/katacode;");
+            assert.equal(
+              identity.desktopEntry,
+              [
+                "[Desktop Entry]",
+                "Type=Application",
+                "Name=Kata Code (Alpha)",
+                'Exec="/Applications/current.AppImage" %U',
+                "Icon=/xdg/icons/katacode-url-handler.desktop.png",
+                "Terminal=false",
+                "NoDisplay=true",
+                "StartupNotify=false",
+                "MimeType=x-scheme-handler/katacode;x-scheme-handler/t3code;",
+                "",
+              ].join("\n"),
+            );
+            assert.deepEqual(identity.iconCopy, {
+              source: "/tmp/.mount_Kata/resources/app.asar/apps/desktop/prod-resources/icon.png",
+              destination: "/xdg/icons/katacode-url-handler.desktop.png",
+            });
           }),
         ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
       },
     );
   }
+
+  it.effect("still prepares the portal entry when the bundled icon cannot be copied", () => {
+    getSwitchValueMock.mockReturnValue("");
+    copyFileSyncMock.mockImplementation(() => {
+      throw new Error("missing bundled icon");
+    });
+
+    return Effect.gen(function* () {
+      yield* DesktopPreReadyPlatform.make;
+      const contents = writeFileSyncMock.mock.calls[0]?.[1];
+      assert.include(contents, "MimeType=x-scheme-handler/katacode;");
+      assert.match(contents, /^Icon=.*\/icons\/katacode-url-handler\.desktop\.png$/m);
+      assert.equal(setDesktopNameMock.mock.calls.length, 1);
+    }).pipe(Effect.provideService(HostProcessPlatform, "linux"));
+  });
+
+  it.effect("installs no icon and renders no Icon line outside a packaged app", () => {
+    appState.isPackaged = false;
+    getSwitchValueMock.mockReturnValue("");
+
+    return Effect.gen(function* () {
+      yield* DesktopPreReadyPlatform.make;
+      const contents = writeFileSyncMock.mock.calls[0]?.[1];
+      assert.include(contents, "MimeType=x-scheme-handler/katacode;");
+      assert.notInclude(contents, "Icon=");
+      assert.equal(copyFileSyncMock.mock.calls.length, 0);
+    }).pipe(Effect.provideService(HostProcessPlatform, "linux"));
+  });
 
   it.effect("keeps startup available when the early desktop entry cannot be written", () => {
     getSwitchValueMock.mockReturnValue("");

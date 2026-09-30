@@ -19,6 +19,7 @@ import {
   resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
   serverUpdateGuidance,
+  supportsBitbucketCredentials,
   supportsDesktopAppUpdate,
 } from "./versionSkew";
 
@@ -220,6 +221,26 @@ describe("versionSkew", () => {
     expect(supportsDesktopAppUpdate(descriptor(false))).toBe(false);
     expect(supportsDesktopAppUpdate(descriptor())).toBe(false);
     expect(supportsDesktopAppUpdate(null)).toBe(false);
+  });
+
+  it("detects Bitbucket credential support, treating servers that predate it as unsupported", () => {
+    const descriptor = (bitbucketCredentials?: boolean) => ({
+      environment: {
+        environmentId: EnvironmentId.make("environment-bitbucket"),
+        label: "Remote",
+        platform: { os: "linux", arch: "x64" } as const,
+        serverVersion: "0.0.39",
+        capabilities: {
+          repositoryIdentity: true,
+          ...(bitbucketCredentials === undefined ? {} : { bitbucketCredentials }),
+        },
+      },
+    });
+
+    expect(supportsBitbucketCredentials(descriptor(true))).toBe(true);
+    expect(supportsBitbucketCredentials(descriptor(false))).toBe(false);
+    expect(supportsBitbucketCredentials(descriptor())).toBe(false);
+    expect(supportsBitbucketCredentials(null)).toBe(false);
   });
 
   it("matches version-drift guidance to the advertised update path", () => {

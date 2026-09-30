@@ -478,6 +478,18 @@ const CONTRACT_CHECKS = [
     ],
   },
   {
+    id: "model-manifest-newer-bundle",
+    title: "Model manifest keeps a newer bundle",
+    evidenceKind: "automated",
+    evidenceProfile: "portable",
+    ownerPaths: ["apps/server/src/provider/ModelManifest.ts"],
+    specRefs: [
+      "apps/server/src/provider/ModelManifest.test.ts",
+      "docs/upstream/kat-3562-decisions.tsv",
+    ],
+    commands: [vpTestCommand(["apps/server/src/provider/ModelManifest.test.ts"])],
+  },
+  {
     id: "icon-composer-live-evidence",
     title: "macOS Icon Composer output",
     evidenceKind: "manual",
@@ -521,14 +533,6 @@ const ANDROID_PARKED: Retirement = {
   reason: "Android is parked; intake takes upstream Android-only changes without Kata review.",
 };
 
-// KAT-3568 ports upstream #8673 (Linux URL handler icon and MIME cache refresh) onto the handler
-// and edits its test. The unfreeze ends with that PR, which re-freezes the file at its new bytes.
-const URL_HANDLER_ICON_PORT: Retirement = {
-  issue: "KAT-3563",
-  reason:
-    "KAT-3568 ports upstream #8673 onto the Linux URL handler; the test re-freezes at its new bytes.",
-};
-
 export const RETIREMENTS: RetirementTables = {
   checks: new Map([
     ["mobile-android-asset-live-evidence", ANDROID_PARKED],
@@ -538,9 +542,7 @@ export const RETIREMENTS: RetirementTables = {
     ["apps/mobile/src/lib/materialYouTheme.ts", ANDROID_PARKED],
     ["apps/mobile/src/lib/materialYouTheme.test.ts", ANDROID_PARKED],
   ]),
-  unfrozenTrustedPaths: new Map([
-    ["apps/desktop/src/app/DesktopLinuxUrlHandler.test.ts", URL_HANDLER_ICON_PORT],
-  ]),
+  unfrozenTrustedPaths: new Map(),
 };
 
 // CI runs the base checker against the candidate inventory, so a new check lands here first:

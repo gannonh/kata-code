@@ -22,6 +22,7 @@ import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { readThread, readThreadShell } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { threadEnvironment } from "../../state/threads";
+import { useUsageLimitsSpendStore } from "../../usageLimitsSpendStore";
 import {
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -196,6 +197,8 @@ export async function sendQueuedMessage(
         createdAt,
       },
     });
+    // The turn spends quota, so a /usage-limits panel open for the thread is stale.
+    useUsageLimitsSpendStore.getState().noteSpend(threadKey);
     queue.finishSend(threadKey, message.id);
     if (useUploads) releaseDraftAttachments(attachments);
     for (const image of message.images) revokeBlobPreviewUrl(image.previewUrl);
