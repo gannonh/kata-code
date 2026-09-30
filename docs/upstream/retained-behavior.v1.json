@@ -419,6 +419,21 @@
       }
     },
     {
+      "id": "model-manifest-newer-bundle",
+      "title": "Model manifest keeps a newer bundle",
+      "retainedOutcome": "The model manifest refresh keeps the bundled manifest when the fetched copy is an older edit. ModelManifest.test.ts covers this in \"keeps the bundle when the fetched manifest is an older edit\".",
+      "ownerPaths": ["apps/server/src/provider/ModelManifest.ts"],
+      "specRefs": [
+        "apps/server/src/provider/ModelManifest.test.ts",
+        "docs/upstream/kat-3562-decisions.tsv"
+      ],
+      "evidence": {
+        "kind": "automated",
+        "profile": "portable",
+        "verification": "model-manifest-newer-bundle"
+      }
+    },
+    {
       "id": "icon-composer-live-evidence",
       "title": "macOS Icon Composer output",
       "retainedOutcome": "Icon Composer output is inspected on macOS and remains Kata artwork with the required dimensions and safe area.",
