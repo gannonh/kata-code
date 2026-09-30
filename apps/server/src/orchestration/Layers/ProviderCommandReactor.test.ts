@@ -3771,6 +3771,73 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  effectIt.effect("does not hold up other threads while one thread's session stop is slow", () =>
+    Effect.gen(function* () {
+      const releaseStop = yield* Deferred.make<void>();
+      const harness = yield* Effect.promise(() =>
+        createHarness({ stopSessionEffect: () => Deferred.await(releaseStop) }),
+      );
+      const now = "2026-01-01T00:00:00.000Z";
+      const modelSelection = {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      };
+      const startTurn = (threadId: string, text: string) =>
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-slow-stop-${threadId}-${text}`),
+          threadId: ThreadId.make(threadId),
+          message: {
+            messageId: asMessageId(`message-slow-stop-${threadId}-${text}`),
+            role: "user",
+            text,
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        });
+      const sentTexts = () =>
+        harness.sendTurn.mock.calls.map((call) => (call[0] as { readonly input?: string }).input);
+
+      yield* harness.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-thread-create-slow-stop-2"),
+        threadId: ThreadId.make("thread-2"),
+        projectId: asProjectId("project-1"),
+        title: "Thread 2",
+        modelSelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt: now,
+      });
+      yield* startTurn("thread-1", "first");
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+
+      // Thread 1's Stop hangs, like a Claude interrupt that never gets a result.
+      yield* harness.engine.dispatch({
+        type: "thread.session.stop",
+        commandId: CommandId.make("cmd-slow-stop-thread-1"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      });
+      yield* Effect.promise(() => waitFor(() => harness.stopSession.mock.calls.length === 1));
+      yield* startTurn("thread-1", "after stop");
+      yield* startTurn("thread-2", "other thread");
+
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 2));
+      expect(sentTexts()).toEqual(["first", "other thread"]);
+
+      // Thread 1 keeps its order: the message queued behind the Stop waits for it.
+      yield* Deferred.succeed(releaseStop, undefined);
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 3));
+      expect(sentTexts()).toEqual(["first", "other thread", "after stop"]);
+      yield* Effect.promise(() => harness.drain());
+    }),
+  );
+
   it("reacts to thread.turn.interrupt-requested by calling provider interrupt", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
