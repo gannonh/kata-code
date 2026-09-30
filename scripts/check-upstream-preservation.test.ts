@@ -190,11 +190,11 @@ const withRetainedRegressionWorktree = <A>(
         NodePath.join(temporaryRoot, relativePath),
       );
     }
-    // Checks added after currentSha own files that checkout lacks; carry today's copies.
     const addedContractPaths = [
       ...new Set(
         PRESERVATION_CONTRACT.flatMap((check) => [
           ...check.ownerPaths,
+          ...check.specRefs,
           ...check.commands.flatMap((command) => [
             ...command.requiredPaths,
             ...(command.trustedPaths ?? []),
@@ -497,41 +497,23 @@ describe("upstream preservation CLI", () => {
     ).toThrow("exactly");
   });
 
-  it("accepts an inventory with or without a pending check entry", () => {
+  it("requires the newer-bundle inventory entry once its check is no longer pending", () => {
     const inventory = JSON.parse(
       NodeFS.readFileSync(
         NodePath.join(repositoryRoot, "docs/upstream/retained-behavior.v1.json"),
         "utf8",
       ),
     ) as { entries: Array<{ id: string }> };
-    const pending = PRESERVATION_CONTRACT.find(
-      (check) => check.id === "model-manifest-newer-bundle",
-    )!;
-    const pendingEntry = {
-      id: pending.id,
-      title: pending.title,
-      retainedOutcome:
-        "The model manifest refresh keeps the bundled manifest when the fetched copy is an older edit.",
-      ownerPaths: [...pending.ownerPaths],
-      specRefs: [...pending.specRefs],
-      evidence: { kind: "automated", profile: "portable", verification: pending.id },
-    };
-    const withoutPending = inventory.entries.filter((entry) => entry.id !== pending.id);
+    const withoutEntry = inventory.entries.filter(
+      (entry) => entry.id !== "model-manifest-newer-bundle",
+    );
 
-    expect([...PENDING_INVENTORY_CHECKS.keys()]).toEqual(["model-manifest-newer-bundle"]);
-    expect(
-      validateInventory({ ...inventory, entries: withoutPending }, repositoryRoot).entries,
-    ).toHaveLength(31);
-    expect(
-      validateInventory(
-        { ...inventory, entries: [...withoutPending, pendingEntry] },
-        repositoryRoot,
-      ).entries,
-    ).toHaveLength(32);
+    expect(PENDING_INVENTORY_CHECKS.size).toBe(0);
+    expect(validateInventory(inventory, repositoryRoot).entries).toHaveLength(32);
     expect(() =>
-      validateInventory({ ...inventory, entries: withoutPending.slice(1) }, repositoryRoot),
-    ).toThrow("Inventory must contain exactly 29 to 30 entries; found 28.");
-    expect(PRESERVATION_CHECKS.map((check) => check.id)).toContain(pending.id);
+      validateInventory({ ...inventory, entries: withoutEntry }, repositoryRoot),
+    ).toThrow("Inventory must contain exactly 30 entries; found 29.");
+    expect(PRESERVATION_CHECKS.map((check) => check.id)).toContain("model-manifest-newer-bundle");
   });
 
   it("rejects skip metadata added to the inventory", () => {
