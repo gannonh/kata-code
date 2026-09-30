@@ -258,6 +258,13 @@ const makeHarnessFor = Effect.fnUntraced(function* (
       const waiting = yield* phase("waiting");
       return { waiting, callbackUrl: prepareCallback(waiting).toString() };
     });
+  const startLoopback = (methodId?: string) =>
+    Effect.gen(function* () {
+      yield* auth.controller.start("owner", Effect.void, methodId, returnUrl);
+      const waiting = yield* phase("waiting");
+      assert.strictEqual(waiting.interaction?.type, "browser");
+      return { waiting, callbackUrl: prepareCallback(waiting).toString() };
+    });
   const signInWithMethod = (methodId?: string) =>
     Effect.gen(function* () {
       yield* auth.controller.start("owner", Effect.void, methodId, returnUrl);
@@ -331,6 +338,7 @@ const makeHarnessFor = Effect.fnUntraced(function* (
       Effect.provideService(ServerEnvironmentIdentity, environment),
     ),
     startRemote,
+    startLoopback,
     signIn: signInWithMethod(),
     changeAccount: signInWithMethod("chatgpt-change-account"),
     reconnectProfile: (clientId: string) => signInWithMethod(`chatgpt-profile:${clientId}`),
@@ -957,11 +965,14 @@ it.effect("rejects mismatched callback state before any token exchange or creden
     Effect.gen(function* () {
       const h = yield* makeHarness;
       h.mismatchCallbackState();
-      yield* h.signIn;
-      assert.include((yield* h.phase("failed")).message!, "could not be verified");
+      const { waiting, callbackUrl } = yield* h.startLoopback();
+      const response = yield* Effect.promise(() => fetch(callbackUrl));
+      assert.strictEqual(response.status, 400);
       assert.strictEqual(h.exchanges.length, 0);
       assert.deepEqual(h.storedRecords(), []);
       assert.isTrue(Option.isNone(yield* h.auth.read));
+      yield* h.auth.controller.cancel("owner", waiting.flowId!);
+      yield* h.phase("cancelled");
     }),
   ),
 );
@@ -1046,6 +1057,28 @@ it.effect("retains the saved refresh token when renewal omits a rotated token", 
       const rotated = yield* h.auth.access;
       assert.strictEqual(rotated.refreshToken, "refresh-2");
       assert.strictEqual(h.exchanges.at(-1)?.get("refresh_token"), "initial-refresh");
+    }),
+  ),
+);
+
+it.effect("does not consume a loopback sign-in on an invalid callback", () =>
+  provision(
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      const { callbackUrl } = yield* h.startLoopback();
+      const missingState = new URL(callbackUrl);
+      missingState.searchParams.delete("state");
+      const wrongState = new URL(callbackUrl);
+      wrongState.searchParams.set("state", "wrong-state");
+      for (const invalid of [missingState, wrongState]) {
+        const invalidResponse = yield* Effect.promise(() => fetch(invalid));
+        assert.strictEqual(invalidResponse.status, 400);
+      }
+
+      const validResponse = yield* Effect.promise(() => fetch(callbackUrl));
+      assert.strictEqual(validResponse.status, 200);
+      assert.include(yield* Effect.promise(() => validResponse.text()), "You&#39;re signed in");
+      yield* h.phase("succeeded");
     }),
   ),
 );

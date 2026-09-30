@@ -468,9 +468,22 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
             try: () =>
               new Promise<NodeHttp.Server>((resolve, reject) => {
                 const server = NodeHttp.createServer((request, response) => {
-                  const url = new URL(request.url ?? "/", "http://127.0.0.1");
+                  let url: URL;
+                  try {
+                    url = new URL(request.url ?? "/", redirectUri);
+                  } catch {
+                    response.writeHead(400).end("Invalid ChatGPT sign-in callback.");
+                    return;
+                  }
                   if (request.method !== "GET" || url.pathname !== "/auth/callback") {
                     response.writeHead(404).end();
+                    return;
+                  }
+                  let returned: URL;
+                  try {
+                    returned = codexCallbackUrl(url.toString(), redirectUri, state);
+                  } catch {
+                    response.writeHead(400).end("Invalid ChatGPT sign-in callback.");
                     return;
                   }
                   if (used) {
@@ -478,7 +491,7 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
                     return;
                   }
                   used = true;
-                  callback.resolve({ url, response });
+                  callback.resolve({ url: returned, response });
                 });
                 server.once("error", reject);
                 server.listen(0, "127.0.0.1", () => resolve(server));

@@ -188,3 +188,12 @@ The accepted repair keeps a setup action visible for existing Codex instances. U
 The fresh [Codex review](https://github.com/gannonh/kata-code/pull/332#discussion_r4148493935) on `36d17e8c90eb79ac53d7971330312a2642e455dd` found that managed Codex rejects a successful renewal when the response omits `refresh_token`. The response schema permits that omission. [OAuth 2.0 section 6](https://www.rfc-editor.org/rfc/rfc6749#section-6) makes issuing a replacement refresh token optional.
 
 The accepted repair retains the saved refresh token when the response omits a replacement and saves a supplied rotated token. Bearer-token validation and revoked-token handling remain in place. The owning Linear spec records this repair before implementation. The mocked OAuth harness verifies successful access and a later renewal using the retained token; this does not require a live account or provider turn.
+
+## Accepted authorization and callback repairs before landing
+
+Fresh review on `cd190a2ac04dff137c0e48f2d5e1f811af5478d7` found two further defects in the imported OAuth flow:
+
+- [ChatGPT RPC authorization](https://github.com/gannonh/kata-code/pull/332#discussion_r4148646413): reconnect, profile import, and handoff subscription declare an operate scope but bypass the RPC helpers that enforce it. The repair uses the existing effect and stream helpers so a read-only session cannot retrieve profile data, replace credentials, or subscribe to handoff data.
+- [Direct loopback callback validation](https://github.com/gannonh/kata-code/pull/332#discussion_r4148646423): an unrelated request consumes the listener before its state is checked. The repair validates the callback URL and state first, allowing the matching redirect to finish the same attempt after an invalid request.
+
+The owning Linear spec records both repairs before implementation. Mocked RPC and loopback regressions verify the boundaries without a live account or provider turn. Valid callback errors and single-use behavior remain covered.

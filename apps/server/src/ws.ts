@@ -2838,10 +2838,22 @@ const makeWsRpcLayer = (
             providerAuth.complete(input, currentSessionId),
             { "rpc.aggregate": "provider" },
           ),
-        [WS_METHODS.chatGptReconnectProfile]: (input) => providerAuth.reconnectProfile(input),
-        [WS_METHODS.chatGptImportProfile]: (input) => providerAuth.importProfile(input),
+        [WS_METHODS.chatGptReconnectProfile]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.chatGptReconnectProfile,
+            providerAuth.reconnectProfile(input),
+            { "rpc.aggregate": "provider" },
+          ),
+        [WS_METHODS.chatGptImportProfile]: (input) =>
+          observeRpcEffect(WS_METHODS.chatGptImportProfile, providerAuth.importProfile(input), {
+            "rpc.aggregate": "provider",
+          }),
         [WS_METHODS.chatGptHandoffSubscribe]: (input) =>
-          subscribeChatGptHandoff(input, currentSessionId),
+          observeRpcStream(
+            WS_METHODS.chatGptHandoffSubscribe,
+            subscribeChatGptHandoff(input, currentSessionId),
+            { "rpc.aggregate": "provider" },
+          ),
         [WS_METHODS.codexAuthCallbackSubscribe]: (input) =>
           observeRpcStream(
             WS_METHODS.codexAuthCallbackSubscribe,
