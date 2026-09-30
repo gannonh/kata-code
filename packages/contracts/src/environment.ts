@@ -185,6 +185,11 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       desktop servers whose app predates the remote trigger, where clients
       must keep telling the user to update the app on that machine. */
   desktopAppUpdate: Schema.optionalKey(Schema.Boolean),
+  /** Server stores Bitbucket credentials from the `bitbucket` settings patch.
+      Older servers drop that key on write and still report success, so
+      clients hide the credentials form rather than let a save look like it
+      worked. */
+  bitbucketCredentials: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 
