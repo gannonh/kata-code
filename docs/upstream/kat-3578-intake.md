@@ -168,3 +168,11 @@ Not exercised live:
 - The thread-level web fixes, which need a provider thread. Their upstream unit tests pass.
 
 Screenshots and a 48 s, 1 fps video are on PR #332.
+
+## CI repair after the main sync, 2026-09-30
+
+Gannon requested CI repair and landing of PR #332. Main advanced from `ef043ab71a4b2684bdd7f618e3db6419573e0c36` to `be15dd1120d7f72c1ab5100dbf12a78b99729e04`, and merge `4fad06b7eaed5368e183091a8cf08fabf2649b4b` brought it into the candidate. The frozen upstream target stays `0fcd5f90611451cca842689faea53b5450c022da`.
+
+CI run [36759267823](https://github.com/gannonh/kata-code/actions/runs/36759267823) passed all test shards but failed Check. KAT-3559 had added `model-manifest-newer-bundle`, whose trusted assertion is `apps/server/src/provider/ModelManifest.test.ts`. The checker reported `CHECK id=model-manifest-newer-bundle status=FAIL detail=trusted assertion changed apps/server/src/provider/ModelManifest.test.ts`. The intake had taken upstream's additional stale-fetch/cache test in that file before it became frozen.
+
+The repair restores the trusted file to current main bytes and retains upstream's stale-fetch/cache coverage in `ModelManifest.upstream.test.ts`. Production behavior, the retained inventory, and the CI trusted-assertion allowlist stay unchanged by this repair. Exact-candidate evidence is regenerated against the current pre-merge main. The newly owned `ModelManifest.ts` change gets its own TAKE disposition, with the trusted newer-bundle guard exercised against the candidate. Earlier receipts keep their original refs.
