@@ -134,3 +134,37 @@ Its findings:
 - **Note:** the Codex `clientInfo.name` change also applies to CLI-login sessions. Codex uses it as the request originator. A managed ChatGPT sign-in and turn is a live provider check, which the standing waiver covers on this run; it is not claimed as verified.
 - **Note:** `providerAuthReturnUrl` accepts only `https://app.kata.sh`, not `latest.` or `nightly.app.kata.sh`. This matches upstream, which accepts only `app.t3.codes`, and the channel hosts are served through `app.kata.sh`. The paste-the-redirect-URL fallback works everywhere.
 - **Note:** `FORK.md` in the merge commit links to intake files that arrive in the next commit. They land together.
+
+## Verification
+
+Local gates ran on a clean checkout of `b30826746`. Candidates after it change only this intake and the decisions TSV.
+
+- **Checks:** branding, workflow references, knip, `vp check`, and `vpr typecheck` pass. The desktop build and preload verification pass. So do the preview, nightly, and release-smoke tests.
+- **Tests:** the non-server suites pass. All three server shards pass: 5942 passed, 0 failed.
+- **Trusted checker, archived from base `ef043ab71`:**
+  - `--mode ci`: 27 automated checks and the inventory pass.
+  - `--mode human-review`: `INTEGRATION_RECORD status=PASS`, and `CHANGED_RETAINED_OUTCOMES status=PASS` with 4 TAKE dispositions. Three are `FORK.md` pin-only (`product-identity-release-ownership`, `connect-wire-identity`, `state-isolation`), and one is `WelcomeWizard.tsx` for `connect-early-access-waitlist`.
+  - It prints `HUMAN_REVIEW_ACCEPTANCE status=FAIL`. The only open items are `human-device-provider-evidence` and `icon-composer-live-evidence`, which are NOT RUN under the standing waiver. This is not a PASS.
+
+## Web verification
+
+Disposable stacks ran from `verify-katacode`: branch run `web-20260930-072229-11772bad` on `b30826746`, and main run `web-20260930-072644-d4238ad6` on `ef043ab71`.
+
+1. The main welcome Agents step lists agents only. The branch step offers "Connect another ChatGPT account".
+2. Pairing works, and the Connect step says Kata Code and Kata Code Connect.
+3. The Add ChatGPT account dialog opens with a default account name.
+4. Continuing opens OpenAI's authorize page with `client_id=dynamic_agent_client`, `agent_name_hint=Kata Code`, and a `127.0.0.1` loopback redirect. No account was signed in.
+5. The sign-in fallback says "If sign-in doesn't return to Kata Code, paste the URL from the final localhost page."
+6. A cancelled OpenAI response sent to the loopback receiver shows "Sign-in couldn't finish · Kata Code". Its return link points to this app's `/welcome#agents:<environment>`, and the app then shows that sign-in was declined.
+7. The ChatGPT instance's runtime says "Selected by Kata Code." Its shadow home is under the Kata state directory.
+8. Searching settings for "ChatGPT" narrows the providers list.
+9. Settings → Connections says Kata Code Connect, with no T3 copy.
+10. The Usage page renders without errors, and the command palette opens.
+
+Not exercised live:
+
+- A real ChatGPT sign-in and a Codex turn. This is a live provider check under the standing waiver.
+- The hosted-web-to-desktop handoff. Unit tests cover it through startup, `open-url`, and `second-instance`.
+- The thread-level web fixes, which need a provider thread. Their upstream unit tests pass.
+
+Screenshots and a 48 s, 1 fps video are on PR #332.
