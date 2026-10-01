@@ -44,7 +44,7 @@ const upstreamSha = "12391bd0d38eef6655b7a9f8945d0cb5febadc2b";
 // copies today's checker over that checkout and needs a tree difference to commit.
 const baselineCandidateSha = "d62d138f6ab43eec6da1b45a9582a7f757ffda10";
 const baselineUpstreamSha = "ab099178a7b7f9728843e90fc95ed90bb61d710d";
-const currentUpstreamSha = "0fcd5f90611451cca842689faea53b5450c022da";
+const currentUpstreamSha = "71a90ae70e3ff880396363809bd9bfcfd520f30c";
 const upstreamBaseSha = "6a687ee43bf222672ab8d3f4c0bab3d8d174f79f";
 
 const relativeRepositoryPath = (absolutePath: string): string =>

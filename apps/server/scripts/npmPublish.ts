@@ -8,6 +8,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import { ServerCliBuildAssetMissingError } from "./cliErrors.ts";
+import { publishPlatformsThenLauncher } from "./publishOrder.ts";
 import { runCommand } from "./runCommand.ts";
 
 const PackageManifest = Schema.Struct({ name: Schema.String, version: Schema.String });
@@ -45,7 +46,7 @@ const isPublished = Effect.fn("isPublished")(function* (name: string, version: s
 
 /**
  * Publishes the tarballs scripts/build-npm-platform-packages.ts produced:
- * every `@kata-sh/code-cli-<platform>.tgz` first, `@kata-sh/code-cli.tgz`
+ * every `@kata-sh/code-cli-<platform>.tgz` at once, `@kata-sh/code-cli.tgz`
  * (the launcher) last, so the launcher is never installable before the
  * executables it depends on. Tarballs rather than directories because
  * `npm publish <dir>` strips the `node_modules/` the executable loads its
@@ -83,7 +84,7 @@ export const publishNpmTarballs = Effect.fn("publishNpmTarballs")(function* (
   if (options.provenance) args.push("--provenance");
   if (options.dryRun) args.push("--dry-run");
 
-  for (const tarball of [...platformTarballs, launcherTarball]) {
+  const publishTarball = Effect.fn("publishTarball")(function* (tarball: string) {
     // build-npm-platform-packages.ts writes each package directory beside its tarball.
     const { name, version } = yield* decodePackageManifest(
       yield* fs.readFileString(path.join(tarball.slice(0, -".tgz".length), "package.json")),
@@ -115,5 +116,12 @@ export const publishNpmTarballs = Effect.fn("publishNpmTarballs")(function* (
         schedule: Schedule.spaced(options.retryDelay ?? "15 seconds"),
       }),
     );
-  }
+  });
+
+  // Each publish takes about 17s, so the platform packages go at once.
+  yield* publishPlatformsThenLauncher({
+    platformTarballs,
+    launcherTarball,
+    publish: publishTarball,
+  });
 });

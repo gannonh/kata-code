@@ -2006,3 +2006,50 @@ describe("RoutinesPage offline environments", () => {
     expect(buttonWithText(renderer, "Delete").props.disabled).toBe(false);
   });
 });
+
+describe("RoutinesPage project targets", () => {
+  let renderer: ReactTestRenderer | undefined;
+  const originalEnvironments = testState.environments;
+  const originalProjects = testState.projects;
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    testState.command.mockReset();
+    testState.listData.length = 0;
+  });
+
+  afterEach(async () => {
+    await act(async () => renderer?.unmount());
+    vi.unstubAllGlobals();
+    testState.environments = originalEnvironments;
+    testState.projects = originalProjects;
+  });
+
+  it("does not offer the No project scratch project as a routine target", async () => {
+    const environmentWithScratch = {
+      environmentId: "environment-1",
+      label: "Local",
+      connection: { phase: "connected" },
+      serverConfig: { scratchWorkspaceRoot: "/home/user/.katacode/scratch" },
+    };
+    testState.environments = [environmentWithScratch];
+    testState.projects = [
+      ...originalProjects,
+      {
+        id: "project-scratch",
+        environmentId: "environment-1",
+        title: "No project",
+        workspaceRoot: "/home/user/.katacode/scratch",
+        repositoryIdentity: null,
+      },
+    ];
+
+    renderer = await openNewRoutineEditor();
+
+    const options = renderer.root
+      .findByProps({ id: "routine-project" })
+      .findAllByType("option")
+      .map((option) => option.props.value);
+    expect(options).toEqual(["project-1"]);
+  });
+});

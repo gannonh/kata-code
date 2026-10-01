@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { routineEnvironment } from "../../state/routines";
 import { serverEnvironment } from "../../state/server";
+import { isScratchProject } from "@kata-sh/code-client-runtime/state/projects";
 import { useProjects } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
@@ -195,7 +196,22 @@ function RoutineCard({
 export function RoutinesPage() {
   const { environments, isReady } = useEnvironments();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const projects = useProjects();
+  const allProjects = useProjects();
+  // Routine threads are created by the server's dispatcher, which never gives
+  // them a per-thread folder in the scratch project ("No project"), so
+  // routines target only real projects.
+  const projects = useMemo(
+    () =>
+      allProjects.filter(
+        (project) =>
+          !isScratchProject(
+            project,
+            environments.find((entry) => entry.environmentId === project.environmentId)
+              ?.serverConfig?.scratchWorkspaceRoot,
+          ),
+      ),
+    [allProjects, environments],
+  );
   const [routinesByEnvironment, setRoutinesByEnvironment] = useState<
     ReadonlyMap<EnvironmentId, EnvironmentRoutineLoad>
   >(new Map());
