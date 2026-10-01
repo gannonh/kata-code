@@ -1622,6 +1622,12 @@ describe("ClaudeAdapterLive", () => {
       assert.equal(String(runtimeEvents[completedIndex]?.turnId), String(turn.turnId));
       assert.equal(String(runtimeEvents[compactedIndex]?.turnId), String(turn.turnId));
       assert.isAbove(completedIndex, compactedIndex);
+      // Stream teardown would also end the turn, but as interrupted.
+      const completed = runtimeEvents[completedIndex];
+      assert.equal(
+        completed?.type === "turn.completed" ? completed.payload.state : null,
+        "completed",
+      );
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
