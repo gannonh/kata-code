@@ -1650,6 +1650,38 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
               [latestSkills],
             );
 
+            // A fresh scan supersedes an ordinary scan already in flight for the
+            // same cwd, even when that older scan finishes first.
+            const staleStarted = yield* Deferred.make<void>();
+            const releaseStale = yield* Deferred.make<void>();
+            yield* Ref.set(scanGate, { started: staleStarted, release: releaseStale });
+            yield* Ref.set(scopedResult, scopedProvider);
+            const staleScan = yield* registry
+              .refreshWorkspaceSnapshot({ instanceId, cwd: "/other" })
+              .pipe(Effect.forkChild);
+            yield* Deferred.await(staleStarted);
+            const restartedSkills = [
+              ...scopedProvider.skills,
+              { name: "restarted", path: "/other/restarted/SKILL.md", enabled: true },
+            ];
+            const freshStarted = yield* Deferred.make<void>();
+            const releaseFresh = yield* Deferred.make<void>();
+            yield* Ref.set(scanGate, { started: freshStarted, release: releaseFresh });
+            yield* Ref.set(scopedResult, { ...scopedProvider, skills: restartedSkills });
+            const freshScan = yield* registry
+              .refreshWorkspaceSnapshot({ instanceId, cwd: "/other", fresh: true })
+              .pipe(Effect.forkChild);
+            yield* Deferred.await(freshStarted);
+            yield* Deferred.succeed(releaseStale, undefined);
+            yield* Fiber.join(staleScan);
+            yield* Deferred.succeed(releaseFresh, undefined);
+            yield* Fiber.join(freshScan);
+            assert.deepStrictEqual(
+              (yield* registry.getProviders)[0]?.workspaceSnapshots?.find((s) => s.cwd === "/other")
+                ?.skills,
+              restartedSkills,
+            );
+
             yield* Ref.set(instancesRef, [rebuiltInstance]);
             yield* PubSub.publish(registryChanges, undefined);
             let rebuilt = yield* registry.getProviders;

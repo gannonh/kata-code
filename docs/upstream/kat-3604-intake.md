@@ -131,3 +131,9 @@ Local gates ran on `8686041a0ae907b4f0f2bfdb74277183e0469761`. The candidate add
 | `vp run build:desktop`, preload bundle verification        | Pass                                                                 |
 
 The trusted checker results and the web check are recorded on KAT-3604 against the exact candidate.
+
+## Accepted review repair
+
+Codex reviewed candidate `5e47151ffe` and raised one P2 on `ProviderRegistry.ts` ([thread](https://github.com/gannonh/kata-code/pull/334#discussion_r4152972923)), in code taken unchanged from upstream #14542. When an ordinary workspace scan was already running for a cwd with no snapshot, a fresh scan from Restart agent session ran beside it with the same starting snapshot. If the older scan finished first, its write changed the snapshot, so the fresh result failed the "snapshot unchanged" guard. The session then kept the pre-restart skills.
+
+The repair adds a per-cwd scan generation. Each fresh scan bumps it, and a scan writes only while its generation is still current. The check runs in the same synchronous update as the write. Upstream's case, where a slow fresh scan must not overwrite a newer one, still holds. A new case in `ProviderRegistry.test.ts` failed before the repair, because the stale skills won, and passes after it. `vpr typecheck`, `vp check`, and the 91 provider test files pass.

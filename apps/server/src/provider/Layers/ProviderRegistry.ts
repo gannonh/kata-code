@@ -385,6 +385,10 @@ export const ProviderRegistryLive = Layer.effect(
     const workspaceRefreshesRef = yield* Ref.make<
       ReadonlyMap<ProviderInstance, ReadonlySet<string>>
     >(new Map());
+    // Bumped by each fresh scan of a cwd. A scan writes only while the
+    // generation it started under is still current. Plain mutable state so the
+    // check runs inside the same synchronous update as the write.
+    const workspaceScanGenerations = new WeakMap<ProviderInstance, Map<string, number>>();
     const maintenanceActionStatesRef = yield* Ref.make<
       ReadonlyMap<ProviderInstanceId, { readonly update?: ServerProviderUpdateState | undefined }>
     >(new Map());
@@ -895,6 +899,13 @@ export const ProviderRegistryLive = Layer.effect(
       });
       // A fresh scan never joins a running one, which may predate the change.
       if (!claimed && !input.fresh) return yield* Ref.get(providersRef);
+      let generations = workspaceScanGenerations.get(instance);
+      if (!generations) {
+        generations = new Map();
+        workspaceScanGenerations.set(instance, generations);
+      }
+      const generation = (generations.get(input.cwd) ?? 0) + (input.fresh ? 1 : 0);
+      generations.set(input.cwd, generation);
       // Fresh scans also re-read the machine snapshot: Claude's plugin
       // commands come from it, not from the cwd scan.
       const refreshMachineSnapshot = input.fresh
@@ -910,15 +921,18 @@ export const ProviderRegistryLive = Layer.effect(
             : instanceRegistry.getInstance(input.instanceId).pipe(
                 Effect.flatMap((currentInstance) => {
                   if (currentInstance !== instance) return Ref.get(providersRef);
-                  // Write only if the cwd's snapshot did not change during the
-                  // scan. A session event or another scan that landed first is newer.
+                  // Write only if no fresh scan started after this one and the
+                  // cwd's snapshot did not change during the scan. A session event
+                  // or another scan that landed first is newer.
                   return updateProviders((currentProviders) =>
-                    currentProviders.map((candidate) =>
-                      candidate.instanceId === input.instanceId &&
-                      Equal.equals(workspaceSnapshotOf(candidate), scannedFrom)
-                        ? upsertProviderWorkspaceSnapshot(candidate, input.cwd, scopedSnapshot)
-                        : candidate,
-                    ),
+                    workspaceScanGenerations.get(instance)?.get(input.cwd) !== generation
+                      ? currentProviders
+                      : currentProviders.map((candidate) =>
+                          candidate.instanceId === input.instanceId &&
+                          Equal.equals(workspaceSnapshotOf(candidate), scannedFrom)
+                            ? upsertProviderWorkspaceSnapshot(candidate, input.cwd, scopedSnapshot)
+                            : candidate,
+                        ),
                   );
                 }),
               ),
