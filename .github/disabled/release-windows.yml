@@ -10,17 +10,17 @@
 # 4. Add `echo 'release-assets/*.exe'` to "Resolve release asset list".
 #
 # release-desktop.yml still carries every `inputs.platform == 'win'` step
-# (package cache, WSL runtime embed, Azure Trusted Signing); they run again
+# (WSL runtime wait and embed, Azure Trusted Signing); they run again
 # as soon as a caller passes `platform: win`.
 
 jobs:
   # The Windows jobs embed the same-arch Linux CLI archive as the WSL runtime.
-  # `!cancelled()` (not `!failure()`) still lets them start when that Linux job
-  # failed; the download step inside then fails this single platform if the
-  # archive is missing.
+  # They start with the other platforms and wait for that artifact partway
+  # through ("Wait for Linux CLI archive" in release-desktop.yml), which fails
+  # this single platform if the Linux job ends without uploading it.
   desktop_win_x64:
     name: Desktop Windows x64
-    needs: [preflight, relay_public_config, build_bundle, desktop_linux_x64]
+    needs: [preflight, relay_public_config, build_bundle]
     if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build_bundle.result == 'success' }}
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
@@ -44,7 +44,7 @@ jobs:
 
   desktop_win_arm64:
     name: Desktop Windows arm64
-    needs: [preflight, relay_public_config, build_bundle, desktop_linux_arm64]
+    needs: [preflight, relay_public_config, build_bundle]
     if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build_bundle.result == 'success' }}
     uses: ./.github/workflows/release-desktop.yml
     secrets: inherit
