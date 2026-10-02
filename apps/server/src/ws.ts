@@ -49,6 +49,7 @@ import {
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
+  type ProjectCreateNewInput,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
@@ -147,6 +148,7 @@ import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
+import * as NewProject from "./project/NewProject.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
@@ -2135,6 +2137,49 @@ const makeWsRpcLayer = (
         );
       });
 
+      // Projects started from just a name live beside Scratch and worktrees,
+      // away from folders the user organizes by hand. A nested repository is
+      // fine here (unlike Scratch) because each project gets its own `git init`.
+      const newProjectsRoot = path.resolve(config.baseDir, "projects");
+      const createNewProject = (input: ProjectCreateNewInput) =>
+        Effect.gen(function* () {
+          const folder = yield* NewProject.createNewProjectFolder({
+            root: newProjectsRoot,
+            name: input.name,
+          }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestrationDispatchCommandError({
+                  message: "Failed to create the project folder.",
+                  cause,
+                }),
+            ),
+          );
+          const projectId = ProjectId.make(yield* randomUUID);
+          yield* Effect.gen(function* () {
+            const command = yield* normalizeDispatchCommand({
+              type: "project.create",
+              commandId: yield* serverCommandId("project-create-new"),
+              projectId,
+              title: input.name,
+              workspaceRoot: folder.workspaceRoot,
+              createdAt: yield* nowIso,
+            });
+            yield* dispatchNormalizedCommand(command);
+          }).pipe(
+            // Only a rejected command means no project uses the folder. An
+            // interrupt can land after the command is queued, so keep it then.
+            Effect.tapError(() =>
+              fileSystem.remove(folder.workspaceRoot, { recursive: true }).pipe(Effect.ignore),
+            ),
+          );
+          return {
+            projectId,
+            workspaceRoot: folder.workspaceRoot,
+            ...(folder.commitError === undefined ? {} : { commitError: folder.commitError }),
+          };
+        });
+
       // Only clients that answer /usage-limits themselves see it in the catalogs;
       // an older client would send the injected command to the provider.
       const loadServerConfig = (options: { readonly usageLimitsCommand: boolean }) =>
@@ -2199,6 +2244,7 @@ const makeWsRpcLayer = (
             threadSnapshotPagination: true,
             reasoningMessages: true,
             ...(scratchWorkspaceRoot === undefined ? {} : { scratchWorkspaceRoot }),
+            newProjectsRoot,
           };
         });
 
@@ -3592,6 +3638,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.projectsEnsureScratch, ensureScratchProject, {
             "rpc.aggregate": "orchestration",
           }),
+        [WS_METHODS.projectsCreateNew]: (input) =>
+          observeRpcEffect(WS_METHODS.projectsCreateNew, createNewProject(input), {
+            "rpc.aggregate": "orchestration",
+          }),
         [WS_METHODS.projectCloneCancel]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectCloneCancel,
@@ -3798,11 +3848,18 @@ const makeWsRpcLayer = (
                     resource: input.resource,
                   });
                 }
+                // A cloned project exists before its files do. Clients ask again
+                // when the clone lands (see createProjectFaviconUrlAtomFamily).
+                const clone = yield* projectCloneTracker.get(project.value.id);
                 return yield* issueAssetUrl({
                   resource: input.resource,
                   ...(project.value.faviconPath
                     ? { projectFaviconPath: project.value.faviconPath }
                     : {}),
+                  projectCheckoutPending:
+                    clone !== null &&
+                    clone.phase !== "done" &&
+                    clone.destinationPath === project.value.workspaceRoot,
                 });
               }
               const thread = yield* projectionSnapshotQuery

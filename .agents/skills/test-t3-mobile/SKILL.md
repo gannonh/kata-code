@@ -88,6 +88,7 @@ Run Metro from `apps/mobile`.
    ```
 
 4. Open the exact development-client URL for the selected device and confirm the loaded bundle belongs to this worktree and Metro port.
+   Append `&disableAutoLaunch=1&disableFab=1` to the development-client URL query when developer chrome would obscure screenshots or taps; the SDK 58 dev client applies these preferences before the app loads.
 
 ### iOS launch
 

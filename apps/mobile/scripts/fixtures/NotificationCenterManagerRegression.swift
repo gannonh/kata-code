@@ -6,9 +6,9 @@ public enum UIBackgroundFetchResult {
   case noData
 }
 
-public struct UNNotificationPresentationOptions: OptionSet {
-  public let rawValue: Int
-  public init(rawValue: Int) { self.rawValue = rawValue }
+// A class, not an OptionSet, so the optional Objective-C delegate methods can take it.
+public final class UNNotificationPresentationOptions: NSObject, ExpressibleByArrayLiteral {
+  public init(arrayLiteral elements: Int...) {}
 }
 
 public final class UNNotification: NSObject {}
@@ -18,7 +18,35 @@ public final class UNNotificationResponse: NSObject {
   init(_ identifier: String) { self.identifier = identifier }
 }
 
-public protocol UNUserNotificationCenterDelegate: AnyObject {}
+@objc public protocol UNUserNotificationCenterDelegate: NSObjectProtocol {
+  @objc optional func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  )
+  @objc optional func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  )
+  @objc optional func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    openSettingsFor notification: UNNotification?
+  )
+}
+
+// expo-notifications 58 locks its registry with ExpoModulesCore's Mutex, which the test strips
+// along with the module import.
+public final class Mutex<Value>: @unchecked Sendable {
+  private let lock = NSLock()
+  private var value: Value
+  public init(_ value: Value) { self.value = value }
+  public func withLock<Result>(_ body: (inout Value) throws -> Result) rethrows -> Result {
+    lock.lock()
+    defer { lock.unlock() }
+    return try body(&value)
+  }
+}
 
 public final class UNUserNotificationCenter: NSObject {
   private static let instance = UNUserNotificationCenter()
