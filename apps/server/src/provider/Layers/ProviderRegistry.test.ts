@@ -20,6 +20,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import {
   EnvironmentId,
+  AntigravitySettings,
   ClaudeSettings,
   CodexSettings,
   DEFAULT_SERVER_SETTINGS,
@@ -41,6 +42,9 @@ import { checkCodexProviderStatus, type CodexAppServerProviderSnapshot } from ".
 import { checkClaudeProviderStatus } from "./ClaudeProvider.ts";
 import * as BackgroundPolicy from "../../background/BackgroundPolicy.ts";
 import { AntigravityInstallation } from "../AntigravityInstallation.ts";
+import type { AcpSessionRuntimeStartResult } from "../acp/AcpSessionRuntime.ts";
+import { makeAntigravityProvider } from "./AntigravityProvider.ts";
+import { makeCursorCommandCatalog } from "./CursorProvider.ts";
 import * as ModelManifest from "../ModelManifest.ts";
 import { applyProviderCompatibility } from "../providerCompatibility.ts";
 import * as ResetCreditCoordinator from "./resetCreditCoordinator.ts";
@@ -96,6 +100,79 @@ const TestHttpClientLive = Layer.succeed(
   ),
 ).pipe(Layer.provideMerge(ModelManifest.layerTest));
 
+const makeWorkspaceInstance = (
+  provider: ServerProvider,
+  snapshotForCwd: NonNullable<ProviderInstance["snapshotForCwd"]>,
+  overrides: Partial<ProviderInstance> = {},
+): ProviderInstance => ({
+  instanceId: provider.instanceId,
+  driverKind: provider.driver,
+  continuationIdentity: {
+    driverKind: provider.driver,
+    continuationKey: `${provider.driver}:instance:${provider.instanceId}`,
+  },
+  displayName: undefined,
+  enabled: true,
+  snapshot: {
+    resolveMaintenance: () =>
+      Effect.succeed(
+        makeManualOnlyProviderMaintenanceCapabilities({
+          provider: provider.driver,
+          packageName: null,
+        }),
+      ),
+    getSnapshot: Effect.succeed(provider),
+    refresh: Effect.succeed(provider),
+    streamChanges: Stream.empty,
+    applyUsageLimits: () => Effect.void,
+  },
+  snapshotForCwd,
+  adapter: {} as ProviderInstance["adapter"],
+  textGeneration: {} as ProviderInstance["textGeneration"],
+  ...overrides,
+});
+
+const makeMachineProvider = (
+  instanceId: ProviderInstanceId,
+  driver: ProviderDriverKind,
+): ServerProvider => ({
+  instanceId,
+  driver,
+  status: "ready",
+  enabled: true,
+  installed: true,
+  auth: { status: "authenticated" },
+  checkedAt: "2026-06-10T00:00:00.000Z",
+  version: "1.0.0",
+  models: [],
+  slashCommands: [],
+  skills: [],
+});
+
+const makeStaticInstanceRegistry = (instances: ReadonlyArray<ProviderInstance>) =>
+  Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
+    getInstance: (requestedId) =>
+      Effect.succeed(instances.find((instance) => instance.instanceId === requestedId)),
+    listInstances: Effect.succeed(instances),
+    listUnavailable: Effect.succeed([]),
+    streamChanges: Stream.empty,
+    subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+  });
+
+const buildRegistryServices = (instances: ReadonlyArray<ProviderInstance>, prefix: string) =>
+  Effect.gen(function* () {
+    const scope = yield* Scope.make();
+    yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+    return yield* Layer.build(
+      ProviderRegistryLive.pipe(
+        Layer.provideMerge(makeStaticInstanceRegistry(instances)),
+        Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix })),
+        Layer.provideMerge(NodeServices.layer),
+      ),
+    ).pipe(Scope.provide(scope));
+  });
+
+const decodeAntigravitySettings = Schema.decodeSync(AntigravitySettings);
 const BackgroundPolicyAlwaysRunLayer = Layer.mock(BackgroundPolicy.BackgroundPolicy)({
   reportClientActivity: () => Effect.void,
   removeRpcClient: () => Effect.void,
@@ -1491,33 +1568,10 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
           const makeInstance = (
             provider: ServerProvider,
             snapshotForCwd: NonNullable<ProviderInstance["snapshotForCwd"]>,
-          ): ProviderInstance => ({
-            instanceId,
-            driverKind: driver,
-            continuationIdentity: {
-              driverKind: driver,
-              continuationKey: "codex:instance:codex",
-            },
-            displayName: undefined,
-            enabled: true,
-            snapshot: {
-              resolveMaintenance: () =>
-                Effect.succeed(
-                  makeManualOnlyProviderMaintenanceCapabilities({
-                    provider: driver,
-                    packageName: null,
-                  }),
-                ),
-              getSnapshot: Effect.succeed(provider),
-              refresh: Effect.succeed(provider),
-              streamChanges: Stream.empty,
-              applyUsageLimits: () => Effect.void,
-            },
-            snapshotForCwd,
-            invalidateCaches: Ref.update(cacheInvalidations, (count) => count + 1),
-            adapter: {} as ProviderInstance["adapter"],
-            textGeneration: {} as ProviderInstance["textGeneration"],
-          });
+          ): ProviderInstance =>
+            makeWorkspaceInstance(provider, snapshotForCwd, {
+              invalidateCaches: Ref.update(cacheInvalidations, (count) => count + 1),
+            });
           const firstInstance = makeInstance(machineProvider, () =>
             Effect.gen(function* () {
               yield* Ref.update(snapshotCalls, (count) => count + 1);
@@ -1698,6 +1752,289 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
           }).pipe(Effect.provide(runtimeServices));
         }),
       );
+
+      describe("dropped workspace snapshots", () => {
+        const cwd = "/workspace";
+        const staleSkills = [
+          { name: "stale", path: "/workspace/stale/SKILL.md", enabled: true },
+        ] satisfies ServerProvider["skills"];
+        const freshSkills = [
+          { name: "fresh", path: "/workspace/fresh/SKILL.md", enabled: true },
+        ] satisfies ServerProvider["skills"];
+        const codexId = ProviderInstanceId.make("codex");
+        const codexProvider = makeMachineProvider(codexId, ProviderDriverKind.make("codex"));
+        const codexInstance = makeWorkspaceInstance(codexProvider, () =>
+          Effect.succeed(codexProvider),
+        );
+        const workspaceCwdsOf = (instanceId: ProviderInstanceId) =>
+          Effect.gen(function* () {
+            const registry = yield* ProviderRegistry.ProviderRegistry;
+            return (yield* registry.getProviders)
+              .find((provider) => provider.instanceId === instanceId)
+              ?.workspaceSnapshots?.map((snapshot) => snapshot.cwd);
+          });
+
+        it.effect("keeps a dropped Antigravity workspace snapshot dropped until it rescans", () =>
+          Effect.gen(function* () {
+            const antigravityDriver = ProviderDriverKind.make("antigravity");
+            const antigravityId = ProviderInstanceId.make("antigravity");
+            const initializeResult = {
+              protocolVersion: 1,
+              agentCapabilities: {},
+              authMethods: [],
+              agentInfo: { name: "antigravity-acp", title: "Antigravity", version: "1.0.0" },
+            } satisfies AcpSessionRuntimeStartResult["initializeResult"];
+            const started = {
+              sessionId: "session-1",
+              initializeResult,
+              sessionSetupResult: { sessionId: "session-1" },
+              modelConfigId: "model",
+            } satisfies AcpSessionRuntimeStartResult;
+            const antigravity = yield* makeAntigravityProvider(
+              decodeAntigravitySettings({ enabled: true }),
+              {
+                stampIdentity: (snapshot) =>
+                  Effect.succeed({
+                    ...snapshot,
+                    instanceId: antigravityId,
+                    driver: antigravityDriver,
+                  }),
+                probe: Effect.succeed(initializeResult),
+                supportsTextGeneration: Effect.succeed(false),
+              },
+            ).pipe(
+              Effect.provide(
+                Layer.merge(
+                  BackgroundPolicyAlwaysRunLayer,
+                  ServerSettingsModule.ServerSettingsService.layerTest(),
+                ),
+              ),
+            );
+            const antigravityScans = yield* Ref.make(0);
+            const antigravityScanSkills = yield* Ref.make<ServerProvider["skills"]>(staleSkills);
+            const antigravityInstance = makeWorkspaceInstance(
+              makeMachineProvider(antigravityId, antigravityDriver),
+              (workspaceCwd) =>
+                Ref.update(antigravityScans, (count) => count + 1).pipe(
+                  Effect.andThen(Ref.get(antigravityScanSkills)),
+                  Effect.flatMap((skills) => antigravity.snapshotForCwd(workspaceCwd, skills)),
+                  Effect.orDie,
+                ),
+              { snapshot: antigravity.snapshot },
+            );
+            const runtimeServices = yield* buildRegistryServices(
+              [antigravityInstance, codexInstance],
+              "t3-provider-registry-antigravity-drop-",
+            );
+
+            yield* Effect.gen(function* () {
+              const registry = yield* ProviderRegistry.ProviderRegistry;
+              const antigravityInRegistry = Effect.map(registry.getProviders, (providers) =>
+                providers.find((provider) => provider.instanceId === antigravityId),
+              );
+              const waitUntil = <R>(condition: Effect.Effect<boolean, never, R>) =>
+                Effect.gen(function* () {
+                  for (let attempt = 0; attempt < 50_000; attempt += 1) {
+                    if (yield* condition) return;
+                    yield* Effect.yieldNow;
+                  }
+                  assert.fail("condition did not hold");
+                });
+              // Emissions reach the registry in order, so once it shows the latest
+              // slash command name, everything published before it has landed.
+              const waitForPublishedCommand = (name: string) =>
+                waitUntil(
+                  Effect.map(antigravityInRegistry, (provider) =>
+                    Boolean(provider?.slashCommands.some((command) => command.name === name)),
+                  ),
+                );
+
+              yield* antigravity.onSessionStarted(started, cwd);
+              yield* antigravity.snapshotForCwd(cwd, staleSkills);
+              yield* waitUntil(
+                Effect.map(workspaceCwdsOf(antigravityId), (cwds) => cwds?.[0] === cwd),
+              );
+
+              // Restart agent session on codex drops Antigravity's snapshot for the cwd.
+              yield* registry.refreshWorkspaceSnapshot({ instanceId: codexId, cwd, fresh: true });
+              assert.deepStrictEqual(yield* workspaceCwdsOf(antigravityId), []);
+
+              // Neither session callbacks for the cwd nor a health check may bring it back.
+              const commands = [{ name: "plan", description: "Create a plan" }];
+              yield* antigravity.onAvailableCommands(commands);
+              yield* antigravity.onSessionStarted(started, cwd);
+              yield* antigravity.onAvailableCommands(commands, cwd);
+              yield* registry.refreshInstance(antigravityId);
+              yield* waitForPublishedCommand("plan");
+              assert.deepStrictEqual(yield* workspaceCwdsOf(antigravityId), []);
+
+              // The next ordinary refresh rescans instead of finding a snapshot.
+              yield* Ref.set(antigravityScanSkills, freshSkills);
+              yield* registry.refreshWorkspaceSnapshot({ instanceId: antigravityId, cwd });
+              assert.strictEqual(yield* Ref.get(antigravityScans), 1);
+              const rescannedSkills = Effect.map(antigravityInRegistry, (provider) =>
+                provider?.workspaceSnapshots?.map((snapshot) => snapshot.skills),
+              );
+              assert.deepStrictEqual(yield* rescannedSkills, [freshSkills]);
+
+              // The rescanned entry survives later Antigravity publishes.
+              yield* antigravity.onAvailableCommands([{ name: "review", description: "Review" }]);
+              yield* registry.refreshInstance(antigravityId);
+              yield* waitForPublishedCommand("review");
+              assert.deepStrictEqual(yield* rescannedSkills, [freshSkills]);
+            }).pipe(Effect.provide(runtimeServices));
+          }),
+        );
+
+        it.effect(
+          "keeps a dropped snapshot dropped when a provider republishes its own cache",
+          () =>
+            Effect.gen(function* () {
+              const cursorId = ProviderInstanceId.make("cursor");
+              const cursorDriver = ProviderDriverKind.make("cursor");
+              const cursorMachine = makeMachineProvider(cursorId, cursorDriver);
+              const cursor = yield* makeCursorCommandCatalog(
+                makeWorkspaceInstance(cursorMachine, () => Effect.succeed(cursorMachine)).snapshot,
+              );
+              const cursorSkills = yield* Ref.make<ServerProvider["skills"]>(staleSkills);
+              const cursorInstance = makeWorkspaceInstance(
+                cursorMachine,
+                (workspaceCwd) =>
+                  Ref.get(cursorSkills).pipe(
+                    Effect.flatMap((skills) => cursor.snapshotForCwd(workspaceCwd, skills)),
+                  ),
+                { snapshot: cursor.snapshot },
+              );
+              const runtimeServices = yield* buildRegistryServices(
+                [cursorInstance, codexInstance],
+                "t3-provider-registry-cursor-drop-",
+              );
+
+              yield* Effect.gen(function* () {
+                const registry = yield* ProviderRegistry.ProviderRegistry;
+                const cursorSkillsInRegistry = Effect.map(registry.getProviders, (providers) =>
+                  providers
+                    .find((provider) => provider.instanceId === cursorId)
+                    ?.workspaceSnapshots?.map((snapshot) => snapshot.skills),
+                );
+
+                yield* registry.refreshWorkspaceSnapshot({ instanceId: cursorId, cwd });
+                assert.deepStrictEqual(yield* cursorSkillsInRegistry, [staleSkills]);
+
+                // Restart agent session on codex drops Cursor's snapshot for the cwd.
+                yield* registry.refreshWorkspaceSnapshot({ instanceId: codexId, cwd, fresh: true });
+                assert.deepStrictEqual(yield* cursorSkillsInRegistry, []);
+
+                // Cursor's own cache still holds the entry and republishes it on refresh.
+                yield* registry.refreshInstance(cursorId);
+                assert.deepStrictEqual(yield* cursorSkillsInRegistry, []);
+
+                // The next ordinary refresh rescans, and the rescan survives a later refresh.
+                yield* Ref.set(cursorSkills, freshSkills);
+                yield* registry.refreshWorkspaceSnapshot({ instanceId: cursorId, cwd });
+                yield* registry.refreshInstance(cursorId);
+                assert.deepStrictEqual(yield* cursorSkillsInRegistry, [freshSkills]);
+              }).pipe(Effect.provide(runtimeServices));
+            }),
+        );
+
+        it.effect("filters a publication queued from an instance the drop found empty", () =>
+          Effect.gen(function* () {
+            const lateId = ProviderInstanceId.make("late");
+            const lateMachine = makeMachineProvider(lateId, ProviderDriverKind.make("cursor"));
+            const cached = yield* Ref.make<NonNullable<ServerProvider["workspaceSnapshots"]>>([]);
+            const publishCache = Effect.map(Ref.get(cached), (workspaceSnapshots) => ({
+              ...lateMachine,
+              workspaceSnapshots,
+            }));
+            const lateInstance = makeWorkspaceInstance(
+              lateMachine,
+              () => Effect.succeed(lateMachine),
+              {
+                snapshot: {
+                  ...makeWorkspaceInstance(lateMachine, () => Effect.succeed(lateMachine)).snapshot,
+                  getSnapshot: publishCache,
+                  refresh: publishCache,
+                },
+              },
+            );
+            const runtimeServices = yield* buildRegistryServices(
+              [lateInstance, codexInstance],
+              "t3-provider-registry-drop-queued-",
+            );
+
+            yield* Effect.gen(function* () {
+              const registry = yield* ProviderRegistry.ProviderRegistry;
+              yield* registry.refreshWorkspaceSnapshot({ instanceId: codexId, cwd, fresh: true });
+              yield* Ref.set(cached, [
+                {
+                  cwd,
+                  checkedAt: "2026-06-10T00:00:00.000Z",
+                  slashCommands: [],
+                  skills: staleSkills,
+                },
+              ]);
+              yield* registry.refreshInstance(lateId);
+              assert.deepStrictEqual(yield* workspaceCwdsOf(lateId), []);
+            }).pipe(Effect.provide(runtimeServices));
+          }),
+        );
+
+        it.effect("remembers the 32 most recent drops for an instance", () =>
+          Effect.gen(function* () {
+            const cacheId = ProviderInstanceId.make("cache");
+            const cacheMachine = makeMachineProvider(cacheId, ProviderDriverKind.make("cursor"));
+            const cwds = Array.from({ length: 33 }, (_, index) => `/w-${index}`);
+            const cached = yield* Ref.make<NonNullable<ServerProvider["workspaceSnapshots"]>>(
+              cwds.map((workspaceCwd) => ({
+                cwd: workspaceCwd,
+                checkedAt: "2026-06-10T00:00:00.000Z",
+                slashCommands: [],
+                skills: staleSkills,
+              })),
+            );
+            const publishCache = Effect.map(Ref.get(cached), (workspaceSnapshots) => ({
+              ...cacheMachine,
+              workspaceSnapshots,
+            }));
+            const cacheInstance = makeWorkspaceInstance(
+              cacheMachine,
+              () => Effect.succeed(cacheMachine),
+              {
+                snapshot: {
+                  ...makeWorkspaceInstance(cacheMachine, () => Effect.succeed(cacheMachine))
+                    .snapshot,
+                  getSnapshot: publishCache,
+                  refresh: publishCache,
+                },
+              },
+            );
+            const runtimeServices = yield* buildRegistryServices(
+              [cacheInstance, codexInstance],
+              "t3-provider-registry-drop-cap-",
+            );
+
+            yield* Effect.gen(function* () {
+              const registry = yield* ProviderRegistry.ProviderRegistry;
+              yield* registry.refreshInstance(cacheId);
+              assert.strictEqual((yield* workspaceCwdsOf(cacheId))?.length, 33);
+
+              for (const workspaceCwd of cwds) {
+                yield* registry.refreshWorkspaceSnapshot({
+                  instanceId: codexId,
+                  cwd: workspaceCwd,
+                  fresh: true,
+                });
+              }
+              assert.deepStrictEqual(yield* workspaceCwdsOf(cacheId), []);
+
+              // The cache republishes all 33. The oldest drop was forgotten and returns.
+              yield* registry.refreshInstance(cacheId);
+              assert.deepStrictEqual(yield* workspaceCwdsOf(cacheId), ["/w-0"]);
+            }).pipe(Effect.provide(runtimeServices));
+          }),
+        );
+      });
 
       it.effect("refreshes OpenCode catalogs and preserves other providers", () =>
         Effect.gen(function* () {
