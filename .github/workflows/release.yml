@@ -292,8 +292,9 @@ jobs:
       - name: Typecheck
         run: vp run typecheck
 
-  # Keep tests on their own runners, using the same package split and server
-  # shards as CI, so the release check job does not spend its budget on tests.
+  # Keep tests on their own runners so the release check job does not spend its
+  # budget on them: package tests here, server tests in the release's own three
+  # shards below. CI splits its tests differently.
   test:
     name: Release tests
     needs: [preflight]
