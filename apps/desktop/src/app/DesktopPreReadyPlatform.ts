@@ -98,18 +98,18 @@ export const make = Effect.gen(function* () {
               appVersion: Electron.app.getVersion(),
             }).displayName,
             execTarget: process.env.APPIMAGE?.trim() || process.execPath,
-            ...(portalEntryClaimsSchemes({
+            schemes: portalEntryClaimsSchemes({
               isPackaged: Electron.app.isPackaged,
               linuxDesktopEntryName: linux.linuxDesktopEntryName,
             })
-              ? { schemes: desktopUrlHandlerSchemes(linux.isDevelopment) }
-              : {}),
+              ? desktopUrlHandlerSchemes(linux.isDevelopment)
+              : null,
             ...(iconPath === undefined ? {} : { iconPath }),
           }),
           "utf8",
         );
       } catch {
-        // The URL handler retries with the full environment and logs failures.
+        // Best-effort: the next launch rewrites the entry.
       }
       // Chromium caches its portal registration during startup. Set the identity
       // before any asynchronous work can initialize it with Electron's default.

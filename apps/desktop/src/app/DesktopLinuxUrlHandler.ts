@@ -119,11 +119,11 @@ export function escapeDesktopEntryExecArgument(value: string): string {
 
 // The AppImage integration entry owns the window identity. This
 // hidden URL-only entry must not compete with it for StartupWMClass matching.
-// An entry rendered without `schemes` carries no MimeType, so it claims no scheme.
+// Null `schemes` renders no MimeType, so the entry claims no scheme.
 export function renderUrlHandlerDesktopEntry(input: {
   readonly displayName: string;
   readonly execTarget: string;
-  readonly schemes?: readonly string[];
+  readonly schemes: readonly string[] | null;
   readonly iconPath?: string;
 }): string {
   return [
@@ -135,7 +135,7 @@ export function renderUrlHandlerDesktopEntry(input: {
     "Terminal=false",
     "NoDisplay=true",
     "StartupNotify=false",
-    ...(input.schemes === undefined
+    ...(input.schemes === null
       ? []
       : [`MimeType=${input.schemes.map((scheme) => `x-scheme-handler/${scheme}`).join(";")};`]),
     "",
@@ -178,8 +178,8 @@ export const make = Effect.gen(function* () {
       schemes,
       ...(environment.isPackaged ? { iconPath } : {}),
     });
-    // Unpackaged, pre-ready setup already wrote this file, and the portal may be
-    // reading it during startup, so skip a rewrite that would truncate it.
+    // Skip a rewrite of a current entry: the portal may be reading it during
+    // startup, and a rewrite would truncate it.
     const existing = yield* fileSystem
       .readFileString(desktopEntryPath)
       .pipe(Effect.orElseSucceed(() => null));

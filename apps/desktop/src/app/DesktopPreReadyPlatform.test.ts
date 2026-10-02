@@ -147,78 +147,77 @@ describe("DesktopPreReadyPlatform", () => {
 
   for (const scenario of [
     {
-      name: "packaged",
-      isPackaged: true,
-      devServerUrl: "",
-      entry: "t3code.desktop",
-      claims: false,
-    },
-    {
-      name: "packaged development",
+      name: "packaged development entry claims no URL scheme",
       isPackaged: true,
       devServerUrl: "http://localhost:5733",
       entry: "katacode-dev.desktop",
-      claims: false,
+      expected: [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Kata Code (Dev)",
+        'Exec="/Applications/current.AppImage" %U',
+        "Icon=/xdg/icons/katacode-url-handler.desktop.png",
+        "Terminal=false",
+        "NoDisplay=true",
+        "StartupNotify=false",
+        "",
+      ].join("\n"),
     },
     {
-      name: "unpackaged",
+      name: "unpackaged entry claims both URL schemes",
       isPackaged: false,
       devServerUrl: "",
       entry: "t3code.desktop",
-      claims: true,
+      expected: [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Kata Code (Alpha)",
+        'Exec="/Applications/current.AppImage" %U',
+        "Terminal=false",
+        "NoDisplay=true",
+        "StartupNotify=false",
+        "MimeType=x-scheme-handler/katacode;x-scheme-handler/t3code;",
+        "",
+      ].join("\n"),
     },
     {
-      name: "unpackaged development",
+      name: "unpackaged development entry claims the development URL scheme",
       isPackaged: false,
       devServerUrl: "http://localhost:5733",
       entry: "katacode-dev.desktop",
-      claims: true,
+      expected: [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Kata Code (Dev)",
+        'Exec="/Applications/current.AppImage" %U',
+        "Terminal=false",
+        "NoDisplay=true",
+        "StartupNotify=false",
+        "MimeType=x-scheme-handler/katacode-dev;",
+        "",
+      ].join("\n"),
     },
   ] as const) {
-    it.effect(
-      `${scenario.name} portal entry ${scenario.claims ? "claims" : "does not claim"} the URL schemes`,
-      () => {
-        appState.isPackaged = scenario.isPackaged;
-        vi.stubEnv("VITE_DEV_SERVER_URL", scenario.devServerUrl);
-        vi.stubEnv("XDG_DATA_HOME", "/xdg");
-        vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
-        getSwitchValueMock.mockReturnValue("");
-        const dev = scenario.devServerUrl !== "";
-        const written = new Map<string, string>();
-        writeFileSyncMock.mockImplementation((path: string, contents: string) => {
-          written.set(path, contents);
-        });
+    it.effect(scenario.name, () => {
+      appState.isPackaged = scenario.isPackaged;
+      vi.stubEnv("VITE_DEV_SERVER_URL", scenario.devServerUrl);
+      vi.stubEnv("XDG_DATA_HOME", "/xdg");
+      vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
+      getSwitchValueMock.mockReturnValue("");
+      const written = new Map<string, string>();
+      writeFileSyncMock.mockImplementation((path: string, contents: string) => {
+        written.set(path, contents);
+      });
 
-        return Effect.gen(function* () {
-          yield* DesktopPreReadyPlatform.make;
-          assert.equal(setDesktopNameMock.mock.calls[0]?.[0], scenario.entry);
-          assert.equal(
-            written.get(`/xdg/applications/${scenario.entry}`),
-            [
-              "[Desktop Entry]",
-              "Type=Application",
-              `Name=Kata Code (${dev ? "Dev" : "Alpha"})`,
-              'Exec="/Applications/current.AppImage" %U',
-              ...(scenario.isPackaged ? ["Icon=/xdg/icons/katacode-url-handler.desktop.png"] : []),
-              "Terminal=false",
-              "NoDisplay=true",
-              "StartupNotify=false",
-              ...(scenario.claims
-                ? [
-                    dev
-                      ? "MimeType=x-scheme-handler/katacode-dev;"
-                      : "MimeType=x-scheme-handler/katacode;x-scheme-handler/t3code;",
-                  ]
-                : []),
-              "",
-            ].join("\n"),
-          );
-        }).pipe(
-          Effect.provideService(HostProcessPlatform, "linux"),
-          Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
-        );
-      },
-    );
+      return Effect.gen(function* () {
+        yield* DesktopPreReadyPlatform.make;
+        assert.equal(setDesktopNameMock.mock.calls[0]?.[0], scenario.entry);
+        assert.equal(written.get(`/xdg/applications/${scenario.entry}`), scenario.expected);
+      }).pipe(
+        Effect.provideService(HostProcessPlatform, "linux"),
+        Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+      );
+    });
   }
 
   it.effect("still prepares the portal entry when the bundled icon cannot be copied", () => {
