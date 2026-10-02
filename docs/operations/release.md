@@ -302,7 +302,9 @@ A cancelled, failed, or timed-out run therefore leaves a draft and nothing else:
 release stays the newest one, so every client keeps updating from it. No tag is created, so the
 next nightly's previous-tag lookup and the six-hour nightly gap are unaffected. Re-run the failed
 jobs of the same run; **Create draft release** finds the draft by tag and replaces its assets. To
-discard an interrupted run instead, delete the draft on the Releases page.
+discard an interrupted run instead, delete the draft on the Releases page. Re-running **Create draft
+release** for a tag that is already published replaces that release's assets in place, which is how
+a broken published release is repaired; updaters can see the files while they are swapped.
 
 Preview releases carry no updater manifests, so for them the check only rejects an asset that is
 still uploading.

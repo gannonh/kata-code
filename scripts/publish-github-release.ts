@@ -50,7 +50,7 @@ export class DraftReleaseIncompleteError extends Schema.TaggedError<DraftRelease
 export function manifestReferences(manifest: string): ReadonlyArray<string> {
   const names = new Set<string>();
   for (const line of manifest.split(/\r?\n/)) {
-    const match = /^(?:\s+-\s+url|path):\s*(.+?)\s*$/.exec(line);
+    const match = /^(?:\s*(?:-\s+)?url|path):\s*(.+?)\s*$/.exec(line);
     if (match?.[1]) {
       names.add(match[1].replace(/^(['"])(.*)\1$/, "$2"));
     }

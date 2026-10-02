@@ -45,6 +45,15 @@ describe("manifestReferences", () => {
     ]);
   });
 
+  it("reads list entries at any indentation and a url that is not the first key", () => {
+    assert.deepStrictEqual(
+      manifestReferences(
+        "files:\n- url: A.zip\n  size: 1\n- size: 2\n  url: B.zip\n    \npath: A.zip\n",
+      ),
+      ["A.zip", "B.zip"],
+    );
+  });
+
   it("strips quotes around a name", () => {
     assert.deepStrictEqual(
       manifestReferences(`files:\n  - url: 'A b.zip'\n    size: 1\npath: "A b.zip"\n`),
