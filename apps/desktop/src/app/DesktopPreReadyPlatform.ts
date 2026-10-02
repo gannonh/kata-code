@@ -11,7 +11,11 @@ import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 
 import * as DesktopEarlyElectronStartup from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopAppBranding } from "./DesktopEnvironment.ts";
-import { renderUrlHandlerDesktopEntry, urlHandlerIconPath } from "./DesktopLinuxUrlHandler.ts";
+import {
+  portalEntryClaimsSchemes,
+  renderUrlHandlerDesktopEntry,
+  urlHandlerIconPath,
+} from "./DesktopLinuxUrlHandler.ts";
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import { desktopUrlHandlerSchemes } from "@kata-sh/code-shared/branding";
 
@@ -94,10 +98,12 @@ export const make = Effect.gen(function* () {
               appVersion: Electron.app.getVersion(),
             }).displayName,
             execTarget: process.env.APPIMAGE?.trim() || process.execPath,
-            // Packaged, the handler entry owns the scheme claims. The portal
-            // entry only has to exist, and a second claim would list Kata Code
-            // twice in "Choose an application". In development both are one file.
-            schemes: Electron.app.isPackaged ? [] : desktopUrlHandlerSchemes(linux.isDevelopment),
+            ...(portalEntryClaimsSchemes({
+              isPackaged: Electron.app.isPackaged,
+              linuxDesktopEntryName: linux.linuxDesktopEntryName,
+            })
+              ? { schemes: desktopUrlHandlerSchemes(linux.isDevelopment) }
+              : {}),
             ...(iconPath === undefined ? {} : { iconPath }),
           }),
           "utf8",

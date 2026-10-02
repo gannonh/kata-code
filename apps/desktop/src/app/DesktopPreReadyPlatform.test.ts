@@ -145,6 +145,82 @@ describe("DesktopPreReadyPlatform", () => {
     );
   }
 
+  for (const scenario of [
+    {
+      name: "packaged",
+      isPackaged: true,
+      devServerUrl: "",
+      entry: "t3code.desktop",
+      claims: false,
+    },
+    {
+      name: "packaged development",
+      isPackaged: true,
+      devServerUrl: "http://localhost:5733",
+      entry: "katacode-dev.desktop",
+      claims: false,
+    },
+    {
+      name: "unpackaged",
+      isPackaged: false,
+      devServerUrl: "",
+      entry: "t3code.desktop",
+      claims: true,
+    },
+    {
+      name: "unpackaged development",
+      isPackaged: false,
+      devServerUrl: "http://localhost:5733",
+      entry: "katacode-dev.desktop",
+      claims: true,
+    },
+  ] as const) {
+    it.effect(
+      `${scenario.name} portal entry ${scenario.claims ? "claims" : "does not claim"} the URL schemes`,
+      () => {
+        appState.isPackaged = scenario.isPackaged;
+        vi.stubEnv("VITE_DEV_SERVER_URL", scenario.devServerUrl);
+        vi.stubEnv("XDG_DATA_HOME", "/xdg");
+        vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
+        getSwitchValueMock.mockReturnValue("");
+        const dev = scenario.devServerUrl !== "";
+        const written = new Map<string, string>();
+        writeFileSyncMock.mockImplementation((path: string, contents: string) => {
+          written.set(path, contents);
+        });
+
+        return Effect.gen(function* () {
+          yield* DesktopPreReadyPlatform.make;
+          assert.equal(setDesktopNameMock.mock.calls[0]?.[0], scenario.entry);
+          assert.equal(
+            written.get(`/xdg/applications/${scenario.entry}`),
+            [
+              "[Desktop Entry]",
+              "Type=Application",
+              `Name=Kata Code (${dev ? "Dev" : "Alpha"})`,
+              'Exec="/Applications/current.AppImage" %U',
+              ...(scenario.isPackaged ? ["Icon=/xdg/icons/katacode-url-handler.desktop.png"] : []),
+              "Terminal=false",
+              "NoDisplay=true",
+              "StartupNotify=false",
+              ...(scenario.claims
+                ? [
+                    dev
+                      ? "MimeType=x-scheme-handler/katacode-dev;"
+                      : "MimeType=x-scheme-handler/katacode;x-scheme-handler/t3code;",
+                  ]
+                : []),
+              "",
+            ].join("\n"),
+          );
+        }).pipe(
+          Effect.provideService(HostProcessPlatform, "linux"),
+          Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+        );
+      },
+    );
+  }
+
   it.effect("still prepares the portal entry when the bundled icon cannot be copied", () => {
     getSwitchValueMock.mockReturnValue("");
     copyFileSyncMock.mockImplementation(() => {
