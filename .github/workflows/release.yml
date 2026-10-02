@@ -917,12 +917,20 @@ jobs:
             --dist release-assets \
             --make-latest "${{ needs.preflight.outputs.make_latest }}"
 
-  deploy_web:
-    name: Deploy hosted web app
-    needs: [preflight, relay_public_config, release]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel != 'preview' && needs.preflight.outputs.dry_run != 'true' }}
+  # Vercel builds the hosted web app while the desktop jobs run. `--skip-domain`
+  # keeps the channel and router domains on the previous deployment until
+  # deploy_web aliases them after the GitHub Release exists, so a failed release
+  # leaves the previous alias in place. It does still move the project's own
+  # katacode-web.vercel.app production hostname at build time; see
+  # docs/operations/release.md.
+  build_web:
+    name: Build hosted web app
+    needs: [preflight, relay_public_config]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.preflight.outputs.release_channel != 'preview' && needs.preflight.outputs.dry_run != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    outputs:
+      deployment_url: ${{ steps.deploy.outputs.deployment_url }}
     env:
       KATACODE_CLERK_PUBLISHABLE_KEY: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
       KATACODE_CLERK_JWT_TEMPLATE: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
@@ -932,8 +940,6 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       KATACODE_WEB_ROUTER_URL: ${{ vars.KATACODE_WEB_ROUTER_URL }}
-      KATACODE_WEB_LATEST_DOMAIN: ${{ vars.KATACODE_WEB_LATEST_DOMAIN }}
-      KATACODE_WEB_NIGHTLY_DOMAIN: ${{ vars.KATACODE_WEB_NIGHTLY_DOMAIN }}
       VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
     steps:
       - name: Checkout
@@ -975,7 +981,8 @@ jobs:
       - name: Refresh release lockfile
         run: vp install --lockfile-only --ignore-scripts
 
-      - name: Deploy and alias channel
+      - id: deploy
+        name: Build staged deployment
         shell: bash
         run: |
           set -euo pipefail
@@ -986,17 +993,10 @@ jobs:
           fi
 
           router_url="${KATACODE_WEB_ROUTER_URL:-https://app.kata.sh}"
-          latest_domain="${KATACODE_WEB_LATEST_DOMAIN:-latest.app.kata.sh}"
-          nightly_domain="${KATACODE_WEB_NIGHTLY_DOMAIN:-nightly.app.kata.sh}"
-          router_domain="${router_url#http://}"
-          router_domain="${router_domain#https://}"
-          router_domain="${router_domain%%/*}"
 
           if [[ "${{ needs.preflight.outputs.release_channel }}" == "stable" ]]; then
-            channel_domain="$latest_domain"
             channel_name="latest"
           else
-            channel_domain="$nightly_domain"
             channel_name="nightly"
           fi
 
@@ -1009,7 +1009,7 @@ jobs:
           mkdir -p .vercel
           printf '{"orgId":"%s","projectId":"%s"}\n' "$VERCEL_ORG_ID" "$VERCEL_PROJECT_ID" > .vercel/project.json
 
-          echo "Deploying hosted web app for $channel_name channel."
+          echo "Building hosted web app for $channel_name channel."
           deploy_log="$RUNNER_TEMP/vercel-hosted-deploy.log"
           deployment_url="$(
             vp dlx vercel@53.1.1 deploy \
@@ -1044,14 +1044,75 @@ jobs:
             exit 1
           fi
 
-          echo "Aliasing $deployment_url to $channel_domain."
-          vp dlx vercel@53.1.1 alias set "$deployment_url" "$channel_domain" \
+          echo "Staged $deployment_url."
+          echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"
+
+  deploy_web:
+    name: Deploy hosted web app
+    needs: [preflight, build_web, release]
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build_web.result == 'success' && needs.release.result == 'success' && needs.preflight.outputs.release_channel != 'preview' && needs.preflight.outputs.dry_run != 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DEPLOYMENT_URL: ${{ needs.build_web.outputs.deployment_url }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      KATACODE_WEB_ROUTER_URL: ${{ vars.KATACODE_WEB_ROUTER_URL }}
+      KATACODE_WEB_LATEST_DOMAIN: ${{ vars.KATACODE_WEB_LATEST_DOMAIN }}
+      KATACODE_WEB_NIGHTLY_DOMAIN: ${{ vars.KATACODE_WEB_NIGHTLY_DOMAIN }}
+      VERCEL_TEAM_SLUG: ${{ vars.VERCEL_TEAM_SLUG }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Alias channel
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$DEPLOYMENT_URL" ]]; then
+            echo "Build hosted web app did not report a deployment URL." >&2
+            exit 1
+          fi
+
+          router_url="${KATACODE_WEB_ROUTER_URL:-https://app.kata.sh}"
+          latest_domain="${KATACODE_WEB_LATEST_DOMAIN:-latest.app.kata.sh}"
+          nightly_domain="${KATACODE_WEB_NIGHTLY_DOMAIN:-nightly.app.kata.sh}"
+          router_domain="${router_url#http://}"
+          router_domain="${router_domain#https://}"
+          router_domain="${router_domain%%/*}"
+
+          if [[ "${{ needs.preflight.outputs.release_channel }}" == "stable" ]]; then
+            channel_domain="$latest_domain"
+            channel_name="latest"
+          else
+            channel_domain="$nightly_domain"
+            channel_name="nightly"
+          fi
+
+          vercel_scope_args=(--scope "${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}")
+
+          echo "Aliasing $DEPLOYMENT_URL to $channel_domain."
+          vp dlx vercel@53.1.1 alias set "$DEPLOYMENT_URL" "$channel_domain" \
             --token "$VERCEL_TOKEN" \
             "${vercel_scope_args[@]}"
 
           if [[ "$channel_name" == "latest" && -n "$router_domain" && "$router_domain" != "$channel_domain" ]]; then
-            echo "Aliasing $deployment_url to router domain $router_domain."
-            vp dlx vercel@53.1.1 alias set "$deployment_url" "$router_domain" \
+            echo "Aliasing $DEPLOYMENT_URL to router domain $router_domain."
+            vp dlx vercel@53.1.1 alias set "$DEPLOYMENT_URL" "$router_domain" \
               --token "$VERCEL_TOKEN" \
               "${vercel_scope_args[@]}"
           fi
