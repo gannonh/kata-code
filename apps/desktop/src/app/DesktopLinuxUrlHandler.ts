@@ -30,7 +30,7 @@ const URL_HANDLER_DESKTOP_ENTRY_NAME = DESKTOP_URL_HANDLER_ENTRY_NAME;
 
 // Packaged, the handler owns a file of its own. Unpackaged, it writes the
 // portal-identity entry itself.
-export function urlHandlerEntryName(input: {
+function urlHandlerEntryName(input: {
   readonly isPackaged: boolean;
   readonly linuxDesktopEntryName: string;
 }): string {
