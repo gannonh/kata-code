@@ -1078,7 +1078,7 @@ describe("upstream preservation CLI", () => {
         executionTreeCheck: () => undefined,
       });
 
-    it("retires only the parked Android checks and paths", () => {
+    it("retires only the parked Android checks and paths, and unfreezes the remote registration test", () => {
       expect([...RETIREMENTS.checks.keys()]).toEqual([
         "mobile-android-asset-live-evidence",
         "mobile-android-fab-inset",
@@ -1087,7 +1087,16 @@ describe("upstream preservation CLI", () => {
         "apps/mobile/src/lib/materialYouTheme.ts",
         "apps/mobile/src/lib/materialYouTheme.test.ts",
       ]);
-      expect(RETIREMENTS.unfrozenTrustedPaths.size).toBe(0);
+      expect([...RETIREMENTS.unfrozenTrustedPaths.keys()]).toEqual([
+        "apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts",
+      ]);
+      const awareness = PRESERVATION_CHECKS.find(
+        (check) => check.id === "mobile-agent-awareness-teardown",
+      );
+      expect(awareness?.commands[0]?.requiredPaths).toEqual([
+        "apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts",
+      ]);
+      expect(awareness?.commands[0]?.trustedPaths).toEqual([]);
       const urlHandler = PRESERVATION_CHECKS.find(
         (check) => check.id === "desktop-url-handler-backend-routes",
       );

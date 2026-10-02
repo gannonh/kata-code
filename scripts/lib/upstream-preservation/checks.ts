@@ -533,6 +533,14 @@ const ANDROID_PARKED: Retirement = {
   reason: "Android is parked; intake takes upstream Android-only changes without Kata review.",
 };
 
+// KAT-3607 adopts vite-plus 1.0, whose Vitest 5 drops describe.sequential, and edits the test
+// that calls it. The unfreeze ends with that PR, which re-freezes the file at its new bytes.
+const VITE_PLUS_1_ADOPTION: Retirement = {
+  issue: "KAT-3607",
+  reason:
+    "KAT-3607 adopts vite-plus 1.0 and replaces describe.sequential in the test; it re-freezes at its new bytes.",
+};
+
 export const RETIREMENTS: RetirementTables = {
   checks: new Map([
     ["mobile-android-asset-live-evidence", ANDROID_PARKED],
@@ -542,7 +550,9 @@ export const RETIREMENTS: RetirementTables = {
     ["apps/mobile/src/lib/materialYouTheme.ts", ANDROID_PARKED],
     ["apps/mobile/src/lib/materialYouTheme.test.ts", ANDROID_PARKED],
   ]),
-  unfrozenTrustedPaths: new Map(),
+  unfrozenTrustedPaths: new Map([
+    ["apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts", VITE_PLUS_1_ADOPTION],
+  ]),
 };
 
 // CI runs the base checker against the candidate inventory, so a new check lands here first:
