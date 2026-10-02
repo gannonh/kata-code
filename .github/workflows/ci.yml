@@ -61,9 +61,6 @@ jobs:
           cache: true
           run-install: true
 
-      - name: Ensure Electron runtime is installed
-        run: vp run --filter @kata-sh/code-desktop ensure:electron
-
       - name: Check product branding
         run: |
           node --test scripts/check-product-branding.node-test.mjs scripts/check-agent-facing-branding.node-test.mjs
@@ -156,9 +153,6 @@ jobs:
           cache: true
           run-install: true
 
-      - name: Ensure Electron runtime is installed
-        run: vp run --filter @kata-sh/code-desktop ensure:electron
-
       - name: Typecheck
         run: vpr typecheck
 
@@ -190,9 +184,6 @@ jobs:
           node-version-file: package.json
           cache: true
           run-install: true
-
-      - name: Ensure Electron runtime is installed
-        run: vp run --filter @kata-sh/code-desktop ensure:electron
 
       - name: Finish installing browser secret helper build libraries
         timeout-minutes: 5

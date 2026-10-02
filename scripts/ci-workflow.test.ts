@@ -2,47 +2,69 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
 import { describe, expect, it } from "@effect/vitest";
 
-const repositoryRoot = NodePath.resolve(new URL("..", import.meta.url).pathname);
+const repositoryRoot = NodePath.resolve(
+  NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
+  "..",
+);
 const workflow = NodeFS.readFileSync(
   NodePath.join(repositoryRoot, ".github/workflows/ci.yml"),
   "utf8",
 );
 
-const jobsSection = workflow.slice(workflow.indexOf("\njobs:\n"));
+// The job-id pattern of scripts/check-workflow-references.mjs.
+const jobIdLine = "^ {2}([A-Za-z_][A-Za-z0-9_-]*):\\s*$";
 
-const jobIds = [...jobsSection.matchAll(/^ {2}([a-z_]+):\s*$/gm)].map(
-  (match) => match[1] as string,
-);
+const jobsSectionOf = (text: string): string => text.slice(text.indexOf("\njobs:\n"));
 
-const jobBlock = (id: string): string => {
-  const start = jobsSection.indexOf(`\n  ${id}:\n`);
+const jobIdsOf = (text: string): ReadonlyArray<string> =>
+  [...jobsSectionOf(text).matchAll(new RegExp(jobIdLine, "gm"))].map((match) => match[1] as string);
+
+const jobBlockOf = (text: string, id: string): string => {
+  const jobs = jobsSectionOf(text);
+  const start = jobs.indexOf(`\n  ${id}:\n`);
   expect(start).toBeGreaterThan(-1);
-  const rest = jobsSection.slice(start + 1);
-  const next = rest.slice(1).search(/^ {2}[a-z_]+:\s*$/m);
+  const rest = jobs.slice(start + 1);
+  const next = rest.slice(1).search(new RegExp(jobIdLine, "m"));
   return next === -1 ? rest : rest.slice(0, next + 1);
 };
 
-const gateBlock = jobBlock("check");
-
-const gateNeeds = (): ReadonlyArray<string> => {
-  const list = /needs:\s*\[([^\]]*)\]/.exec(gateBlock)?.[1] ?? "";
+const gateNeedsOf = (text: string): ReadonlyArray<string> => {
+  const list = /needs:\s*\[([^\]]*)\]/.exec(jobBlockOf(text, "check"))?.[1] ?? "";
   return list
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
 };
 
-const gateScript = (): string => {
-  const step = gateBlock.slice(gateBlock.indexOf("- name: Require every job to pass"));
-  const run = step.slice(step.indexOf("run: |\n") + "run: |\n".length);
-  return run
-    .split("\n")
-    .map((line) => line.replace(/^ {10}/, ""))
-    .join("\n");
+const jobsMissingFromGate = (text: string): ReadonlyArray<string> => {
+  const needs = gateNeedsOf(text);
+  return jobIdsOf(text).filter((id) => id !== "check" && !needs.includes(id));
 };
+
+const indentOf = (line: string): number => line.length - line.trimStart().length;
+
+const gateScriptOf = (gateBlock: string): string => {
+  const lines = gateBlock.split("\n");
+  const step = lines.findIndex((line) => line.includes("- name: Require every job to pass"));
+  const run = lines.findIndex((line, index) => index > step && /^\s*run:\s*\|\s*$/.test(line));
+  const body: string[] = [];
+  for (const line of lines.slice(run + 1)) {
+    if (line.trim() !== "" && indentOf(line) <= indentOf(lines[run] as string)) break;
+    body.push(line);
+  }
+  while (body.at(-1)?.trim() === "") body.pop();
+  const indent = indentOf(body.find((line) => line.trim() !== "") as string);
+  return body.map((line) => line.slice(indent)).join("\n");
+};
+
+const jobBlock = (id: string): string => jobBlockOf(workflow, id);
+const jobIds = jobIdsOf(workflow);
+const gateBlock = jobBlock("check");
+const gateNeeds = (): ReadonlyArray<string> => gateNeedsOf(workflow);
 
 const runGate = (
   results: Record<string, string>,
@@ -51,7 +73,7 @@ const runGate = (
   const needs = Object.fromEntries(
     Object.entries(results).map(([id, result]) => [id, { result, outputs: {} }]),
   );
-  const run = NodeChildProcess.spawnSync("bash", ["-c", gateScript()], {
+  const run = NodeChildProcess.spawnSync("bash", ["-c", gateScriptOf(gateBlock)], {
     encoding: "utf8",
     env: { ...process.env, RESULTS: JSON.stringify(needs), NATIVE_CHANGED: nativeChanged },
   });
@@ -63,7 +85,43 @@ const allSuccess = (): Record<string, string> =>
 
 describe("CI workflow", () => {
   it("makes the Check gate need every other job", () => {
-    expect(jobIds.filter((id) => id !== "check").toSorted()).toEqual(gateNeeds().toSorted());
+    expect(jobsMissingFromGate(workflow)).toEqual([]);
+    expect(gateNeeds().toSorted()).toEqual(jobIds.filter((id) => id !== "check").toSorted());
+  });
+
+  it("finds a hyphenated job the gate does not need", () => {
+    const text = [
+      "name: CI",
+      "jobs:",
+      "  lint:",
+      "    name: Lint",
+      "  test-e2e:",
+      "    name: E2E",
+      "  check:",
+      "    name: Check",
+      "    needs: [lint]",
+      "",
+    ].join("\n");
+    expect(jobIdsOf(text)).toEqual(["lint", "test-e2e", "check"]);
+    expect(jobsMissingFromGate(text)).toEqual(["test-e2e"]);
+  });
+
+  it("reads the gate script only up to the end of its run block", () => {
+    const block = [
+      "  check:",
+      "    steps:",
+      "      - name: Require every job to pass",
+      "        env:",
+      "          RESULTS: x",
+      "        run: |",
+      "          echo gate",
+      "",
+      "          echo end",
+      "",
+      "      - name: Later step",
+      "        run: exit 7",
+    ].join("\n");
+    expect(gateScriptOf(block)).toBe("echo gate\n\necho end");
   });
 
   it("keeps the Check job name that branch protection requires", () => {
