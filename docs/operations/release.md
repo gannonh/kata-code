@@ -35,6 +35,8 @@ This document covers the unified release workflow for stable and nightly desktop
 - Publishes one GitHub Release with all produced files.
   - Renames desktop installers to stable platform and architecture names, rewrites updater
     manifests to reference those names, and adds a platform download table to the release body.
+  - Uploads every file into a draft release first, then publishes the draft with
+    `scripts/publish-github-release.ts`. See [Interrupted release publish](#interrupted-release-publish).
   - Stable tags with a suffix after `X.Y.Z` (for example `1.2.3-alpha.1`) are published as GitHub prereleases.
   - Only plain stable `X.Y.Z` releases are marked as the repository's latest release.
   - Nightly runs are always GitHub prereleases and never marked latest.
@@ -276,6 +278,33 @@ One-time Vercel dashboard setup:
 - Publishes Electron auto-update metadata to the dedicated `nightly` updater channel, so desktop users can opt into that track independently from stable.
 - Publishes the CLI npm packages (`@kata-sh/code-cli` and `@kata-sh/code-cli-<platform>-<arch>`) to the `nightly` npm dist-tag using the same nightly version.
 - Does not commit version bumps back to `main`.
+
+## Interrupted release publish
+
+`electron-updater` follows the newest published GitHub Release of its channel, then downloads the
+files that release's manifests name. A release that is published while its binaries are still
+uploading makes every client on the channel fail with "Electron updater failed to download the
+update" until the upload finishes, and permanently if it never does. The `release` job therefore
+never publishes mid-upload:
+
+1. **Create draft release** (and **Create first draft release**, for a series with no previous
+   tag) creates the release as a draft and uploads every asset. A draft is invisible to updaters and
+   to everyone without write access, and it has no tag yet.
+2. **Publish release** runs `scripts/publish-github-release.ts`. It lists the draft's assets and
+   refuses to publish unless every updater manifest (`latest*.yml`, `nightly*.yml`) and every file
+   a manifest names, by `files[].url` or `path`, is an asset in the `uploaded` state with the
+   byte size of the file the build produced, and no asset is still uploading. Then it publishes the
+   draft with `make_latest` set exactly as before. GitHub creates the tag at that point, on the
+   release commit.
+
+A cancelled, failed, or timed-out run therefore leaves a draft and nothing else: the previous
+release stays the newest one, so every client keeps updating from it. No tag is created, so the
+next nightly's previous-tag lookup and the six-hour nightly gap are unaffected. Re-run the failed
+jobs of the same run; **Create draft release** finds the draft by tag and replaces its assets. To
+discard an interrupted run instead, delete the draft on the Releases page.
+
+Preview releases carry no updater manifests, so for them the check only rejects an asset that is
+still uploading.
 
 ## Mobile TestFlight
 
@@ -559,6 +588,10 @@ Checklist:
 
 ## 5) Troubleshooting
 
+- **Publish GitHub Release** fails with `Release <id> stays a draft`:
+  - The message lists each missing, still-uploading, or mis-sized file. Nothing was published, so
+    updaters still see the previous release. Re-run the failed jobs; if a file is missing from the
+    build itself, fix the build and cut a new release.
 - macOS build unsigned when expected signed:
   - Check all Apple secrets plus `APPLE_TEAM_ID` are populated and non-empty.
   - Confirm the provisioning profile belongs to `APPLE_TEAM_ID.com.katacode.app` and includes

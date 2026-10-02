@@ -865,10 +865,17 @@ jobs:
           EOF
           cat release-assets/release-body.md >> release-notes.md
 
-      - name: Publish release
+      # electron-updater follows the newest published release, so the release
+      # stays a draft, invisible to updaters and without a tag, until every
+      # file has uploaded and the next step has checked what the manifests name.
+      # A cancelled or failed run leaves a draft; the previous release stays the
+      # newest one, and re-running the job reuses the draft.
+      - id: draft_release
+        name: Create draft release
         if: needs.preflight.outputs.previous_tag != '' && needs.preflight.outputs.dry_run != 'true'
         uses: softprops/action-gh-release@v3
         with:
+          draft: true
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
           name: ${{ needs.preflight.outputs.release_name }}
@@ -881,10 +888,12 @@ jobs:
           fail_on_unmatched_files: true
           token: ${{ github.token }}
 
-      - name: Publish first release
+      - id: first_draft_release
+        name: Create first draft release
         if: needs.preflight.outputs.previous_tag == '' && needs.preflight.outputs.dry_run != 'true'
         uses: softprops/action-gh-release@v3
         with:
+          draft: true
           tag_name: ${{ needs.preflight.outputs.tag }}
           target_commitish: ${{ needs.preflight.outputs.ref }}
           name: ${{ needs.preflight.outputs.release_name }}
@@ -895,6 +904,18 @@ jobs:
           files: ${{ steps.release_files.outputs.files }}
           fail_on_unmatched_files: true
           token: ${{ github.token }}
+
+      - name: Publish release
+        if: needs.preflight.outputs.dry_run != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.draft_release.outputs.id || steps.first_draft_release.outputs.id }}
+        run: |
+          node scripts/publish-github-release.ts \
+            --repository "${{ github.repository }}" \
+            --release-id "$RELEASE_ID" \
+            --dist release-assets \
+            --make-latest "${{ needs.preflight.outputs.make_latest }}"
 
   deploy_web:
     name: Deploy hosted web app
