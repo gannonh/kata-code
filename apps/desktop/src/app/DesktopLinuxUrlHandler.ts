@@ -28,6 +28,25 @@ import { makeComponentLogger } from "./DesktopObservability.ts";
 // use xdg-mime to record it as the scheme default in mimeapps.list.
 const URL_HANDLER_DESKTOP_ENTRY_NAME = DESKTOP_URL_HANDLER_ENTRY_NAME;
 
+// Packaged, the handler owns a file of its own. Unpackaged, it writes the
+// portal-identity entry itself.
+function urlHandlerEntryName(input: {
+  readonly isPackaged: boolean;
+  readonly linuxDesktopEntryName: string;
+}): string {
+  return input.isPackaged ? URL_HANDLER_DESKTOP_ENTRY_NAME : input.linuxDesktopEntryName;
+}
+
+// The portal-identity entry claims the URL schemes only when it is the same
+// file as the handler entry. Otherwise a second claim would list Kata Code
+// twice in "Choose an application".
+export function portalEntryClaimsSchemes(input: {
+  readonly isPackaged: boolean;
+  readonly linuxDesktopEntryName: string;
+}): boolean {
+  return urlHandlerEntryName(input) === input.linuxDesktopEntryName;
+}
+
 // Pre-ready setup and the handler both point their entries at this one copy of
 // the app icon, so the two render identical content. The AppImage mount is
 // temporary; the OS chooser needs the icon after the app exits.
@@ -100,10 +119,11 @@ export function escapeDesktopEntryExecArgument(value: string): string {
 
 // The AppImage integration entry owns the window identity. This
 // hidden URL-only entry must not compete with it for StartupWMClass matching.
+// Null `schemes` renders no MimeType, so the entry claims no scheme.
 export function renderUrlHandlerDesktopEntry(input: {
   readonly displayName: string;
   readonly execTarget: string;
-  readonly schemes: readonly string[];
+  readonly schemes: readonly string[] | null;
   readonly iconPath?: string;
 }): string {
   return [
@@ -115,7 +135,9 @@ export function renderUrlHandlerDesktopEntry(input: {
     "Terminal=false",
     "NoDisplay=true",
     "StartupNotify=false",
-    `MimeType=${input.schemes.map((scheme) => `x-scheme-handler/${scheme}`).join(";")};`,
+    ...(input.schemes === null
+      ? []
+      : [`MimeType=${input.schemes.map((scheme) => `x-scheme-handler/${scheme}`).join(";")};`]),
     "",
   ].join("\n");
 }
@@ -138,7 +160,7 @@ export const make = Effect.gen(function* () {
   const schemes = desktopUrlHandlerSchemes(environment.isDevelopment);
   const desktopEntryPath = environment.path.join(
     environment.linuxApplicationsDir,
-    environment.isPackaged ? URL_HANDLER_DESKTOP_ENTRY_NAME : environment.linuxDesktopEntryName,
+    urlHandlerEntryName(environment),
   );
   const legacyDesktopEntryPath = environment.path.join(
     environment.linuxApplicationsDir,
@@ -156,8 +178,8 @@ export const make = Effect.gen(function* () {
       schemes,
       ...(environment.isPackaged ? { iconPath } : {}),
     });
-    // Pre-ready setup normally wrote this already. Avoid truncating a valid
-    // entry while the portal may be reading it during startup.
+    // Skip a rewrite of a current entry: the portal may be reading it during
+    // startup, and a rewrite would truncate it.
     const existing = yield* fileSystem
       .readFileString(desktopEntryPath)
       .pipe(Effect.orElseSucceed(() => null));

@@ -132,7 +132,6 @@ describe("DesktopPreReadyPlatform", () => {
                 "Terminal=false",
                 "NoDisplay=true",
                 "StartupNotify=false",
-                "MimeType=x-scheme-handler/katacode;x-scheme-handler/t3code;",
                 "",
               ].join("\n"),
             );
@@ -146,6 +145,81 @@ describe("DesktopPreReadyPlatform", () => {
     );
   }
 
+  for (const scenario of [
+    {
+      name: "packaged development entry claims no URL scheme",
+      isPackaged: true,
+      devServerUrl: "http://localhost:5733",
+      entry: "katacode-dev.desktop",
+      expected: [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Kata Code (Dev)",
+        'Exec="/Applications/current.AppImage" %U',
+        "Icon=/xdg/icons/katacode-url-handler.desktop.png",
+        "Terminal=false",
+        "NoDisplay=true",
+        "StartupNotify=false",
+        "",
+      ].join("\n"),
+    },
+    {
+      name: "unpackaged entry claims both URL schemes",
+      isPackaged: false,
+      devServerUrl: "",
+      entry: "t3code.desktop",
+      expected: [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Kata Code (Alpha)",
+        'Exec="/Applications/current.AppImage" %U',
+        "Terminal=false",
+        "NoDisplay=true",
+        "StartupNotify=false",
+        "MimeType=x-scheme-handler/katacode;x-scheme-handler/t3code;",
+        "",
+      ].join("\n"),
+    },
+    {
+      name: "unpackaged development entry claims the development URL scheme",
+      isPackaged: false,
+      devServerUrl: "http://localhost:5733",
+      entry: "katacode-dev.desktop",
+      expected: [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Kata Code (Dev)",
+        'Exec="/Applications/current.AppImage" %U',
+        "Terminal=false",
+        "NoDisplay=true",
+        "StartupNotify=false",
+        "MimeType=x-scheme-handler/katacode-dev;",
+        "",
+      ].join("\n"),
+    },
+  ] as const) {
+    it.effect(scenario.name, () => {
+      appState.isPackaged = scenario.isPackaged;
+      vi.stubEnv("VITE_DEV_SERVER_URL", scenario.devServerUrl);
+      vi.stubEnv("XDG_DATA_HOME", "/xdg");
+      vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
+      getSwitchValueMock.mockReturnValue("");
+      const written = new Map<string, string>();
+      writeFileSyncMock.mockImplementation((path: string, contents: string) => {
+        written.set(path, contents);
+      });
+
+      return Effect.gen(function* () {
+        yield* DesktopPreReadyPlatform.make;
+        assert.equal(setDesktopNameMock.mock.calls[0]?.[0], scenario.entry);
+        assert.equal(written.get(`/xdg/applications/${scenario.entry}`), scenario.expected);
+      }).pipe(
+        Effect.provideService(HostProcessPlatform, "linux"),
+        Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+      );
+    });
+  }
+
   it.effect("still prepares the portal entry when the bundled icon cannot be copied", () => {
     getSwitchValueMock.mockReturnValue("");
     copyFileSyncMock.mockImplementation(() => {
@@ -155,7 +229,7 @@ describe("DesktopPreReadyPlatform", () => {
     return Effect.gen(function* () {
       yield* DesktopPreReadyPlatform.make;
       const contents = writeFileSyncMock.mock.calls[0]?.[1];
-      assert.include(contents, "MimeType=x-scheme-handler/katacode;");
+      assert.notInclude(contents, "MimeType=");
       assert.match(contents, /^Icon=.*\/icons\/katacode-url-handler\.desktop\.png$/m);
       assert.equal(setDesktopNameMock.mock.calls.length, 1);
     }).pipe(Effect.provideService(HostProcessPlatform, "linux"));
