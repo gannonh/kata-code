@@ -249,6 +249,9 @@ patchedDependencies:
   expo-modules-core@58.0.11: patches/expo-modules-core@58.0.11.patch
   # Upstream dropped this with SDK 58; 58.0.11 can drop or miss pending notification responses.
   expo-notifications@58.0.11: patches/expo-notifications@58.0.11.patch
+  # Expo 58 adds an exports map that no longer resolves the documented "expo/tsconfig.base".
+  # Historical Kata trees still extend it, and the preservation baseline test runs one.
+  expo@58.0.2: patches/expo@58.0.2.patch
   expo-sharing@58.0.13: patches/expo-sharing@58.0.13.patch
   expo-widgets@58.0.11: patches/expo-widgets@58.0.11.patch
   "@ff-labs/fff-node@0.9.4": patches/@ff-labs__fff-node@0.9.4.patch

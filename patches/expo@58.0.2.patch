@@ -1,0 +1,11 @@
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -184,6 +184,7 @@
+     "./scripts/*": "./scripts/*.js",
+     "./bin/*": "./bin/*",
+     "./package.json": "./package.json",
++    "./tsconfig.base": "./tsconfig.base.json",
+     "./*.json": "./*.json",
+     "./*": {
+       "types": "./*.d.ts",
