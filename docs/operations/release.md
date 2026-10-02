@@ -35,6 +35,8 @@ This document covers the unified release workflow for stable and nightly desktop
 - Publishes one GitHub Release with all produced files.
   - Renames desktop installers to stable platform and architecture names, rewrites updater
     manifests to reference those names, and adds a platform download table to the release body.
+  - Uploads every file into a draft release first, then publishes the draft with
+    `scripts/publish-github-release.ts`. See [Interrupted release publish](#interrupted-release-publish).
   - Stable tags with a suffix after `X.Y.Z` (for example `1.2.3-alpha.1`) are published as GitHub prereleases.
   - Only plain stable `X.Y.Z` releases are marked as the repository's latest release.
   - Nightly runs are always GitHub prereleases and never marked latest.
@@ -276,6 +278,55 @@ One-time Vercel dashboard setup:
 - Publishes Electron auto-update metadata to the dedicated `nightly` updater channel, so desktop users can opt into that track independently from stable.
 - Publishes the CLI npm packages (`@kata-sh/code-cli` and `@kata-sh/code-cli-<platform>-<arch>`) to the `nightly` npm dist-tag using the same nightly version.
 - Does not commit version bumps back to `main`.
+
+## Interrupted release publish
+
+`electron-updater` follows the newest published GitHub Release of its channel, then downloads the
+files that release's manifests name. A release that is published while its binaries are still
+uploading makes every client on the channel fail with "Electron updater failed to download the
+update" until the upload finishes, and permanently if it never does. The `release` job therefore
+never publishes mid-upload:
+
+1. **Create draft release** (and **Create first draft release**, for a series with no previous
+   tag) creates the release as a draft and uploads every asset. A draft is invisible to updaters and
+   to everyone without write access.
+2. **Publish release** runs `scripts/publish-github-release.ts`. It lists the draft's assets and
+   refuses to publish unless:
+   - every updater manifest (`latest*.yml`, `nightly*.yml`) and every file a manifest names, by
+     `files[].url` or `path`, is a file this build produced and an asset in the `uploaded` state
+     with that file's byte size, so a leftover asset from an earlier attempt cannot stand in for a
+     missing one;
+   - the `.blockmap` of each of those files is on the release too, when this build produced it;
+   - no asset is still uploading, and every asset on the release is a file this build produced, so
+     a reused draft cannot carry a leftover, such as an old manifest, from an earlier attempt;
+   - for a nightly, no newer nightly is already published (see below).
+
+   Then it publishes the draft with `make_latest` set exactly as before.
+
+A cancelled, failed, or timed-out run therefore leaves a draft and nothing else visible: the
+previous release stays the newest one, so every client keeps updating from it. GitHub creates a
+release's tag when the draft is published, on the release commit, so a nightly or a stable
+dispatched from the Actions tab leaves no tag behind either, and the next nightly's previous-tag
+lookup and the six-hour nightly gap are unaffected.
+
+A stable started by pushing a `vX.Y.Z` tag already has its tag, so an interrupted run leaves that
+tag and a draft. To finish it, re-run the failed jobs of the same run: **Create draft release**
+finds the draft by tag and replaces its assets. To abandon it, delete the draft on the Releases
+page and delete the tag with `git push origin :refs/tags/vX.Y.Z`. Left in place, the stray tag
+becomes the previous stable tag in the next stable's release notes.
+
+Re-run an interrupted nightly only while no newer nightly has published. Nightlies keep being cut
+from `main` on the schedule, and stable builds the commit of the nightly with the latest
+publication time, so publishing an older nightly after a newer one would make stable ship the older
+commit. The publish step refuses in that case, fails with the tag of the newer nightly, and leaves
+the draft; delete the draft instead. A stale draft that is never deleted does no harm.
+
+Re-running **Create draft release** for a tag that is already published replaces that release's
+assets in place, which is how a broken published release is repaired; updaters can see the files
+while they are swapped.
+
+Preview releases carry no updater manifests, so for them the check only rejects an asset that is
+still uploading.
 
 ## Mobile TestFlight
 
@@ -559,6 +610,10 @@ Checklist:
 
 ## 5) Troubleshooting
 
+- **Publish GitHub Release** fails with `Release <id> stays a draft`:
+  - The message lists each missing, still-uploading, or mis-sized file. Nothing was published, so
+    updaters still see the previous release. Re-run the failed jobs; if a file is missing from the
+    build itself, fix the build and cut a new release.
 - macOS build unsigned when expected signed:
   - Check all Apple secrets plus `APPLE_TEAM_ID` are populated and non-empty.
   - Confirm the provisioning profile belongs to `APPLE_TEAM_ID.com.katacode.app` and includes

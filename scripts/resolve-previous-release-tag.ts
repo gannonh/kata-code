@@ -166,7 +166,7 @@ const parseStableTag = (tag: string): StableVersion | undefined => {
   };
 };
 
-const compareNightlyVersions = (left: NightlyVersion, right: NightlyVersion): number => {
+export const compareNightlyVersions = (left: NightlyVersion, right: NightlyVersion): number => {
   if (left.major !== right.major) return left.major - right.major;
   if (left.minor !== right.minor) return left.minor - right.minor;
   if (left.patch !== right.patch) return left.patch - right.patch;
@@ -174,7 +174,7 @@ const compareNightlyVersions = (left: NightlyVersion, right: NightlyVersion): nu
   return left.runNumber - right.runNumber;
 };
 
-const parseNightlyTag = (
+export const parseNightlyTag = (
   tag: string,
   channel: "nightly" | "preview" = "nightly",
 ): NightlyVersion | undefined => {

@@ -154,6 +154,27 @@ releaseDate: '2026-03-07T10:36:07.540Z'
     );
   });
 
+  it("parses a Linux manifest's blockMapSize and path, and keeps blockMapSize when serializing", () => {
+    const linux = parsePlatformUpdateManifest(
+      "mac",
+      `version: 0.0.44-nightly.20261002.1602
+files:
+  - url: Kata-Code-Linux-x64.AppImage
+    sha512: YR7XP+kv1T0wB0Zn4ZtBbY0auUXyXV+NUL3seD7WscFAqUIij8g30qPapGvWj81JtrmjDACp7Nkywt2Jc3cmLg==
+    size: 174987455
+    blockMapSize: 182483
+path: Kata-Code-Linux-x64.AppImage
+sha512: YR7XP+kv1T0wB0Zn4ZtBbY0auUXyXV+NUL3seD7WscFAqUIij8g30qPapGvWj81JtrmjDACp7Nkywt2Jc3cmLg==
+releaseDate: '2026-10-02T15:39:21.904Z'
+`,
+      "nightly-linux.yml",
+    );
+
+    assert.equal(linux.path, "Kata-Code-Linux-x64.AppImage");
+    assert.equal(linux.files[0]?.blockMapSize, 182483);
+    assert.ok(serializePlatformUpdateManifest("mac", linux).includes("    blockMapSize: 182483\n"));
+  });
+
   it("preserves quoted scalars as strings", () => {
     const manifest = parsePlatformUpdateManifest(
       "mac",
