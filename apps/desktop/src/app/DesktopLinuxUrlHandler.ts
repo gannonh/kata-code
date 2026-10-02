@@ -100,6 +100,7 @@ export function escapeDesktopEntryExecArgument(value: string): string {
 
 // The AppImage integration entry owns the window identity. This
 // hidden URL-only entry must not compete with it for StartupWMClass matching.
+// An entry with no schemes carries no MimeType, so choosers do not list it.
 export function renderUrlHandlerDesktopEntry(input: {
   readonly displayName: string;
   readonly execTarget: string;
@@ -115,7 +116,9 @@ export function renderUrlHandlerDesktopEntry(input: {
     "Terminal=false",
     "NoDisplay=true",
     "StartupNotify=false",
-    `MimeType=${input.schemes.map((scheme) => `x-scheme-handler/${scheme}`).join(";")};`,
+    ...(input.schemes.length === 0
+      ? []
+      : [`MimeType=${input.schemes.map((scheme) => `x-scheme-handler/${scheme}`).join(";")};`]),
     "",
   ].join("\n");
 }

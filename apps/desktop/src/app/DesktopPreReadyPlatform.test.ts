@@ -132,7 +132,6 @@ describe("DesktopPreReadyPlatform", () => {
                 "Terminal=false",
                 "NoDisplay=true",
                 "StartupNotify=false",
-                "MimeType=x-scheme-handler/katacode;x-scheme-handler/t3code;",
                 "",
               ].join("\n"),
             );
@@ -155,7 +154,7 @@ describe("DesktopPreReadyPlatform", () => {
     return Effect.gen(function* () {
       yield* DesktopPreReadyPlatform.make;
       const contents = writeFileSyncMock.mock.calls[0]?.[1];
-      assert.include(contents, "MimeType=x-scheme-handler/katacode;");
+      assert.notInclude(contents, "MimeType=");
       assert.match(contents, /^Icon=.*\/icons\/katacode-url-handler\.desktop\.png$/m);
       assert.equal(setDesktopNameMock.mock.calls.length, 1);
     }).pipe(Effect.provideService(HostProcessPlatform, "linux"));

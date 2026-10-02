@@ -94,7 +94,10 @@ export const make = Effect.gen(function* () {
               appVersion: Electron.app.getVersion(),
             }).displayName,
             execTarget: process.env.APPIMAGE?.trim() || process.execPath,
-            schemes: desktopUrlHandlerSchemes(linux.isDevelopment),
+            // Packaged, the handler entry owns the scheme claims. The portal
+            // entry only has to exist, and a second claim would list Kata Code
+            // twice in "Choose an application". In development both are one file.
+            schemes: Electron.app.isPackaged ? [] : desktopUrlHandlerSchemes(linux.isDevelopment),
             ...(iconPath === undefined ? {} : { iconPath }),
           }),
           "utf8",
