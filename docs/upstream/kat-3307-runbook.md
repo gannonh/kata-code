@@ -36,11 +36,13 @@ The command resolves each ref with `git rev-parse --verify --end-of-options
 <ref>^{commit}`. It rejects a different upstream tip or root. It has no skip,
 allow-missing, or disabled mode.
 
-CI fetches both frozen upstream objects from the authoritative URL in `FORK.md`
-(`https://github.com/pingdotgg/t3code.git`) with `--no-tags --depth=1`, then
-verifies `FETCH_HEAD` against each full SHA before running the gate.
+The `Lint` job of `.github/workflows/ci.yml` fetches both frozen upstream objects
+from the authoritative URL in `FORK.md` (`https://github.com/pingdotgg/t3code.git`)
+with `--no-tags --depth=1`, then verifies `FETCH_HEAD` against each full SHA before
+running the gate. That job holds both pin literals (`UPSTREAM_TIP` and
+`UPSTREAM_SHA`); the final `Check` job requires it along with every other job.
 
-CI runs the checker and its `scripts/lib/upstream-preservation-*.ts` modules from
+The same job runs the checker and its `scripts/lib/upstream-preservation-*.ts` modules from
 the trusted base commit in a temporary directory, with the candidate checkout
 as the command working tree. If the base predates this gate, the first
 introduction uses the candidate checker as an explicit bootstrap; every later
