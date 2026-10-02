@@ -14,8 +14,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check:
-    name: Check
+  # Lint, typecheck, and the desktop build each get a runner so they run side by
+  # side instead of one after another. The `Check` job at the end of this file
+  # passes only when every other job does. This job holds both frozen upstream-tip
+  # literals: `UPSTREAM_TIP` in the fetch step and `UPSTREAM_SHA` in the trusted
+  # preservation checker step. Advance them together.
+  lint:
+    name: Lint
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -55,9 +60,6 @@ jobs:
           node-version-file: package.json
           cache: true
           run-install: true
-
-      - name: Ensure Electron runtime is installed
-        run: vp run --filter @kata-sh/code-desktop ensure:electron
 
       - name: Check product branding
         run: |
@@ -131,12 +133,64 @@ jobs:
       - name: Check
         run: vp check
 
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
       - name: Typecheck
         run: vpr typecheck
 
-      - name: Install browser secret helper build libraries
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      # Runs in the background while Vite+ installs; the step before the build waits for it.
+      - name: Start installing browser secret helper build libraries
         run: |
-          sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+          (
+            set +e
+            sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+            echo "$?" > "$RUNNER_TEMP/apt-status"
+          ) > "$RUNNER_TEMP/apt.log" 2>&1 < /dev/null &
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Finish installing browser secret helper build libraries
+        timeout-minutes: 5
+        run: |
+          until test -s "$RUNNER_TEMP/apt-status"; do sleep 1; done
+          cat "$RUNNER_TEMP/apt.log"
+          exit "$(cat "$RUNNER_TEMP/apt-status")"
 
       - name: Build desktop pipeline
         run: vp run build:desktop
@@ -144,11 +198,12 @@ jobs:
       - name: Verify preload bundle output
         run: node apps/desktop/scripts/verify-preload-bundle.mjs
 
-  # Everything except `@kata-sh/code-cli` (apps/server). `--parallel` drops the package
-  # dependency ordering that `vp run` applies by default: these `test` tasks
-  # declare no `dependsOn` and resolve workspace deps from source, so ordering
-  # only bought us idle runners between dependency layers. The concurrency
-  # limit stays at the default 4 so peak load per runner is unchanged.
+  # Everything except `@kata-sh/code-cli` (apps/server) and the web app, which has
+  # its own job below. `--parallel` drops the package dependency ordering that
+  # `vp run` applies by default: these `test` tasks declare no `dependsOn` and
+  # resolve workspace deps from source, so ordering only bought us idle runners
+  # between dependency layers. The concurrency limit stays at the default 4 so
+  # peak load per runner is unchanged.
   test:
     name: Test
     runs-on: ubuntu-24.04
@@ -163,6 +218,16 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
 
+      # The desktop tests compile the browser secret helper. The install runs in
+      # the background while Vite+ installs; the step before the tests waits for it.
+      - name: Start installing browser secret helper build libraries
+        run: |
+          (
+            set +e
+            sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
+            echo "$?" > "$RUNNER_TEMP/apt-status"
+          ) > "$RUNNER_TEMP/apt.log" 2>&1 < /dev/null &
+
       - name: Setup Vite+
         uses: voidzero-dev/setup-vp@v1
         with:
@@ -173,23 +238,52 @@ jobs:
       - name: Ensure Electron runtime is installed
         run: vp run --filter @kata-sh/code-desktop ensure:electron
 
-      - name: Install browser secret helper build libraries
-        run: |
-          sudo apt-get update && sudo apt-get install -y libsecret-1-dev pkg-config
-
       - name: Test preview artifact validation
         run: python3 -B .github/scripts/stage-preview-bundle.test.py
 
       - name: Test nightly release checks
         run: node --test .github/scripts/check-nightly-release.test.cjs
 
-      - name: Test
-        run: vp run --parallel --concurrency-limit 4 --filter '!@kata-sh/code-cli' --filter '!@kata-sh/code-monorepo' test
+      - name: Finish installing browser secret helper build libraries
+        timeout-minutes: 5
+        run: |
+          until test -s "$RUNNER_TEMP/apt-status"; do sleep 1; done
+          cat "$RUNNER_TEMP/apt.log"
+          exit "$(cat "$RUNNER_TEMP/apt-status")"
 
-  # apps/server sets `fileParallelism: false`, so its 239 files run strictly
+      - name: Test
+        run: vp run --parallel --concurrency-limit 4 --filter '!@kata-sh/code-cli' --filter '!@kata-sh/code-monorepo' --filter '!@kata-sh/code-web' test
+
+  # The web suite is the largest outside the server. In the shared Test job it
+  # started once a worker freed up and finished last, so it set that job's length.
+  test_web:
+    name: Test Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: true
+
+      - name: Test
+        run: vp run --filter @kata-sh/code-web test
+
+  # apps/server sets `fileParallelism: false`, so its test files run strictly
   # one at a time. Sharding spreads them over separate runners instead of
   # separate workers, so no two server test files ever share a machine and the
-  # isolation that flag buys is preserved exactly.
+  # isolation that flag buys is preserved exactly. The shards split files by
+  # recorded duration (apps/server/src/testUtils/weightedShardSequencer.ts).
   test_server:
     name: Test Server ${{ matrix.shard }}
     runs-on: ubuntu-24.04
@@ -197,7 +291,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -397,3 +491,40 @@ jobs:
 
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
+
+  # Branch protection requires this job by its name, `Check`. It fails when any
+  # other job fails, is cancelled, or is skipped without a reason, so splitting
+  # or resharding jobs needs no ruleset change. Add every new job to `needs`.
+  # `always()` rather than `!cancelled()`: a skipped job reports success to
+  # branch protection, so a cancelled run must still produce a failing check.
+  check:
+    name: Check
+    if: ${{ always() }}
+    needs:
+      [
+        lint,
+        typecheck,
+        build,
+        test,
+        test_web,
+        test_server,
+        rust,
+        mobile_native_changes,
+        mobile_native_static_analysis,
+        release_smoke,
+      ]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          NATIVE_CHANGED: ${{ needs.mobile_native_changes.outputs.changed }}
+        run: |
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          # Only the macOS lint skips on purpose, when no native mobile code changed.
+          echo "$RESULTS" | jq -e --arg native_changed "$NATIVE_CHANGED" 'all(to_entries[];
+            .value.result == "success"
+            or (.key == "mobile_native_static_analysis"
+              and .value.result == "skipped"
+              and $native_changed == "false"))' > /dev/null
