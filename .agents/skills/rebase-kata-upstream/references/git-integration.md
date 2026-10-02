@@ -44,11 +44,19 @@ A conflict exit is expected when files overlap. Inspect it instead of retrying o
 
 Resolve each outcome, stage reviewed files, and commit the merge. Never use `-s ours`, `-X ours`, blanket checkout, or blanket renaming for new upstream content. Inspect reused rerere resolutions as carefully as new ones. Preserve approved deletions when upstream modifies or reintroduces deleted tooling.
 
+## Dependency manifests and the lockfile
+
+When the range changes dependencies, do these intake steps before resolving source conflicts:
+
+1. Diff `patchedDependencies` and `overrides` in `pnpm-workspace.yaml` between `base` and the merge. For every patch the merge drops, port it to the new version or record a justification in the decisions file. A version bump that removes a patch entry does not mean the patch is obsolete.
+2. Regenerate `pnpm-lock.yaml` from the base lockfile with `vp install`. Never take either side's lockfile. Then compare the resolved versions of the upgraded package family with upstream's lockfile at `upstream`, and explain every difference. This keeps Kata-only pins, such as the vite-plus version, that taking upstream's lockfile would overwrite.
+3. When the range bumps the test toolchain (vite-plus, Vitest, or TypeScript), run every trusted test file at its base bytes under the new toolchain before taking the bump. See the fourth trusted-assertion case in [history](history.md#preservation-gate-replaced-weak-evidence).
+
 Before publishing, prove that base and upstream are both ancestors of candidate. Compare `base..candidate` and `upstream..candidate`. Retain the previous pin in the intake after FORK.md advances. A deliberate SKIP is part of the accounted-for intake, not a claim that every upstream file was copied.
 
 ## Repeat and resume
 
-Prefer GitHub's merge-commit method when permitted. Verify actual landed parents. If policy requires squash, record that result; the next run must re-establish the documented previous pin using the guarded procedure.
+Prefer GitHub's merge-commit method when permitted. As of 2026-10-02 the repository disallows squash merges (`allow_squash_merge: false`), but rebase merges remain allowed, and a rebase also drops the upstream tip as a parent. Verify actual landed parents. If the PR landed without the upstream tip as a parent, record that result; the next run must re-establish the documented previous pin using the guarded procedure. Do not write follow-up issues whose plan depends on the landing method.
 
 On retry, inspect the existing worktree's HEAD, Git operation, PR head, and intake. Continue its merge only if frozen refs and ownership match. Preserve work and report a mismatch. Do not hard-reset a partially resolved integration or create another PR for the same target.
 
