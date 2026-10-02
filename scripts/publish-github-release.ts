@@ -116,9 +116,11 @@ export function findIncompleteReleaseProblems(
     .filter((asset) => asset.state !== "uploaded")
     .map((asset) => `${asset.name} is ${asset.state}, not uploaded`);
 
+  const notProduced = new Set<string>();
   const check = (name: string, needed: string) => {
     const localSize = input.localSizes.get(name);
     if (localSize === undefined) {
+      notProduced.add(name);
       problems.push(`${needed} was not produced by this build`);
       return;
     }
@@ -142,6 +144,14 @@ export function findIncompleteReleaseProblems(
       if (input.localSizes.has(blockmap)) {
         check(blockmap, `${blockmap}, the blockmap of ${reference},`);
       }
+    }
+  }
+
+  // A reused draft can still hold assets from an earlier attempt, such as a
+  // manifest this build no longer writes.
+  for (const asset of input.assets) {
+    if (!input.localSizes.has(asset.name) && !notProduced.has(asset.name)) {
+      problems.push(`${asset.name} is on the release but was not produced by this build`);
     }
   }
   return problems;

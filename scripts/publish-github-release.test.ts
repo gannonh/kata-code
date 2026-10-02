@@ -264,11 +264,31 @@ describe("findIncompleteReleaseProblems", () => {
     );
   });
 
+  it("rejects assets left on a reused draft that this build did not produce", () => {
+    assert.deepStrictEqual(
+      findIncompleteReleaseProblems({
+        manifests,
+        localSizes,
+        assets: [
+          { name: "nightly-mac.yml", state: "uploaded", size: 733 },
+          { name: "Kata-Code-macOS-Apple-Silicon-arm64.zip", state: "uploaded", size: 152111146 },
+          { name: "Kata-Code-macOS-Apple-Silicon.dmg", state: "uploaded", size: 157786161 },
+          { name: "nightly-linux.yml", state: "uploaded", size: 397 },
+          { name: "Kata-Code-Linux-x64.AppImage", state: "uploaded", size: 174987455 },
+        ],
+      }),
+      [
+        "nightly-linux.yml is on the release but was not produced by this build",
+        "Kata-Code-Linux-x64.AppImage is on the release but was not produced by this build",
+      ],
+    );
+  });
+
   it("has nothing to check on a release without updater manifests", () => {
     assert.deepStrictEqual(
       findIncompleteReleaseProblems({
         manifests: [],
-        localSizes: new Map(),
+        localSizes: new Map([["SHA256SUMS", 368]]),
         assets: [{ name: "SHA256SUMS", state: "uploaded", size: 368 }],
       }),
       [],

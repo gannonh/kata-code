@@ -297,7 +297,8 @@ never publishes mid-upload:
      with that file's byte size, so a leftover asset from an earlier attempt cannot stand in for a
      missing one;
    - the `.blockmap` of each of those files is on the release too, when this build produced it;
-   - no asset is still uploading;
+   - no asset is still uploading, and every asset on the release is a file this build produced, so
+     a reused draft cannot carry a leftover, such as an old manifest, from an earlier attempt;
    - for a nightly, no newer nightly is already published (see below).
 
    Then it publishes the draft with `make_latest` set exactly as before.
