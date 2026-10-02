@@ -22,13 +22,23 @@ import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/unstable/cli";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 
+import { compareNightlyVersions, parseNightlyTag } from "./resolve-previous-release-tag.ts";
+import { parseUpdateManifest, type UpdateManifest } from "./lib/update-manifest.ts";
+
 const MakeLatest = Schema.Literals(["true", "false", "legacy"]);
 type MakeLatest = typeof MakeLatest.Type;
 
 const GitHubRelease = Schema.Struct({
   draft: Schema.Boolean,
   html_url: Schema.String,
+  tag_name: Schema.String,
 });
+
+const GitHubListedRelease = Schema.Struct({
+  draft: Schema.Boolean,
+  tag_name: Schema.String,
+});
+type GitHubListedRelease = typeof GitHubListedRelease.Type;
 
 const GitHubReleaseAsset = Schema.Struct({
   name: Schema.String,
@@ -46,20 +56,52 @@ export class DraftReleaseIncompleteError extends Schema.TaggedError<DraftRelease
   }
 }
 
-/** The file names an electron-builder manifest tells updaters to download. */
-export function manifestReferences(manifest: string): ReadonlyArray<string> {
-  const names = new Set<string>();
-  for (const line of manifest.split(/\r?\n/)) {
-    const match = /^(?:\s*(?:-\s+)?url|path):\s*(.+?)\s*$/.exec(line);
-    if (match?.[1]) {
-      names.add(match[1].replace(/^(['"])(.*)\1$/, "$2"));
-    }
+export class StaleNightlyDraftError extends Schema.TaggedError<StaleNightlyDraftError>()(
+  "StaleNightlyDraftError",
+  { releaseId: Schema.Number, tag: Schema.String, newerTag: Schema.String },
+) {
+  override get message(): string {
+    return `Release ${this.releaseId} (${this.tag}) stays a draft: ${this.newerTag} is already published and newer, and publishing this one now would make it the newest nightly. Delete the draft.`;
   }
-  return [...names];
+}
+
+export class ReleaseManifestUnreadableError extends Schema.TaggedError<ReleaseManifestUnreadableError>()(
+  "ReleaseManifestUnreadableError",
+  { manifest: Schema.String, detail: Schema.String },
+) {
+  override get message(): string {
+    return `${this.manifest} is not a readable updater manifest: ${this.detail}`;
+  }
+}
+
+/** The updater feeds electron-updater reads, as opposed to other YAML in the build output. */
+export const isUpdaterManifestName = (name: string): boolean =>
+  /^(?:latest|nightly).*\.yml$/.test(name);
+
+/**
+ * The newest published nightly that is newer than `tag`, by the order the
+ * release notes use (version, then date, then run number), or undefined.
+ * Publishing an older nightly after a newer one would make it the newest by
+ * publish time, and stable builds the commit of that one.
+ */
+export function newerPublishedNightlyTag(
+  tag: string,
+  releases: ReadonlyArray<GitHubListedRelease>,
+): string | undefined {
+  const current = parseNightlyTag(tag);
+  if (current === undefined) return undefined;
+  return releases
+    .flatMap((release) => {
+      const parsed = release.draft ? undefined : parseNightlyTag(release.tag_name);
+      return parsed !== undefined && compareNightlyVersions(parsed, current) > 0
+        ? [{ tag: release.tag_name, parsed }]
+        : [];
+    })
+    .toSorted((left, right) => compareNightlyVersions(right.parsed, left.parsed))[0]?.tag;
 }
 
 export interface ReleaseCompletenessInput {
-  readonly manifests: ReadonlyArray<{ readonly name: string; readonly text: string }>;
+  readonly manifests: ReadonlyArray<{ readonly name: string; readonly manifest: UpdateManifest }>;
   /** Size in bytes of every file the build produced, by release asset name. */
   readonly localSizes: ReadonlyMap<string, number>;
   readonly assets: ReadonlyArray<GitHubReleaseAsset>;
@@ -88,10 +130,18 @@ export function findIncompleteReleaseProblems(
     }
   };
 
-  for (const manifest of input.manifests) {
-    check(manifest.name, `${manifest.name}`);
-    for (const reference of manifestReferences(manifest.text)) {
-      check(reference, `${reference}, which ${manifest.name} references,`);
+  for (const { name, manifest } of input.manifests) {
+    check(name, name);
+    const references = new Set([
+      ...manifest.files.map((file) => file.url),
+      ...(manifest.path === undefined ? [] : [manifest.path]),
+    ]);
+    for (const reference of references) {
+      check(reference, `${reference}, which ${name} references,`);
+      const blockmap = `${reference}.blockmap`;
+      if (input.localSizes.has(blockmap)) {
+        check(blockmap, `${blockmap}, the blockmap of ${reference},`);
+      }
     }
   }
   return problems;
@@ -108,14 +158,25 @@ const readDistFiles = Effect.fn("readDistFiles")(function* (distDir: string) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const localSizes = new Map<string, number>();
-  const manifests: Array<{ name: string; text: string }> = [];
+  const manifests: Array<{ name: string; manifest: UpdateManifest }> = [];
   for (const name of yield* fs.readDirectory(distDir)) {
     const filePath = path.join(distDir, name);
     const stat = yield* fs.stat(filePath);
     if (stat.type !== "File") continue;
     localSizes.set(name, Number(stat.size));
-    if (name.endsWith(".yml")) {
-      manifests.push({ name, text: yield* fs.readFileString(filePath) });
+    if (isUpdaterManifestName(name)) {
+      const text = yield* fs.readFileString(filePath);
+      manifests.push({
+        name,
+        manifest: yield* Effect.try({
+          try: () => parseUpdateManifest(text, name, "release"),
+          catch: (cause) =>
+            new ReleaseManifestUnreadableError({
+              manifest: name,
+              detail: cause instanceof Error ? cause.message : String(cause),
+            }),
+        }),
+      });
     }
   }
   return { localSizes, manifests };
@@ -128,6 +189,18 @@ export const publishGitHubRelease = Effect.fn("publishGitHubRelease")(function* 
     HttpClient.mapRequest(HttpClientRequest.acceptJson),
     HttpClient.filterStatusOk,
   );
+  const getAll = <A, I>(path: string, schema: Schema.Codec<A, I>) =>
+    Effect.gen(function* () {
+      const all: Array<A> = [];
+      for (let page = 1; ; page += 1) {
+        const batch = yield* client.get(`${path}?per_page=100&page=${page}`).pipe(
+          Effect.flatMap((response) => response.json),
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(schema))),
+        );
+        all.push(...batch);
+        if (batch.length < 100) return all;
+      }
+    });
   const releasePath = `/repos/${options.repository}/releases/${options.releaseId}`;
 
   const release = yield* client.get(releasePath).pipe(
@@ -139,16 +212,21 @@ export const publishGitHubRelease = Effect.fn("publishGitHubRelease")(function* 
     return;
   }
 
-  const assets: Array<GitHubReleaseAsset> = [];
-  for (let page = 1; ; page += 1) {
-    const batch = yield* client.get(`${releasePath}/assets?per_page=100&page=${page}`).pipe(
-      Effect.flatMap((response) => response.json),
-      Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(GitHubReleaseAsset))),
+  if (parseNightlyTag(release.tag_name) !== undefined) {
+    const newerTag = newerPublishedNightlyTag(
+      release.tag_name,
+      yield* getAll(`/repos/${options.repository}/releases`, GitHubListedRelease),
     );
-    assets.push(...batch);
-    if (batch.length < 100) break;
+    if (newerTag !== undefined) {
+      return yield* new StaleNightlyDraftError({
+        releaseId: options.releaseId,
+        tag: release.tag_name,
+        newerTag,
+      });
+    }
   }
 
+  const assets = yield* getAll(`${releasePath}/assets`, GitHubReleaseAsset);
   const { localSizes, manifests } = yield* readDistFiles(options.distDir);
   const problems = findIncompleteReleaseProblems({ manifests, localSizes, assets });
   if (problems.length > 0) {

@@ -289,22 +289,40 @@ never publishes mid-upload:
 
 1. **Create draft release** (and **Create first draft release**, for a series with no previous
    tag) creates the release as a draft and uploads every asset. A draft is invisible to updaters and
-   to everyone without write access, and it has no tag yet.
+   to everyone without write access.
 2. **Publish release** runs `scripts/publish-github-release.ts`. It lists the draft's assets and
-   refuses to publish unless every updater manifest (`latest*.yml`, `nightly*.yml`) and every file
-   a manifest names, by `files[].url` or `path`, is a file this build produced and an asset in the
-   `uploaded` state with that file's byte size, so a leftover asset from an earlier attempt cannot
-   stand in for a missing one, and no asset is still uploading. Then it publishes the
-   draft with `make_latest` set exactly as before. GitHub creates the tag at that point, on the
-   release commit.
+   refuses to publish unless:
+   - every updater manifest (`latest*.yml`, `nightly*.yml`) and every file a manifest names, by
+     `files[].url` or `path`, is a file this build produced and an asset in the `uploaded` state
+     with that file's byte size, so a leftover asset from an earlier attempt cannot stand in for a
+     missing one;
+   - the `.blockmap` of each of those files is on the release too, when this build produced it;
+   - no asset is still uploading;
+   - for a nightly, no newer nightly is already published (see below).
 
-A cancelled, failed, or timed-out run therefore leaves a draft and nothing else: the previous
-release stays the newest one, so every client keeps updating from it. No tag is created, so the
-next nightly's previous-tag lookup and the six-hour nightly gap are unaffected. Re-run the failed
-jobs of the same run; **Create draft release** finds the draft by tag and replaces its assets. To
-discard an interrupted run instead, delete the draft on the Releases page. Re-running **Create draft
-release** for a tag that is already published replaces that release's assets in place, which is how
-a broken published release is repaired; updaters can see the files while they are swapped.
+   Then it publishes the draft with `make_latest` set exactly as before.
+
+A cancelled, failed, or timed-out run therefore leaves a draft and nothing else visible: the
+previous release stays the newest one, so every client keeps updating from it. GitHub creates a
+release's tag when the draft is published, on the release commit, so a nightly or a stable
+dispatched from the Actions tab leaves no tag behind either, and the next nightly's previous-tag
+lookup and the six-hour nightly gap are unaffected.
+
+A stable started by pushing a `vX.Y.Z` tag already has its tag, so an interrupted run leaves that
+tag and a draft. To finish it, re-run the failed jobs of the same run: **Create draft release**
+finds the draft by tag and replaces its assets. To abandon it, delete the draft on the Releases
+page and delete the tag with `git push origin :refs/tags/vX.Y.Z`. Left in place, the stray tag
+becomes the previous stable tag in the next stable's release notes.
+
+Re-run an interrupted nightly only while no newer nightly has published. Nightlies keep being cut
+from `main` on the schedule, and stable builds the commit of the nightly with the latest
+publication time, so publishing an older nightly after a newer one would make stable ship the older
+commit. The publish step refuses in that case, fails with the tag of the newer nightly, and leaves
+the draft; delete the draft instead. A stale draft that is never deleted does no harm.
+
+Re-running **Create draft release** for a tag that is already published replaces that release's
+assets in place, which is how a broken published release is repaired; updaters can see the files
+while they are swapped.
 
 Preview releases carry no updater manifests, so for them the check only rejects an asset that is
 still uploading.

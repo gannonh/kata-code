@@ -6,9 +6,11 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 
+import { parseUpdateManifest } from "./lib/update-manifest.ts";
 import {
   findIncompleteReleaseProblems,
-  manifestReferences,
+  isUpdaterManifestName,
+  newerPublishedNightlyTag,
   publishGitHubRelease,
 } from "./publish-github-release.ts";
 
@@ -34,30 +36,88 @@ sha512: YR7XP+kv1T0wB0Zn4ZtBbY0auUXyXV+NUL3seD7WscFAqUIij8g30qPapGvWj81JtrmjDACp
 releaseDate: '2026-10-02T15:39:21.904Z'
 `;
 
-describe("manifestReferences", () => {
-  it("lists every file entry and the top-level path once", () => {
-    assert.deepStrictEqual(manifestReferences(NIGHTLY_MAC_MANIFEST), [
-      "Kata-Code-macOS-Apple-Silicon-arm64.zip",
-      "Kata-Code-macOS-Apple-Silicon.dmg",
-    ]);
-    assert.deepStrictEqual(manifestReferences(NIGHTLY_LINUX_MANIFEST), [
-      "Kata-Code-Linux-x64.AppImage",
-    ]);
-  });
+const manifest = (name: string, text: string) => ({
+  name,
+  manifest: parseUpdateManifest(text, name, "release"),
+});
 
-  it("reads list entries at any indentation and a url that is not the first key", () => {
+describe("isUpdaterManifestName", () => {
+  it("accepts the stable and nightly feeds and nothing else", () => {
     assert.deepStrictEqual(
-      manifestReferences(
-        "files:\n- url: A.zip\n  size: 1\n- size: 2\n  url: B.zip\n    \npath: A.zip\n",
-      ),
-      ["A.zip", "B.zip"],
+      [
+        "latest.yml",
+        "latest-mac.yml",
+        "latest-linux-arm64.yml",
+        "nightly-mac.yml",
+        "nightly-linux.yml",
+        "builder-debug.yml",
+        "app-update.yml",
+        "latest-mac.yml.blockmap",
+        "SHA256SUMS",
+      ].map(isUpdaterManifestName),
+      [true, true, true, true, true, false, false, false, false],
+    );
+  });
+});
+
+describe("newerPublishedNightlyTag", () => {
+  const tag = "v0.0.44-nightly.20261002.1602";
+
+  it("finds a published nightly with a higher run number", () => {
+    assert.equal(
+      newerPublishedNightlyTag(tag, [
+        { draft: false, tag_name: "v0.0.44-nightly.20261002.1601" },
+        { draft: false, tag_name: "v0.0.44-nightly.20261002.1603" },
+      ]),
+      "v0.0.44-nightly.20261002.1603",
     );
   });
 
-  it("strips quotes around a name", () => {
-    assert.deepStrictEqual(
-      manifestReferences(`files:\n  - url: 'A b.zip'\n    size: 1\npath: "A b.zip"\n`),
-      ["A b.zip"],
+  it("orders by date before run number and by version before date", () => {
+    assert.equal(
+      newerPublishedNightlyTag(tag, [{ draft: false, tag_name: "v0.0.44-nightly.20261003.7" }]),
+      "v0.0.44-nightly.20261003.7",
+    );
+    assert.equal(
+      newerPublishedNightlyTag(tag, [{ draft: false, tag_name: "v0.0.45-nightly.20260901.1" }]),
+      "v0.0.45-nightly.20260901.1",
+    );
+    assert.equal(
+      newerPublishedNightlyTag(tag, [{ draft: false, tag_name: "v0.0.43-nightly.20261009.9999" }]),
+      undefined,
+    );
+  });
+
+  it("returns the newest when several are newer", () => {
+    assert.equal(
+      newerPublishedNightlyTag(tag, [
+        { draft: false, tag_name: "v0.0.44-nightly.20261002.1604" },
+        { draft: false, tag_name: "v0.0.44-nightly.20261002.1606" },
+        { draft: false, tag_name: "v0.0.44-nightly.20261002.1605" },
+      ]),
+      "v0.0.44-nightly.20261002.1606",
+    );
+  });
+
+  it("ignores older, equal, draft, stable, and preview releases", () => {
+    assert.equal(
+      newerPublishedNightlyTag(tag, [
+        { draft: false, tag_name: "v0.0.44-nightly.20261002.1601" },
+        { draft: false, tag_name: tag },
+        { draft: true, tag_name: "v0.0.44-nightly.20261002.1603" },
+        { draft: false, tag_name: "v0.0.45" },
+        { draft: false, tag_name: "v0.0.45-preview.20261002.1700" },
+      ]),
+      undefined,
+    );
+  });
+
+  it("does not guard a tag that is not a nightly", () => {
+    assert.equal(
+      newerPublishedNightlyTag("v0.0.45", [
+        { draft: false, tag_name: "v0.0.44-nightly.20261002.1603" },
+      ]),
+      undefined,
     );
   });
 });
@@ -68,7 +128,7 @@ describe("findIncompleteReleaseProblems", () => {
     ["Kata-Code-macOS-Apple-Silicon-arm64.zip", 152111146],
     ["Kata-Code-macOS-Apple-Silicon.dmg", 157786161],
   ]);
-  const manifests = [{ name: "nightly-mac.yml", text: NIGHTLY_MAC_MANIFEST }];
+  const manifests = [manifest("nightly-mac.yml", NIGHTLY_MAC_MANIFEST)];
 
   it("accepts a release holding the manifest and every file it names", () => {
     assert.deepStrictEqual(
@@ -132,6 +192,45 @@ describe("findIncompleteReleaseProblems", () => {
     );
   });
 
+  it("requires the blockmap of a named file when this build produced one", () => {
+    assert.deepStrictEqual(
+      findIncompleteReleaseProblems({
+        manifests,
+        localSizes: new Map([
+          ...localSizes,
+          ["Kata-Code-macOS-Apple-Silicon.dmg.blockmap", 166366],
+        ]),
+        assets: [
+          { name: "nightly-mac.yml", state: "uploaded", size: 733 },
+          { name: "Kata-Code-macOS-Apple-Silicon-arm64.zip", state: "uploaded", size: 152111146 },
+          { name: "Kata-Code-macOS-Apple-Silicon.dmg", state: "uploaded", size: 157786161 },
+        ],
+      }),
+      [
+        "Kata-Code-macOS-Apple-Silicon.dmg.blockmap, the blockmap of Kata-Code-macOS-Apple-Silicon.dmg, is not on the release",
+      ],
+    );
+  });
+
+  it("checks the blockmap's size and does not require one the build never produced", () => {
+    assert.deepStrictEqual(
+      findIncompleteReleaseProblems({
+        manifests,
+        localSizes: new Map([
+          ...localSizes,
+          ["Kata-Code-macOS-Apple-Silicon.dmg.blockmap", 166366],
+        ]),
+        assets: [
+          { name: "nightly-mac.yml", state: "uploaded", size: 733 },
+          { name: "Kata-Code-macOS-Apple-Silicon-arm64.zip", state: "uploaded", size: 152111146 },
+          { name: "Kata-Code-macOS-Apple-Silicon.dmg", state: "uploaded", size: 157786161 },
+          { name: "Kata-Code-macOS-Apple-Silicon.dmg.blockmap", state: "uploaded", size: 10 },
+        ],
+      }),
+      ["Kata-Code-macOS-Apple-Silicon.dmg.blockmap is 10 bytes on the release, 166366 built"],
+    );
+  });
+
   it("does not let a stale asset from an earlier attempt stand in for a file this build lacks", () => {
     const withoutDmg = new Map(localSizes);
     withoutDmg.delete("Kata-Code-macOS-Apple-Silicon.dmg");
@@ -151,6 +250,20 @@ describe("findIncompleteReleaseProblems", () => {
     );
   });
 
+  it("reads a Linux manifest: file entries with blockMapSize, and its path, checked once", () => {
+    assert.deepStrictEqual(
+      findIncompleteReleaseProblems({
+        manifests: [manifest("nightly-linux.yml", NIGHTLY_LINUX_MANIFEST)],
+        localSizes: new Map([
+          ["nightly-linux.yml", 397],
+          ["Kata-Code-Linux-x64.AppImage", 174987455],
+        ]),
+        assets: [{ name: "nightly-linux.yml", state: "uploaded", size: 397 }],
+      }),
+      ["Kata-Code-Linux-x64.AppImage, which nightly-linux.yml references, is not on the release"],
+    );
+  });
+
   it("has nothing to check on a release without updater manifests", () => {
     assert.deepStrictEqual(
       findIncompleteReleaseProblems({
@@ -165,11 +278,19 @@ describe("findIncompleteReleaseProblems", () => {
 
 interface FakeRelease {
   draft: boolean;
+  tag: string;
   assets: Array<{ name: string; state: string; size: number }>;
+  /** Every other release in the repository, newest first. */
+  others: Array<{ draft: boolean; tag_name: string }>;
   readonly patches: Array<unknown>;
 }
 
 const RELEASE_PATH = "/repos/gannonh/kata-code/releases/42";
+
+const page = <A>(all: ReadonlyArray<A>, url: URL): ReadonlyArray<A> => {
+  const number = Number(url.searchParams.get("page"));
+  return all.slice((number - 1) * 100, number * 100);
+};
 
 const serveFakeGitHub = (release: FakeRelease) =>
   HttpRouter.serve(
@@ -179,19 +300,23 @@ const serveFakeGitHub = (release: FakeRelease) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const url = new URL(request.url, "http://github.test");
-        const htmlUrl = "https://github.com/gannonh/kata-code/releases/tag/v1";
+        const htmlUrl = `https://github.com/gannonh/kata-code/releases/tag/${release.tag}`;
+        const body = () => ({ draft: release.draft, html_url: htmlUrl, tag_name: release.tag });
         if (request.method === "GET" && url.pathname === RELEASE_PATH) {
-          return HttpServerResponse.jsonUnsafe({ draft: release.draft, html_url: htmlUrl });
+          return HttpServerResponse.jsonUnsafe(body());
         }
         if (request.method === "GET" && url.pathname === `${RELEASE_PATH}/assets`) {
+          return HttpServerResponse.jsonUnsafe(page(release.assets, url));
+        }
+        if (request.method === "GET" && url.pathname === "/repos/gannonh/kata-code/releases") {
           return HttpServerResponse.jsonUnsafe(
-            url.searchParams.get("page") === "1" ? release.assets : [],
+            page([{ draft: release.draft, tag_name: release.tag }, ...release.others], url),
           );
         }
         if (request.method === "PATCH" && url.pathname === RELEASE_PATH) {
           release.patches.push(yield* request.json);
           release.draft = false;
-          return HttpServerResponse.jsonUnsafe({ draft: false, html_url: htmlUrl });
+          return HttpServerResponse.jsonUnsafe(body());
         }
         return HttpServerResponse.text("Not Found", { status: 404 });
       }),
@@ -208,6 +333,7 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
     yield* fs.writeFileString(path.join(distDir, "Kata-Code-macOS-Apple-Silicon-arm64.zip"), "zip");
     yield* fs.writeFileString(path.join(distDir, "Kata-Code-macOS-Apple-Silicon.dmg"), "dmg!");
     yield* fs.writeFileString(path.join(distDir, "release-body.md"), "notes");
+    yield* fs.writeFileString(path.join(distDir, "builder-debug.yml"), "not: [a manifest");
     return distDir;
   });
   const manifestSize = new TextEncoder().encode(NIGHTLY_MAC_MANIFEST).length;
@@ -216,6 +342,14 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
     { name: "Kata-Code-macOS-Apple-Silicon-arm64.zip", state: "uploaded", size: 3 },
     { name: "Kata-Code-macOS-Apple-Silicon.dmg", state: "uploaded", size: 4 },
   ];
+  const draft = (overrides: Partial<FakeRelease> = {}): FakeRelease => ({
+    draft: true,
+    tag: "v0.0.44-nightly.20261002.1602",
+    assets: completeAssets,
+    others: [],
+    patches: [],
+    ...overrides,
+  });
   const publish = (distDir: string, makeLatest: "true" | "false" = "false") =>
     publishGitHubRelease({
       repository: "gannonh/kata-code",
@@ -227,7 +361,7 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
   it.effect("publishes a draft whose manifest files are all uploaded", () =>
     Effect.gen(function* () {
       const distDir = yield* writeDist;
-      const release: FakeRelease = { draft: true, assets: completeAssets, patches: [] };
+      const release = draft();
 
       yield* publish(distDir).pipe(Effect.provide(serveFakeGitHub(release)));
 
@@ -239,7 +373,7 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
   it.effect("sends make_latest through for a stable release", () =>
     Effect.gen(function* () {
       const distDir = yield* writeDist;
-      const release: FakeRelease = { draft: true, assets: completeAssets, patches: [] };
+      const release = draft({ tag: "v0.0.45" });
 
       yield* publish(distDir, "true").pipe(Effect.provide(serveFakeGitHub(release)));
 
@@ -250,14 +384,7 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
   it.effect("leaves the release a draft when a binary the manifest names is missing", () =>
     Effect.gen(function* () {
       const distDir = yield* writeDist;
-      const release: FakeRelease = {
-        draft: true,
-        assets: [
-          completeAssets[0]!,
-          { ...completeAssets[2]!, name: "Kata-Code-macOS-Apple-Silicon.dmg" },
-        ],
-        patches: [],
-      };
+      const release = draft({ assets: [completeAssets[0]!, completeAssets[2]!] });
 
       const error = yield* publish(distDir).pipe(
         Effect.provide(serveFakeGitHub(release)),
@@ -278,15 +405,13 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
   it.effect("leaves the release a draft while an upload is still open", () =>
     Effect.gen(function* () {
       const distDir = yield* writeDist;
-      const release: FakeRelease = {
-        draft: true,
+      const release = draft({
         assets: [
           completeAssets[0]!,
           completeAssets[1]!,
           { ...completeAssets[2]!, state: "open", size: 1 },
         ],
-        patches: [],
-      };
+      });
 
       const error = yield* publish(distDir).pipe(
         Effect.provide(serveFakeGitHub(release)),
@@ -304,10 +429,88 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
     }),
   );
 
+  it.effect("refuses to publish a nightly older than one that is already published", () =>
+    Effect.gen(function* () {
+      const distDir = yield* writeDist;
+      const release = draft({
+        others: [
+          { draft: false, tag_name: "v0.0.44-nightly.20261002.1603" },
+          { draft: false, tag_name: "v0.0.44-nightly.20261001.1560" },
+        ],
+      });
+
+      const error = yield* publish(distDir).pipe(
+        Effect.provide(serveFakeGitHub(release)),
+        Effect.flip,
+      );
+
+      if (error._tag !== "StaleNightlyDraftError") {
+        assert.fail(`Expected StaleNightlyDraftError, got ${error._tag}`);
+      }
+      assert.equal(
+        error.message,
+        "Release 42 (v0.0.44-nightly.20261002.1602) stays a draft: v0.0.44-nightly.20261002.1603 is already published and newer, and publishing this one now would make it the newest nightly. Delete the draft.",
+      );
+      assert.deepStrictEqual(release.patches, []);
+      assert.equal(release.draft, true);
+    }),
+  );
+
+  it.effect("finds the newer nightly beyond the first page of releases", () =>
+    Effect.gen(function* () {
+      const distDir = yield* writeDist;
+      const stable = Array.from({ length: 100 }, (_, index) => ({
+        draft: false,
+        tag_name: `v0.0.${index}`,
+      }));
+      const release = draft({
+        others: [...stable, { draft: false, tag_name: "v0.0.44-nightly.20261002.1700" }],
+      });
+
+      const error = yield* publish(distDir).pipe(
+        Effect.provide(serveFakeGitHub(release)),
+        Effect.flip,
+      );
+
+      assert.equal(error._tag, "StaleNightlyDraftError");
+      assert.deepStrictEqual(release.patches, []);
+    }),
+  );
+
+  it.effect("publishes a nightly when only older nightlies and newer drafts exist", () =>
+    Effect.gen(function* () {
+      const distDir = yield* writeDist;
+      const release = draft({
+        others: [
+          { draft: true, tag_name: "v0.0.44-nightly.20261002.1700" },
+          { draft: false, tag_name: "v0.0.44-nightly.20261002.1601" },
+        ],
+      });
+
+      yield* publish(distDir).pipe(Effect.provide(serveFakeGitHub(release)));
+
+      assert.deepStrictEqual(release.patches, [{ draft: false, make_latest: "false" }]);
+    }),
+  );
+
+  it.effect("publishes a stable draft even when a newer nightly is published", () =>
+    Effect.gen(function* () {
+      const distDir = yield* writeDist;
+      const release = draft({
+        tag: "v0.0.45",
+        others: [{ draft: false, tag_name: "v0.0.45-nightly.20261003.1" }],
+      });
+
+      yield* publish(distDir, "true").pipe(Effect.provide(serveFakeGitHub(release)));
+
+      assert.deepStrictEqual(release.patches, [{ draft: false, make_latest: "true" }]);
+    }),
+  );
+
   it.effect("does nothing to a release that is already published", () =>
     Effect.gen(function* () {
       const distDir = yield* writeDist;
-      const release: FakeRelease = { draft: false, assets: [], patches: [] };
+      const release = draft({ draft: false, assets: [] });
 
       yield* publish(distDir, "true").pipe(Effect.provide(serveFakeGitHub(release)));
 

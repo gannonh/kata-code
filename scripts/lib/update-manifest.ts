@@ -2,6 +2,7 @@ export interface UpdateManifestFile {
   readonly url: string;
   readonly sha512: string;
   readonly size: number;
+  readonly blockMapSize?: number;
 }
 
 export type UpdateManifestScalar = string | number | boolean;
@@ -9,6 +10,8 @@ export type UpdateManifestScalar = string | number | boolean;
 export interface UpdateManifest {
   readonly version: string;
   readonly releaseDate: string;
+  /** Top-level `path`, which Linux manifests carry. Merging drops it. */
+  readonly path?: string;
   readonly files: ReadonlyArray<UpdateManifestFile>;
   readonly extras: Readonly<Record<string, UpdateManifestScalar>>;
 }
@@ -17,6 +20,7 @@ interface MutableUpdateManifestFile {
   url?: string;
   sha512?: string;
   size?: number;
+  blockMapSize?: number;
 }
 
 function stripSingleQuotes(value: string): string {
@@ -48,6 +52,7 @@ function parseFileRecord(
     url: currentFile.url,
     sha512: currentFile.sha512,
     size: currentFile.size,
+    ...(currentFile.blockMapSize === undefined ? {} : { blockMapSize: currentFile.blockMapSize }),
   };
 }
 
@@ -74,6 +79,7 @@ export function parseUpdateManifest(
   const extras: Record<string, UpdateManifestScalar> = {};
   let version: string | null = null;
   let releaseDate: string | null = null;
+  let path: string | null = null;
   let inFiles = false;
   let currentFile: MutableUpdateManifestFile | null = null;
 
@@ -110,6 +116,17 @@ export function parseUpdateManifest(
         );
       }
       currentFile.size = Number(fileSizeMatch[1]);
+      continue;
+    }
+
+    const fileBlockMapSizeMatch = line.match(/^    blockMapSize:\s*(\d+)$/);
+    if (fileBlockMapSizeMatch?.[1]) {
+      if (currentFile === null) {
+        throw new Error(
+          `Invalid ${platformLabel} update manifest at ${sourcePath}:${lineNumber}: blockMapSize without a file entry.`,
+        );
+      }
+      currentFile.blockMapSize = Number(fileBlockMapSizeMatch[1]);
       continue;
     }
 
@@ -155,7 +172,17 @@ export function parseUpdateManifest(
       continue;
     }
 
-    if (key === "path" || key === "sha512") {
+    if (key === "path") {
+      if (typeof value !== "string") {
+        throw new Error(
+          `Invalid ${platformLabel} update manifest at ${sourcePath}:${lineNumber}: path must be a string.`,
+        );
+      }
+      path = value;
+      continue;
+    }
+
+    if (key === "sha512") {
       continue;
     }
 
@@ -180,6 +207,7 @@ export function parseUpdateManifest(
   return {
     version,
     releaseDate,
+    ...(path === null ? {} : { path }),
     files,
     extras,
   };
@@ -259,6 +287,7 @@ export function serializeUpdateManifest(
     lines.push(`  - url: ${file.url}`);
     lines.push(`    sha512: ${file.sha512}`);
     lines.push(`    size: ${file.size}`);
+    if (file.blockMapSize !== undefined) lines.push(`    blockMapSize: ${file.blockMapSize}`);
   }
 
   for (const key of Object.keys(manifest.extras).toSorted()) {
