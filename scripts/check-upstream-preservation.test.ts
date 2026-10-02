@@ -252,6 +252,7 @@ const withRetainedRegressionWorktree = <A>(
           "apps/desktop/src/app/DesktopStatePaths.ts",
           "apps/desktop/src/app/DesktopStatePaths.test.ts",
           "apps/desktop/src/app/DesktopEnvironment.test.ts",
+          "apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts",
           ...addedContractPaths,
         ],
         { cwd: temporaryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
@@ -1078,7 +1079,7 @@ describe("upstream preservation CLI", () => {
         executionTreeCheck: () => undefined,
       });
 
-    it("retires only the parked Android checks and paths, and unfreezes the remote registration test", () => {
+    it("retires only the parked Android checks and paths", () => {
       expect([...RETIREMENTS.checks.keys()]).toEqual([
         "mobile-android-asset-live-evidence",
         "mobile-android-fab-inset",
@@ -1087,16 +1088,6 @@ describe("upstream preservation CLI", () => {
         "apps/mobile/src/lib/materialYouTheme.ts",
         "apps/mobile/src/lib/materialYouTheme.test.ts",
       ]);
-      expect([...RETIREMENTS.unfrozenTrustedPaths.keys()]).toEqual([
-        "apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts",
-      ]);
-      const awareness = PRESERVATION_CHECKS.find(
-        (check) => check.id === "mobile-agent-awareness-teardown",
-      );
-      expect(awareness?.commands[0]?.requiredPaths).toEqual([
-        "apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts",
-      ]);
-      expect(awareness?.commands[0]?.trustedPaths).toEqual([]);
       const urlHandler = PRESERVATION_CHECKS.find(
         (check) => check.id === "desktop-url-handler-backend-routes",
       );
@@ -1146,6 +1137,26 @@ describe("upstream preservation CLI", () => {
       expect(provider?.commands[0]?.trustedPaths).toEqual([
         "apps/server/src/provider/ProviderInstanceEnvironment.test.ts",
       ]);
+    });
+
+    it("unfreezes the remote registration test while the awareness check still runs it", () => {
+      const path = "apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts";
+      expect([...RETIREMENTS.unfrozenTrustedPaths.keys()]).toEqual([path]);
+      const command = PRESERVATION_CHECKS.find(
+        (check) => check.id === "mobile-agent-awareness-teardown",
+      )?.commands[0];
+      expect(command?.display).toBe(`vp test run ${path}`);
+      expect(command?.args).toEqual(["test", "run", path, "--reporter=dot"]);
+      expect(command?.requiredPaths).toEqual([path]);
+      expect(command?.trustedPaths).toEqual([]);
+      withRetainedRegressionWorktree((temporaryRoot, _candidateSha, commitFixture) => {
+        NodeFS.appendFileSync(
+          NodePath.join(temporaryRoot, path),
+          "\nexport const edited = true;\n",
+        );
+        const report = runCandidate(temporaryRoot, commitFixture());
+        expect(report.lines).toContain("CHECK id=mobile-agent-awareness-teardown status=PASS");
+      }, false);
     });
 
     it("rejects an entry that lists an owner path twice", () => {

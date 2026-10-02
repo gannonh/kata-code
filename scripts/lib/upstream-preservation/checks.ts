@@ -533,8 +533,6 @@ const ANDROID_PARKED: Retirement = {
   reason: "Android is parked; intake takes upstream Android-only changes without Kata review.",
 };
 
-// KAT-3607 adopts vite-plus 1.0, whose Vitest 5 drops describe.sequential, and edits the test
-// that calls it. The unfreeze ends with that PR, which re-freezes the file at its new bytes.
 const VITE_PLUS_1_ADOPTION: Retirement = {
   issue: "KAT-3607",
   reason:
