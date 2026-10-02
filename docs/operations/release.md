@@ -292,8 +292,9 @@ never publishes mid-upload:
    to everyone without write access, and it has no tag yet.
 2. **Publish release** runs `scripts/publish-github-release.ts`. It lists the draft's assets and
    refuses to publish unless every updater manifest (`latest*.yml`, `nightly*.yml`) and every file
-   a manifest names, by `files[].url` or `path`, is an asset in the `uploaded` state with the
-   byte size of the file the build produced, and no asset is still uploading. Then it publishes the
+   a manifest names, by `files[].url` or `path`, is a file this build produced and an asset in the
+   `uploaded` state with that file's byte size, so a leftover asset from an earlier attempt cannot
+   stand in for a missing one, and no asset is still uploading. Then it publishes the
    draft with `make_latest` set exactly as before. GitHub creates the tag at that point, on the
    release commit.
 

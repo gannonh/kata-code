@@ -75,13 +75,15 @@ export function findIncompleteReleaseProblems(
     .map((asset) => `${asset.name} is ${asset.state}, not uploaded`);
 
   const check = (name: string, needed: string) => {
+    const localSize = input.localSizes.get(name);
+    if (localSize === undefined) {
+      problems.push(`${needed} was not produced by this build`);
+      return;
+    }
     const asset = assetsByName.get(name);
     if (asset === undefined) {
       problems.push(`${needed} is not on the release`);
-      return;
-    }
-    const localSize = input.localSizes.get(name);
-    if (localSize !== undefined && asset.size !== localSize) {
+    } else if (asset.size !== localSize) {
       problems.push(`${name} is ${asset.size} bytes on the release, ${localSize} built`);
     }
   };

@@ -123,6 +123,25 @@ describe("findIncompleteReleaseProblems", () => {
     );
   });
 
+  it("does not let a stale asset from an earlier attempt stand in for a file this build lacks", () => {
+    const withoutDmg = new Map(localSizes);
+    withoutDmg.delete("Kata-Code-macOS-Apple-Silicon.dmg");
+    assert.deepStrictEqual(
+      findIncompleteReleaseProblems({
+        manifests,
+        localSizes: withoutDmg,
+        assets: [
+          { name: "nightly-mac.yml", state: "uploaded", size: 733 },
+          { name: "Kata-Code-macOS-Apple-Silicon-arm64.zip", state: "uploaded", size: 152111146 },
+          { name: "Kata-Code-macOS-Apple-Silicon.dmg", state: "uploaded", size: 157786161 },
+        ],
+      }),
+      [
+        "Kata-Code-macOS-Apple-Silicon.dmg, which nightly-mac.yml references, was not produced by this build",
+      ],
+    );
+  });
+
   it("has nothing to check on a release without updater manifests", () => {
     assert.deepStrictEqual(
       findIncompleteReleaseProblems({
