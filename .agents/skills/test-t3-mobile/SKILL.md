@@ -19,7 +19,7 @@ Use one representative iOS Simulator on macOS with Xcode. When iOS tooling is un
 
 Authorized mobile verification includes building and installing a development client. A missing, stale, or unknown native client is not a reason to skip verification or leave a PR in draft. Build and install it, then continue. Respect an explicit user instruction not to rebuild; otherwise do not ask for separate permission.
 
-Run this from the checkout being tested, on the machine that hosts the selected simulator. Select and boot one explicit iOS UDID first:
+Run this from the checkout being tested, on the machine that hosts the selected simulator. Select and boot one explicit iOS UDID first. A booted simulator may belong to another session, so create one for this run with `xcrun simctl create` and delete it during cleanup:
 
 - App: `Kata Code Dev`
 - Bundle identifier: `com.katacode.dev`
@@ -107,7 +107,7 @@ xcrun simctl get_app_container <simulator-udid> com.katacode.dev app
 xcrun simctl openurl <simulator-udid> <printed-dev-client-url>
 ```
 
-Accept the iOS confirmation prompt and dismiss the developer menu when it obscures the app.
+Each `simctl openurl`, including the one in `pair-client.sh`, raises an "Open in Kata Code Dev?" prompt. Accept it every time, and dismiss the developer menu when it obscures the app.
 
 Do not start, stop, erase, or reconfigure a simulator owned by another task. Track and later stop only processes owned by this test.
 
@@ -145,9 +145,9 @@ Use `snapshot_ui` and current element references from XcodeBuildMCP for taps and
 Exercise only the affected flow on one representative device unless the change specifically concerns platform, OS version, or screen size. Before finishing:
 
 1. Confirm the app connected to the intended disposable environment instead of merely rendering an empty disconnected state.
-2. Capture the relevant final state.
+2. Capture the relevant final state. `xcrun simctl io <simulator-udid> screenshot` cannot write under an external volume such as `/Volumes/EVO` (TCC, `NSCocoaErrorDomain` 513). Write to `/tmp`, then copy the file.
 3. Remove the disposable environment from Kata Code Dev.
-4. Stop only the Metro, backend, simulator, and log processes started by this test.
+4. Stop only the Metro, backend, simulator, and log processes started by this test. Delete the simulator this run created with `xcrun simctl delete <simulator-udid>`.
 5. Remove only base directories and temporary Git repositories deliberately created for this test. Preserve them when they contain useful reproduction evidence.
 
 Keep local verification focused. Do not turn this workflow into a full repository test run.
