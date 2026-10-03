@@ -104,35 +104,58 @@ export const layerFromProjectStore: Layer.Layer<
           instance === undefined
             ? undefined
             : (yield* instance.snapshot.getSnapshot).supportedRuntimeModes;
-        const cwd =
-          input.thread.worktreePath ??
-          (yield* projects.get(input.thread.projectId).pipe(
-            Effect.mapError(
-              (cause) =>
-                new RuntimePolicyResolveError({
-                  projectId: input.thread.projectId,
-                  providerInstanceId: input.modelSelection.instanceId,
-                  cause,
-                }),
-            ),
-            Effect.flatMap(
-              Option.match({
-                onNone: () =>
-                  Effect.fail(
+        const worktreePath = input.thread.worktreePath;
+        const { cwd, projectRoot } =
+          worktreePath === null
+            ? yield* projects.get(input.thread.projectId).pipe(
+                Effect.mapError(
+                  (cause) =>
                     new RuntimePolicyResolveError({
                       projectId: input.thread.projectId,
                       providerInstanceId: input.modelSelection.instanceId,
-                      cause: "Project not found.",
+                      cause,
                     }),
+                ),
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () =>
+                      Effect.fail(
+                        new RuntimePolicyResolveError({
+                          projectId: input.thread.projectId,
+                          providerInstanceId: input.modelSelection.instanceId,
+                          cause: "Project not found.",
+                        }),
+                      ),
+                    onSome: (project) =>
+                      Effect.succeed({
+                        cwd: project.workspaceRoot,
+                        projectRoot: project.workspaceRoot,
+                      }),
+                  }),
+                ),
+              )
+            : // A worktree runs without its project record; the root only
+              // lets Cursor reach the project folder's plugin logins, so no
+              // lookup failure may block the launch.
+              yield* projects.get(input.thread.projectId).pipe(
+                Effect.map((project) => ({
+                  cwd: worktreePath,
+                  projectRoot: Option.getOrUndefined(
+                    Option.map(project, (found) => found.workspaceRoot),
                   ),
-                onSome: (project) => Effect.succeed(project.workspaceRoot),
-              }),
-            ),
-          ));
+                })),
+                Effect.catchCause((cause) =>
+                  Effect.logDebug("orchestration-v2.runtime-policy.project-root-unavailable", {
+                    projectId: input.thread.projectId,
+                    cause,
+                  }).pipe(Effect.as({ cwd: worktreePath, projectRoot: undefined })),
+                ),
+              );
         return ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
+          ...(projectRoot === undefined ? {} : { projectRoot }),
         });
       }),
     });

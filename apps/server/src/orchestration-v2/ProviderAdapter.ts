@@ -49,6 +49,11 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   cwd: Schema.NullOr(Schema.String),
+  /**
+   * The thread's project folder. Differs from `cwd` when the thread runs in a
+   * worktree; Cursor reads the project folder's plugin logins from it.
+   */
+  projectRoot: Schema.optional(Schema.String),
   approvalPolicy: Schema.optional(Schema.Unknown),
   sandboxPolicy: Schema.optional(Schema.Unknown),
   reasoningEffort: Schema.optional(Schema.String),

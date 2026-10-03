@@ -45,6 +45,7 @@ import * as Stream from "effect/Stream";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { discoverCursorPluginMcpServers } from "../../provider/acp/CursorPluginMcp.ts";
 import { CursorTransportFailure } from "../../provider/acp/CursorTransportFailure.ts";
 import { cursorSdkModelSelection } from "../../provider/cursorSdkModel.ts";
 import {
@@ -302,14 +303,62 @@ const CURSOR_AGENT_SETTING_SOURCES = [
   "plugins",
 ] as const satisfies ReadonlyArray<SettingSource>;
 
+/** Installed Cursor plugin MCP servers, split by the SDK path that needs them. */
+export interface CursorPluginMcpServers {
+  /**
+   * For agent options, where the SDK's plugin loader also runs but reads only
+   * the thread folder's logins: the servers carrying the project folder's.
+   */
+  readonly agent: Record<string, McpServerConfig>;
+  /**
+   * For send options. The SDK builds a run that has send-level servers from
+   * those alone, without project, user, or plugin MCP config, so every
+   * installed plugin server goes along.
+   */
+  readonly send: Record<string, McpServerConfig>;
+}
+
+/**
+ * Plugin servers first, then T3's own. Plugin servers keep Cursor's
+ * `plugin-` identifiers, so the SDK, which keeps the first client of each
+ * name and loads these ahead of its plugin loader, registers each once.
+ */
+function withPluginMcpServers(
+  t3McpServers: Record<string, McpServerConfig> | undefined,
+  pluginMcpServers: Record<string, McpServerConfig> | undefined,
+): Record<string, McpServerConfig> | undefined {
+  if (pluginMcpServers === undefined || Object.keys(pluginMcpServers).length === 0) {
+    return t3McpServers;
+  }
+  return { ...pluginMcpServers, ...t3McpServers };
+}
+
+/**
+ * Send-level MCP servers. Sent only with T3's server, because any send-level
+ * server turns off the SDK's own project, user, and plugin MCP loading.
+ */
+export function cursorSendMcpServers(
+  threadId: ThreadId,
+  pluginMcpServers: CursorPluginMcpServers | undefined,
+): Record<string, McpServerConfig> | undefined {
+  const t3McpServers = cursorMcpServers(threadId);
+  return t3McpServers === undefined
+    ? undefined
+    : withPluginMcpServers(t3McpServers, pluginMcpServers?.send);
+}
+
 export function makeCursorAgentOptions(input: {
   readonly apiKey?: string;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   readonly threadId: ThreadId;
+  readonly pluginMcpServers?: CursorPluginMcpServers;
 }): AgentOptions {
   const policy = cursorRuntimeAgentPolicy(input.runtimePolicy);
-  const mcpServers = cursorMcpServers(input.threadId);
+  const mcpServers = withPluginMcpServers(
+    cursorMcpServers(input.threadId),
+    input.pluginMcpServers?.agent,
+  );
   return {
     model: cursorSdkModelSelection(input.modelSelection),
     name: `Kata Code ${input.threadId}`,
@@ -850,6 +899,8 @@ export interface CursorAdapterV2Options {
   readonly idAllocator: IdAllocator.IdAllocatorV2Shape;
   readonly runner: CursorAgentSdk.CursorAgentSdkRunnerShape;
   readonly serverConfig: ServerConfig.ServerConfig["Service"];
+  /** Probes and refreshes forwarded plugin OAuth tokens. Defaults to the global fetch. */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 export function makeCursorAdapterV2(
@@ -878,6 +929,45 @@ export function makeCursorAdapterV2(
         const liveAgent = yield* Ref.make<CursorLiveAgent | null>(null);
         const activeTurn = yield* Ref.make<ActiveCursorTurn | null>(null);
         const planIds = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact["id"]>());
+        const pluginMcpServersCache = yield* Ref.make<{
+          readonly key: string;
+          readonly servers: CursorPluginMcpServers;
+        } | null>(null);
+
+        /**
+         * Installed plugin servers for the thread's folders, read once per
+         * folder pair because forwarding may probe and refresh each token.
+         */
+        const pluginMcpServers = Effect.fnUntraced(function* (
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+        ) {
+          const { cwd, projectRoot } = runtimePolicy;
+          if (cwd === null) return undefined;
+          const key = `${cwd}\0${projectRoot ?? ""}`;
+          const cached = yield* Ref.get(pluginMcpServersCache);
+          if (cached?.key === key) return cached.servers;
+          const discovered = Object.entries(
+            yield* discoverCursorPluginMcpServers({
+              cwd,
+              ...(projectRoot === undefined ? {} : { projectRoot }),
+              env: adapterOptions.environment,
+              fetch: adapterOptions.fetch ?? globalThis.fetch,
+            }).pipe(
+              Effect.provideService(FileSystem.FileSystem, fileSystem),
+              Effect.provideService(Path.Path, path),
+            ),
+          );
+          const servers: CursorPluginMcpServers = {
+            agent: Object.fromEntries(
+              discovered.flatMap(([name, server]) =>
+                server.loginFolder === "project" ? [[name, server.config]] : [],
+              ),
+            ),
+            send: Object.fromEntries(discovered.map(([name, server]) => [name, server.config])),
+          };
+          yield* Ref.set(pluginMcpServersCache, { key, servers });
+          return servers;
+        });
 
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) =>
           Queue.offer(events, event).pipe(Effect.asVoid);
@@ -2063,6 +2153,7 @@ export function makeCursorAdapterV2(
             yield* existing.session.close.pipe(Effect.ignore);
             yield* Ref.set(liveAgent, null);
           }
+          const plugins = yield* pluginMcpServers(openInput.runtimePolicy);
           const sdkSession = yield* runner.open({
             operation: openInput.operation,
             ...(openInput.agentId === undefined ? {} : { agentId: openInput.agentId }),
@@ -2071,6 +2162,7 @@ export function makeCursorAdapterV2(
               modelSelection: openInput.modelSelection,
               runtimePolicy: openInput.runtimePolicy,
               threadId: openInput.threadId,
+              ...(plugins === undefined ? {} : { pluginMcpServers: plugins }),
             }),
             threadId: openInput.threadId,
             providerSessionId: input.providerSessionId,
@@ -2193,7 +2285,10 @@ export function makeCursorAdapterV2(
               runtimePolicy: turnInput.runtimePolicy,
             });
             const message = yield* resolveUserMessage(turnInput);
-            const mcpServers = cursorMcpServers(turnInput.threadId);
+            const mcpServers = cursorSendMcpServers(
+              turnInput.threadId,
+              yield* pluginMcpServers(turnInput.runtimePolicy),
+            );
             const pendingUpdates: Array<InteractionUpdate> = [];
             let context: ActiveCursorTurn | null = null;
             const sdkRun = yield* agent.session.send({
