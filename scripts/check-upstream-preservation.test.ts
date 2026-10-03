@@ -253,6 +253,7 @@ const withRetainedRegressionWorktree = <A>(
           "apps/desktop/src/app/DesktopStatePaths.test.ts",
           "apps/desktop/src/app/DesktopEnvironment.test.ts",
           "apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts",
+          "scripts/build-desktop-artifact.test.ts",
           ...addedContractPaths,
         ],
         { cwd: temporaryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
@@ -1141,7 +1142,10 @@ describe("upstream preservation CLI", () => {
 
     it("unfreezes the remote registration test while the awareness check still runs it", () => {
       const path = "apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts";
-      expect([...RETIREMENTS.unfrozenTrustedPaths.keys()]).toEqual([path]);
+      expect([...RETIREMENTS.unfrozenTrustedPaths.keys()]).toEqual([
+        path,
+        "scripts/build-desktop-artifact.test.ts",
+      ]);
       const command = PRESERVATION_CHECKS.find(
         (check) => check.id === "mobile-agent-awareness-teardown",
       )?.commands[0];
@@ -1156,6 +1160,26 @@ describe("upstream preservation CLI", () => {
         );
         const report = runCandidate(temporaryRoot, commitFixture());
         expect(report.lines).toContain("CHECK id=mobile-agent-awareness-teardown status=PASS");
+      }, false);
+    });
+
+    it("unfreezes the desktop artifact test while the packaging check still runs it", () => {
+      const path = "scripts/build-desktop-artifact.test.ts";
+      expect(RETIREMENTS.unfrozenTrustedPaths.get(path)?.issue).toBe("KAT-3635");
+      const command = PRESERVATION_CHECKS.find(
+        (check) => check.id === "desktop-packaging-asset-identity",
+      )?.commands[0];
+      expect(command?.display).toBe(`vp test run ${path}`);
+      expect(command?.args).toEqual(["test", "run", path, "--reporter=dot"]);
+      expect(command?.requiredPaths).toEqual([path]);
+      expect(command?.trustedPaths).toEqual([]);
+      withRetainedRegressionWorktree((temporaryRoot, _candidateSha, commitFixture) => {
+        NodeFS.appendFileSync(
+          NodePath.join(temporaryRoot, path),
+          "\nexport const edited = true;\n",
+        );
+        const report = runCandidate(temporaryRoot, commitFixture());
+        expect(report.lines).toContain("CHECK id=desktop-packaging-asset-identity status=PASS");
       }, false);
     });
 
