@@ -123,4 +123,19 @@ Trusted test files keep their base bytes, apart from the planned KAT-3637 file. 
 
 ## Verification
 
-Recorded after the candidate is committed.
+Candidate `fde37c1ccb10588a2c7914aab59102833b6095cd` on base `0e943f74bfa752cab232191194ff2e145f3aba06`. The commit recording this section changes only this document and the decisions log.
+
+**Local checks** (clean checkout, macOS): branding (product and agent-facing), workflow references and their test, knip, `vp check`, `vpr typecheck`, nightly gate test, preview-artifact test, the non-server test partition (including the darwin-only mobile native tests), `@kata-sh/code-web` (440 files, 5,804 tests), `@kata-sh/code-cli` (493 files, 6,557 tests), desktop build plus preload verification, `lint:mobile`, and release smoke all pass. The Rust check fails locally only because this Mac has rustc 1.94; the range does not touch `native/`, and CI's Rust job passes.
+
+**PR CI:** run 37152677202 on `fde37c1ccb`, all jobs green.
+
+**Trusted checker** archived from base `0e943f74bf`:
+
+- `--mode ci`: exit 0. Inventory and 29 checks PASS; `icon-composer-live-evidence` and `human-device-provider-evidence` are NOT RUN.
+- `--mode human-review` with exact-ref records: `INTEGRATION_RECORD status=PASS`, `CHANGED_RETAINED_OUTCOMES status=PASS` (10 TAKE: product identity, Connect wire identity, state isolation, migration identity, desktop window, desktop packaging, release package ownership, mobile config identity, mobile project clone URL, Connect early access). It prints `HUMAN_REVIEW_ACCEPTANCE status=FAIL detail=Missing mandatory manual evidence for icon-composer-live-evidence.` The only open items are the two live checks under the standing waiver (Gannon Hall, 2026-09-25), recorded as NOT RUN.
+
+**Web** (`verify-katacode`, runs `web-20261003-210228-64cc0db2` on main and `web-20261003-210522-d8533ae5` on the candidate): 7 of 10 scenarios pass (pairing and landing, identical on main and the candidate; add project; settings search; Scheduled Tasks; Routines with the server's next-run preview; usage tokens; command palette; `katacode` branch prefix). The Connections row for Kata Code Connect needs build-time Clerk and relay keys that the disposable stack does not load, the same as on main. Sending a message was stopped at "Enable a provider" to avoid a billed provider call. Screenshots and a 56-second video are on PR #345.
+
+**iOS** (`test-t3-mobile`, Xcode 27.0, iOS 27.0 simulator, native rebuild): Kata Code Dev 2.0.0 builds and pairs with a protocol-2 server without an update block; a new thread on the V2 server renders and shows the provider-login error (no provider credentials in the disposable home); Scheduled tasks, Follow-ups, Provider accounts, and Kata Code Connect early access render with Kata copy. Screenshots and a 55-second video are on PR #345.
+
+**Independent review** of the full fork delta in three lenses (server and V2 ports; clients and contracts; identity, assets, workflows, and clean merges): two PASS+NOTES and one FAIL. Every accepted finding is fixed in `fde37c1ccb`. The web T3 timeline mark is KAT-3643.
