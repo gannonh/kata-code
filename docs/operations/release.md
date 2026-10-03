@@ -52,9 +52,12 @@ This document covers the unified release workflow for stable and nightly desktop
   - nightly releases publish npm dist-tag `nightly`
   - preview releases publish npm dist-tag `preview`, which nothing resolves unless asked for by name
   - one-time setup: the `@kata-sh` npm scope must exist, and `@kata-sh/code-cli` plus each `@kata-sh/code-cli-<platform>-<arch>` package needs a trusted publisher registered for this workflow file (see below).
-- Deploys the hosted web app to Vercel only after a release is published:
+- Builds the hosted web app on Vercel while the desktop jobs run, once the quality, test, and server
+  test jobs have passed (`build_web`), and makes it live only after a release is published
+  (`deploy_web`):
   - stable releases are aliased to the `latest` hosted app channel
   - nightly releases are aliased to the `nightly` hosted app channel
+  - a release that fails leaves the previous alias in place
 - Signing is optional and auto-detected per platform from secrets.
 
 ## Required release credentials
@@ -205,16 +208,23 @@ configure the release job.
 
 The hosted app is intentionally not deployed by Vercel's Git integration. The
 web project disables automatic Git deployments in `apps/web/vercel.ts` via
-`git.deploymentEnabled: false`, and `.github/workflows/release.yml` deploys the
-web app with Vercel CLI after the GitHub Release succeeds. Vite emits
-`apps/web/dist`; `apps/web/vercel.ts` sets `outputDirectory` to `dist` so Vercel
-does not fall back to `public`.
+`git.deploymentEnabled: false`. In `.github/workflows/release.yml`, `build_web` builds the
+web app with Vercel CLI as a staged production deployment (`--skip-domain`) while the
+desktop jobs run, and `deploy_web` aliases the channel domains to it after the GitHub Release
+succeeds. Vite emits `apps/web/dist`; `apps/web/vercel.ts` sets `outputDirectory` to `dist` so
+Vercel does not fall back to `public`.
 
 `VERCEL_PROJECT_ID` must be the hosted web project (`katacode-web`). A CLI
 deploy that retrieves the repo-named `kata-code` project runs the repo-root
 `pnpm run build` and fails with `No Output Directory named "public"`.
-`deploy_web` writes `.vercel/project.json` from `VERCEL_ORG_ID` /
-`VERCEL_PROJECT_ID` and refuses a `kata-code` target.
+`build_web` writes `.vercel/project.json` from `VERCEL_ORG_ID` /
+`VERCEL_PROJECT_ID` before it deploys, which is what steers the deploy to the hosted project. After
+the deploy it runs `scripts/assert-hosted-web-project.ts`, which reads the project name from the
+CLI's `Inspect: https://vercel.com/<team>/<project>/<id>` line and fails the job unless it is
+exactly `katacode-web`; `katacode-web-staging` and `kata-code` both fail. The deployment already
+exists by then, so the guard stops the alias, not the deploy: a failed guard skips `deploy_web`, and
+`build_web` reports its URL, channel, and domains as outputs only after the guard passes.
+`deploy_web` aliases only what `build_web` reported.
 
 Required GitHub Actions secrets:
 
@@ -241,14 +251,28 @@ channel by visiting `/__katacode/channel?channel=latest` or
 `katacode_web_channel` cookie and rewrites future requests on `app.kata.sh` to
 the matching channel alias.
 
-The release deploy job rewrites release package versions before upload so the
-hosted app's About panel renders the release version. Stable deploys alias the
-same deployment to both the `latest` channel and the router domain so the router
-rules stay current. Nightly deploys only alias the `nightly` channel. The job
-also passes `VITE_HOSTED_APP_CHANNEL=latest|nightly`, which renders the hosted
+`build_web` rewrites release package versions before upload so the
+hosted app's About panel renders the release version. It also passes
+`VITE_HOSTED_APP_CHANNEL=latest|nightly`, which renders the hosted
 update track selector in the About panel. Changing the selector navigates
 through `/__katacode/channel` on the router domain so the user's channel cookie is
 updated before redirecting to the hosted app root.
+
+`build_web` waits for `quality`, `test`, and `test_server`, then overlaps the desktop builds,
+which are far longer. A release whose checks fail never creates a production deployment.
+`deploy_web` runs after the GitHub Release is published. Stable releases alias the
+same deployment to both the `latest` channel and the router domain so the router
+rules stay current. Nightly releases only alias the `nightly` channel. If any job
+before it fails, the staged deployment stays unaliased and the channel domains keep the
+previous release's deployment.
+
+`--skip-domain` leaves the channel and router domains alone. It does not stop Vercel from moving
+the project's own `*.vercel.app` production hostname to the staged build, which upstream observed
+when it adopted this split. That hostname is not a user channel and nothing in the app links to it,
+but unless the Vercel project's deployment protection covers it, anyone who knows it can load a
+client whose matching server package may not be on npm yet. Only builds that passed the release's
+checks reach that hostname, but a later desktop, npm, or release failure still leaves it serving
+a client that was never released.
 
 One-time Vercel dashboard setup:
 
@@ -374,6 +398,9 @@ The workflow enforces this ordering:
 1. `publish_cli` publishes the exact release version to npm, on every channel.
 2. `release` depends on `publish_cli` before exposing desktop artifacts in GitHub Releases.
 3. `deploy_web` depends on `release` before moving the hosted channel to the new client.
+   `build_web` builds that client earlier, with `--skip-domain`, which keeps the channel
+   domains on the previous client but may not keep the project's own `*.vercel.app`
+   hostname (see [Hosted web app release deployment](#hosted-web-app-release-deployment)).
 
 Preserve these dependencies when changing the release graph. Publishing a client first would leave
 the **Update server** action targeting a package version that does not exist yet.
