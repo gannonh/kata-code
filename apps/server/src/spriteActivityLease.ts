@@ -1,5 +1,5 @@
 import type {
-  ProviderSession,
+  OrchestrationV2ProviderSession,
   TerminalMetadataStreamEvent,
   TerminalSummary,
 } from "@kata-sh/code-contracts";
@@ -8,10 +8,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ProcessRunner from "./processRunner.ts";
-import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 
 const SPRITE_API_SOCKET = "/.sprite/api.sock";
@@ -29,22 +29,38 @@ export interface SpriteLeaseState {
 
 export type SpriteLeaseAction = "none" | "refresh" | "release";
 
+type ProviderSessionStatus = OrchestrationV2ProviderSession["status"];
+
+// A session that is starting, running a turn, or waiting on the user for an
+// approval or answer is mid-turn work the Sprite must stay awake for.
+const ACTIVE_PROVIDER_SESSION_STATUSES: ReadonlySet<ProviderSessionStatus> = new Set([
+  "starting",
+  "running",
+  "waiting",
+]);
+
 export function hasSpriteActivity(input: {
   readonly connectedClientCount: number;
-  readonly providerSessions: ReadonlyArray<Pick<ProviderSession, "activeTurnId" | "status">>;
+  readonly providerSessions: ReadonlyArray<Pick<OrchestrationV2ProviderSession, "status">>;
   readonly terminals: ReadonlyArray<Pick<TerminalSummary, "hasRunningSubprocess">>;
 }): boolean {
   return (
     input.connectedClientCount > 0 ||
-    input.providerSessions.some(
-      (session) =>
-        session.activeTurnId !== undefined ||
-        session.status === "connecting" ||
-        session.status === "running",
+    input.providerSessions.some((session) =>
+      ACTIVE_PROVIDER_SESSION_STATUSES.has(session.status),
     ) ||
     input.terminals.some((terminal) => terminal.hasRunningSubprocess)
   );
 }
+
+/** Provider sessions from the V2 projection that have not stopped. */
+export const readOpenProviderSessions = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return yield* sql<{ readonly status: ProviderSessionStatus }>`
+    SELECT status FROM orchestration_v2_projection_provider_sessions
+    WHERE status != 'stopped'
+  `;
+});
 
 export function nextSpriteLeaseState(input: {
   readonly current: SpriteLeaseState;
@@ -145,7 +161,7 @@ const make = Effect.gen(function* () {
   }
 
   const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
-  const providers = yield* ProviderService.ProviderService;
+  const sql = yield* SqlClient.SqlClient;
   const terminals = yield* TerminalManager.TerminalManager;
   const runner = yield* ProcessRunner.ProcessRunner;
   const terminalState = yield* Ref.make(new Map<string, TerminalSummary>());
@@ -168,7 +184,16 @@ const make = Effect.gen(function* () {
   const tick = Effect.gen(function* () {
     const [connectedClientCount, sessions, terminalSessions, current, now] = yield* Effect.all([
       backgroundPolicy.connectedClientCount,
-      providers.listSessions(),
+      // An unreadable session table must not let the Sprite sleep mid-turn, so a
+      // failed read counts as provider activity until the next poll.
+      readOpenProviderSessions.pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.catch((cause) =>
+          Effect.logWarning("Failed to read provider sessions for Sprite activity", {
+            cause,
+          }).pipe(Effect.as([{ status: "running" as const }])),
+        ),
+      ),
       Ref.get(terminalState),
       Ref.get(leaseState),
       Clock.currentTimeMillis,

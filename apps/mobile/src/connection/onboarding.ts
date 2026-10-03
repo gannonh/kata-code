@@ -15,7 +15,7 @@ export const connectPairingUrl = createRuntimeCommand(connectionAtomRuntime, {
   scheduler: onboardingScheduler,
   concurrency: { mode: "singleFlight", key: (pairingUrl: string) => pairingUrl },
   execute: (pairingUrl: string) =>
-    ConnectionOnboarding.pipe(
+    ConnectionOnboarding.ConnectionOnboarding.pipe(
       Effect.flatMap((onboarding) => onboarding.registerPairing({ pairingUrl })),
     ),
 });
@@ -28,7 +28,7 @@ export const connectRelayEnvironment = createRuntimeCommand(connectionAtomRuntim
     key: (input: { readonly environmentId: string }) => input.environmentId,
   },
   execute: (input: { readonly environmentId: string; readonly label: string }) =>
-    ConnectionOnboarding.pipe(
+    ConnectionOnboarding.ConnectionOnboarding.pipe(
       Effect.flatMap((onboarding) =>
         onboarding.registerRelay({
           environmentId: EnvironmentId.make(input.environmentId),
@@ -49,5 +49,8 @@ export const updateBearerConnection = createRuntimeCommand(connectionAtomRuntime
     readonly environmentId: EnvironmentId;
     readonly label: string;
     readonly httpBaseUrl: string;
-  }) => ConnectionOnboarding.pipe(Effect.flatMap((onboarding) => onboarding.updateBearer(input))),
+  }) =>
+    ConnectionOnboarding.ConnectionOnboarding.pipe(
+      Effect.flatMap((onboarding) => onboarding.updateBearer(input)),
+    ),
 });

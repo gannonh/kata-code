@@ -10,6 +10,7 @@ import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
 
 import { RoutineDispatcher } from "./RoutineDispatcher.ts";
+import { RoutineRunObserver } from "./RoutineRunObserver.ts";
 import { RoutineStore } from "./RoutineStore.ts";
 
 export interface RoutineSchedulerShape {
@@ -31,20 +32,19 @@ export class RoutineScheduler extends Context.Service<RoutineScheduler, RoutineS
 const makeRoutineScheduler = Effect.gen(function* () {
   const store = yield* RoutineStore;
   const dispatcher = yield* RoutineDispatcher;
+  const observer = yield* RoutineRunObserver;
   const owner = `routine-worker:${NodeCrypto.randomUUID()}`;
   // One pending wake is enough: the loop drains every claimable run per pass.
   const wakeups = yield* Queue.make<void>({ capacity: 1, strategy: "dropping" });
   const wake: RoutineSchedulerShape["wake"] = Queue.offer(wakeups, undefined).pipe(Effect.asVoid);
 
-  // Admission owns the short scheduler lease and must keep running while
-  // workspace preparation or setup scripts are waiting on external work.
-  // Dispatching runs on a separate loop so a slow preparation cannot make a
-  // live process look like a crashed scheduler.
+  // Admission owns the short scheduler lease and must keep running while a
+  // launch waits on external work. Dispatching runs on a separate loop so a
+  // slow launch cannot make a live process look like a crashed scheduler.
+  // Each tick also records orchestration progress for launched runs.
   const tick: RoutineSchedulerShape["tick"] = DateTime.now.pipe(
     Effect.map(DateTime.toEpochMillis),
-    Effect.flatMap((now) =>
-      store.tick(owner, now).pipe(Effect.andThen(store.recoverConsumed(now))),
-    ),
+    Effect.flatMap((now) => store.tick(owner, now).pipe(Effect.andThen(observer.observe))),
   );
   const admissionLoop = Effect.forever(
     tick.pipe(
@@ -65,14 +65,13 @@ const makeRoutineScheduler = Effect.gen(function* () {
     ),
   );
   const start: RoutineSchedulerShape["start"] = Effect.gen(function* () {
-    const initialNow = yield* DateTime.now.pipe(Effect.map(DateTime.toEpochMillis));
-    yield* store
-      .recoverConsumed(initialNow)
-      .pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("initial routine submission recovery failed", { cause }),
-        ),
-      );
+    // Catch up on orchestration events the previous process did not observe,
+    // including runs that its shutdown or this startup cancelled.
+    yield* observer.observe.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("initial routine run observation failed", { cause }),
+      ),
+    );
     yield* tick.pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("initial routine scheduler admission tick failed", { cause }),

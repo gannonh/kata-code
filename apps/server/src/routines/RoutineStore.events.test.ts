@@ -5,7 +5,6 @@ import {
   ProjectId,
   RoutineConnectionId,
   RoutineId,
-  RoutineOwnerGeneration,
   RuntimeMode,
   type RoutineConnection,
   type RoutineDraft,
@@ -18,6 +17,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { summarizeGitHubEvent } from "./GitHubRoutineEvents.ts";
 import { summarizeLinearEvent } from "./LinearRoutineEvents.ts";
+import { RESTART_CANCELLED_DETAIL } from "./RoutineRunObserver.ts";
 import { RoutineStore, RoutineStoreLive } from "./RoutineStore.ts";
 
 const environmentId = EnvironmentId.make("routine-events-environment");
@@ -157,7 +157,7 @@ const linearEvent = (deliveryId: string, payload: unknown) => {
 };
 
 it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
-  it.effect("resumes exactly one event run after a crash and reports uncertainty", () =>
+  it.effect("keeps one event run when a restart cuts it off and GitHub redelivers", () =>
     Effect.gen(function* () {
       const store = yield* RoutineStore;
       const id = RoutineConnectionId.make("connection-recovery");
@@ -181,23 +181,29 @@ it.layer(storeLayer)("RoutineStore GitHub events", (it) => {
       });
       assert.equal(admission.runs.length, 1);
       const run = admission.runs[0]!;
-      const claim = yield* store.claim("owner-after-restart", 3_000);
+      const claim = yield* store.claim("owner-before-restart", 3_000);
       assert.equal(claim?.run.id, run.id);
-      yield* store.consumeSubmissionForProvider(
+      yield* store.beginLaunch(claim!, 3_001);
+      yield* store.markLaunched(claim!, 3_002);
+      // The run observer records the restart cancellation as needs-attention.
+      yield* store.recordOrchestrationProgress(
         {
           runId: run.id,
-          owner: claim!.owner,
-          generation: RoutineOwnerGeneration.make(claim!.generation),
-          threadId: run.threadId,
-          messageId: run.messageId,
-          commandId: run.commandId,
+          fromCursor: 0,
+          toCursor: 7,
+          progress: {
+            stage: "terminal",
+            status: "needs-attention",
+            detail: RESTART_CANCELLED_DETAIL,
+          },
         },
-        3_001,
+        4_000,
       );
-      yield* store.recoverConsumed(4_000);
       const history = yield* store.history(environmentId, { id: routine.id });
-      assert.equal(history.runs.length, 1);
-      assert.equal(history.runs[0]?.status, "needs-attention");
+      assert.deepEqual(
+        history.runs.map(({ status, detail }) => ({ status, detail })),
+        [{ status: "needs-attention", detail: RESTART_CANCELLED_DETAIL }],
+      );
       // GitHub's redelivery of the same event cannot add a second run after restart.
       const replay = yield* store.admitEvent({
         connectionId: id,

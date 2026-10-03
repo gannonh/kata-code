@@ -19,7 +19,7 @@ import {
   type ModelSelection,
   RoutineDraftProviderOutput,
 } from "@kata-sh/code-contracts";
-import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
+import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 
 import { TextGenerationError } from "@kata-sh/code-contracts";
@@ -383,6 +383,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       const { prompt, outputSchema } = buildBranchNamePrompt({
         message: input.message,
         attachments: input.attachments,
+        naming: input.naming,
       });
 
       const generated = yield* runClaudeJson({
@@ -394,7 +395,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       });
 
       return {
-        branch: sanitizeBranchFragment(generated.branch),
+        branch: formatGeneratedBranchName(generated.branch, input.naming),
       };
     });
 

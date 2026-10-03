@@ -14,10 +14,11 @@ import {
   PositiveInt,
   NonNegativeInt,
 } from "./baseSchemas.ts";
-import { ModelSelection, RuntimeMode } from "./orchestration.ts";
-import { RoutineOwnerGeneration, RoutineProviderSubmission, RoutineRunId } from "./routineFence.ts";
+import { ModelSelection } from "./modelSelection.ts";
+import { RuntimeMode } from "./providerPolicy.ts";
 
-export { RoutineOwnerGeneration, RoutineProviderSubmission, RoutineRunId } from "./routineFence.ts";
+export const RoutineRunId = TrimmedNonEmptyString.pipe(Schema.brand("RoutineRunId"));
+export type RoutineRunId = typeof RoutineRunId.Type;
 
 export const RoutineId = TrimmedNonEmptyString.pipe(Schema.brand("RoutineId"));
 export type RoutineId = typeof RoutineId.Type;
@@ -319,6 +320,13 @@ export const RoutineRunStatus = Schema.Literals([
   "blocked",
 ]);
 export type RoutineRunStatus = typeof RoutineRunStatus.Type;
+/**
+ * Dispatch progress. `submitting` records the launch intent before the
+ * idempotent orchestration launch, `prompt-accepted` means orchestration
+ * accepted the thread and its first message, and `provider-bound` means its
+ * run started. `thread-created` only appears on runs recorded before
+ * routines launched through orchestration V2.
+ */
 export const RoutineRunStage = Schema.Literals([
   "admitted",
   "thread-created",

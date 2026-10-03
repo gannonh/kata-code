@@ -1,7 +1,10 @@
 import { Connection } from "@kata-sh/code-client-runtime/connection";
-import { shellSnapshotLoaderLayer } from "@kata-sh/code-client-runtime/state/shell";
-import { threadSnapshotLoaderLayer } from "@kata-sh/code-client-runtime/state/threads";
-import { pullRequestDiffLoaderLayer } from "@kata-sh/code-client-runtime/state/pull-requests";
+import { ShellSnapshotLoader } from "@kata-sh/code-client-runtime/state/shell";
+import {
+  boundedThreadSnapshotLoaderLayer,
+  ThreadHistoryController,
+} from "@kata-sh/code-client-runtime/state/threads";
+import { PullRequestDiffLoader } from "@kata-sh/code-client-runtime/state/pull-requests";
 import * as Layer from "effect/Layer";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -17,9 +20,10 @@ const providedConnectionPlatformLayer = connectionPlatformLayer.pipe(
 );
 
 const snapshotLoaderLayer = Layer.mergeAll(
-  threadSnapshotLoaderLayer,
-  shellSnapshotLoaderLayer,
-  pullRequestDiffLoaderLayer,
+  boundedThreadSnapshotLoaderLayer,
+  ShellSnapshotLoader.layer,
+  ThreadHistoryController.layer,
+  PullRequestDiffLoader.layer,
 );
 
 type ConnectionLayerSource =

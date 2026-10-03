@@ -539,14 +539,6 @@ const VITE_PLUS_1_ADOPTION: Retirement = {
     "KAT-3607 adopts vite-plus 1.0 and replaces describe.sequential in the test; it re-freezes at its new bytes.",
 };
 
-// KAT-3635 integrates upstream Orchestration V2, whose Cursor adapter needs @cursor/sdk staged as
-// a desktop extra resource. That PR edits the exact packaging lists and re-freezes the test.
-const CURSOR_SDK_DESKTOP_PACKAGING: Retirement = {
-  issue: "KAT-3635",
-  reason:
-    "KAT-3635 packages @cursor/sdk for the V2 Cursor adapter and updates the pinned packaging lists; it re-freezes at its new bytes.",
-};
-
 export const RETIREMENTS: RetirementTables = {
   checks: new Map([
     ["mobile-android-asset-live-evidence", ANDROID_PARKED],
@@ -558,7 +550,6 @@ export const RETIREMENTS: RetirementTables = {
   ]),
   unfrozenTrustedPaths: new Map([
     ["apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts", VITE_PLUS_1_ADOPTION],
-    ["scripts/build-desktop-artifact.test.ts", CURSOR_SDK_DESKTOP_PACKAGING],
   ]),
 };
 

@@ -17,6 +17,7 @@ import * as Scope from "effect/Scope";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import { summarizeGitHubEvent } from "./GitHubRoutineEvents.ts";
 import { RoutineDispatcher } from "./RoutineDispatcher.ts";
+import { RoutineRunObserver } from "./RoutineRunObserver.ts";
 import { RoutineScheduler, RoutineSchedulerLive } from "./RoutineScheduler.ts";
 import { RoutineStore, RoutineStoreLive } from "./RoutineStore.ts";
 
@@ -69,7 +70,7 @@ const dispatcherLayer = Layer.effect(
           if (claim === null) return;
           yield* store.updatePreparation(
             claim,
-            { stage: "thread-created", status: "starting", detail: null },
+            { stage: "submitting", status: "starting", detail: null },
             now,
           );
         }),
@@ -79,6 +80,7 @@ const dispatcherLayer = Layer.effect(
 );
 const layer = RoutineSchedulerLive.pipe(
   Layer.provideMerge(dispatcherLayer),
+  Layer.provideMerge(Layer.succeed(RoutineRunObserver, { observe: Effect.void })),
   Layer.provideMerge(storeLayer),
 );
 

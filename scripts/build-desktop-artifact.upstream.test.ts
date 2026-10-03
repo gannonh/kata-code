@@ -82,6 +82,7 @@ import {
   WindowsDesktopBuildPrerequisitesMissingError,
   WindowsPackagedPayloadValidationError,
   WINDOWS_NATIVE_ASAR_UNPACK_GLOB,
+  stageCursorSdkPlatformPackages,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
   WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
   WINDOWS_SERVER_EXTRA_RESOURCES,
@@ -564,6 +565,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }
 
     assert.deepStrictEqual(DESKTOP_FILE_EXCLUSIONS, [
+      "!**/node_modules/@cursor/sdk-*/**/*",
+      "!apps/desktop/prod-resources/cursor-sdk",
+      "!apps/desktop/prod-resources/cursor-sdk/**/*",
       "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
       "!apps/desktop/resources/browser-secret",
       "!apps/desktop/resources/browser-secret/**/*",
@@ -666,25 +670,21 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         { from: "apps/desktop/prod-resources/browser-secret", to: "browser-secret" },
       ]);
       assert.deepStrictEqual(win.extraResources, [
-        {
-          from: "apps/desktop/prod-resources/resource-monitor",
-          to: "resource-monitor",
-        },
+        ...DESKTOP_EXTRA_RESOURCES,
         ...WINDOWS_SERVER_EXTRA_RESOURCES,
         ...WSL_RUNTIME_EXTRA_RESOURCES,
       ]);
       // No Linux CLI archive means staging never writes the runtime, so
       // listing it here would fail the build on a missing source file.
       assert.deepStrictEqual(winWithoutWslRuntime.extraResources, [
-        {
-          from: "apps/desktop/prod-resources/resource-monitor",
-          to: "resource-monitor",
-        },
+        ...DESKTOP_EXTRA_RESOURCES,
         ...WINDOWS_SERVER_EXTRA_RESOURCES,
       ]);
       assert.deepStrictEqual(win.nsis, { differentialPackage: true });
       // The Claude SDK platform packages and .bin shims never ship.
       assert.deepStrictEqual(WINDOWS_SERVER_ASAR_IGNORE_GLOBS, [
+        "**/node_modules/@cursor/sdk-*",
+        "**/node_modules/@cursor/sdk-*/**",
         "**/node_modules/@anthropic-ai/claude-agent-sdk-*",
         "**/node_modules/@anthropic-ai/claude-agent-sdk-*/**",
         "**/node_modules/.bin",
@@ -766,8 +766,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   // Applies the Linux build config's `files` exclusions to a node-pty 1.2
   // package listing, the way electron-builder filters the staged app, so the
   // surviving prebuilds are exactly what the Linux app ships.
-  for (const arch of ["x64", "arm64"] as const) {
-    it.effect(`ships only the linux-${arch} node-pty prebuild in a Linux ${arch} app`, () =>
+  it.effect.each(["x64", "arm64"] as const)(
+    "ships only the matching node-pty prebuild in a Linux %s app",
+    (arch) =>
       Effect.gen(function* () {
         const config = yield* createBuildConfig(
           "linux",
@@ -802,8 +803,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
         assert.deepStrictEqual(shipped, [`node_modules/node-pty/prebuilds/linux-${arch}/pty.node`]);
       }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
-    );
-  }
+  );
 
   it("unpacks native binaries while keeping their JavaScript and metadata archived", () => {
     for (const file of [
@@ -838,6 +838,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       resolveMergedStageDependencies({
         platform: "mac",
         serverDependencies: {
+          "@cursor/sdk": "1.0.22",
           "@anthropic-ai/claude-agent-sdk": "^0.3.170",
           "@ff-labs/fff-node": "0.9.4",
           "@opencode-ai/sdk": "^1.3.15",
@@ -853,6 +854,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         fffNodeVersion: "0.9.4",
       }),
       {
+        "@cursor/sdk": "1.0.22",
         "@ff-labs/fff-node": "0.9.4",
         "node-pty": "1.1.0",
         "@napi-rs/keyring": "1.3.0",
@@ -878,6 +880,58 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       },
     );
   });
+
+  it.effect("ships Cursor platform assets outside asar for spawning and native loading", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cursor-helpers-" });
+        const nodeModules = path.join(root, "node_modules");
+        const destination = path.join(root, "resources/node_modules/@cursor");
+        const cursorDirectory = symlinksSupported
+          ? path.join(root, "store/@cursor")
+          : path.join(nodeModules, "@cursor");
+        yield* fs.makeDirectory(path.join(cursorDirectory, "sdk"), { recursive: true });
+        if (symlinksSupported) {
+          yield* fs.makeDirectory(path.join(nodeModules, "@cursor"), { recursive: true });
+          yield* fs.symlink(
+            path.join(cursorDirectory, "sdk"),
+            path.join(nodeModules, "@cursor/sdk"),
+          );
+        }
+        const helpers = [
+          "sdk-darwin-arm64/bin/rg",
+          "sdk-darwin-arm64/bin/cursorsandbox",
+          "sdk-darwin-arm64/vendor/tree-sitter/index.js",
+          "sdk-darwin-arm64/vendor/tree-sitter/binding.node",
+          "sdk-darwin-arm64/vendor/tree-sitter-bash/binding.node",
+          "sdk-darwin-arm64/package.json",
+          "sdk-win32-x64/bin/rg.exe",
+        ];
+        for (const helper of helpers) {
+          const source = path.join(cursorDirectory, helper);
+          yield* fs.makeDirectory(path.dirname(source), { recursive: true });
+          yield* fs.writeFileString(source, "fixture helper", { mode: 0o755 });
+        }
+        yield* stageCursorSdkPlatformPackages(nodeModules, destination);
+        for (const helper of helpers) {
+          assert.equal(yield* fs.readFileString(path.join(destination, helper)), "fixture helper");
+          const packagedPath = `node_modules/@cursor/${helper}`;
+          assert.isTrue(
+            DESKTOP_FILE_EXCLUSIONS.some((glob) =>
+              NodePath.matchesGlob(packagedPath, glob.slice(1)),
+            ),
+          );
+          assert.isTrue(
+            WINDOWS_SERVER_ASAR_IGNORE_GLOBS.some((glob) =>
+              NodePath.matchesGlob(packagedPath, glob),
+            ),
+          );
+        }
+      }),
+    ),
+  );
 
   it("excludes node-pty binaries for the other Windows architecture", () => {
     assert.deepStrictEqual(resolveWindowsServerAsarIgnoreGlobs("x64"), [
@@ -1314,8 +1368,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ).pipe(Effect.provideService(HostProcessPlatform, "linux")),
   );
 
-  for (const targetArch of ["x64", "arm64"] as const) {
-    it.effect(`accepts an embedded archive with the Linux ${targetArch} node-pty prebuild`, () =>
+  it.effect.each(["x64", "arm64"] as const)(
+    "accepts an embedded archive with the Linux %s node-pty prebuild",
+    (targetArch) =>
       Effect.scoped(
         Effect.gen(function* () {
           const fixture = yield* makeWindowsPayloadFixture({
@@ -1335,38 +1390,37 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           assert.equal(result.packagedAppDir, fixture.packagedAppDir);
         }),
       ).pipe(Effect.provideService(HostProcessPlatform, "linux")),
-    );
+  );
 
-    it.effect(
-      `rejects a node-pty prebuild for the wrong architecture in a Linux ${targetArch} archive`,
-      () =>
-        Effect.scoped(
-          Effect.gen(function* () {
-            const fixture = yield* makeWindowsPayloadFixture({
-              copyUnpackedNatives: true,
-              wslRuntime: "valid",
-              targetArch,
-              ptyPrebuildArch: targetArch === "x64" ? "arm64" : "x64",
-            });
-            const error = yield* validateWindowsPackagedPayload({
-              stageDistDir: fixture.stageDistDir,
-              appExecutableName: fixture.appExecutableName,
-              targetArch,
-              appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
-              expectWslRuntime: true,
-            }).pipe(Effect.flip);
+  it.effect.each(["x64", "arm64"] as const)(
+    "rejects a node-pty prebuild for the wrong architecture in a Linux %s archive",
+    (targetArch) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fixture = yield* makeWindowsPayloadFixture({
+            copyUnpackedNatives: true,
+            wslRuntime: "valid",
+            targetArch,
+            ptyPrebuildArch: targetArch === "x64" ? "arm64" : "x64",
+          });
+          const error = yield* validateWindowsPackagedPayload({
+            stageDistDir: fixture.stageDistDir,
+            appExecutableName: fixture.appExecutableName,
+            targetArch,
+            appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
+            expectWslRuntime: true,
+          }).pipe(Effect.flip);
 
-            const stem = wslRuntimeArchiveStem(WINDOWS_PAYLOAD_FIXTURE_VERSION, targetArch);
-            assert.instanceOf(error, WindowsPackagedPayloadValidationError);
-            assert.equal(error.reason, "wsl-runtime-invalid");
-            assert.deepStrictEqual(error.missingFiles, [
-              `${stem}/node_modules/node-pty/build/Release/pty.node`,
-              `${stem}/node_modules/node-pty/prebuilds/linux-${targetArch}/pty.node`,
-            ]);
-          }),
-        ).pipe(Effect.provideService(HostProcessPlatform, "linux")),
-    );
-  }
+          const stem = wslRuntimeArchiveStem(WINDOWS_PAYLOAD_FIXTURE_VERSION, targetArch);
+          assert.instanceOf(error, WindowsPackagedPayloadValidationError);
+          assert.equal(error.reason, "wsl-runtime-invalid");
+          assert.deepStrictEqual(error.missingFiles, [
+            `${stem}/node_modules/node-pty/build/Release/pty.node`,
+            `${stem}/node_modules/node-pty/prebuilds/linux-${targetArch}/pty.node`,
+          ]);
+        }),
+      ).pipe(Effect.provideService(HostProcessPlatform, "linux")),
+  );
 
   it.effect("rejects an embedded archive built for a different release version", () =>
     Effect.scoped(
@@ -2105,6 +2159,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("stages the resource monitor as an external executable resource", () => {
     assert.deepStrictEqual(DESKTOP_EXTRA_RESOURCES, [
+      {
+        from: "apps/desktop/prod-resources/cursor-sdk",
+        to: "node_modules/@cursor",
+      },
       {
         from: "apps/desktop/prod-resources/resource-monitor",
         to: "resource-monitor",
