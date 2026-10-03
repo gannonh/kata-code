@@ -86,66 +86,64 @@ describe("DesktopPreReadyPlatform", () => {
     );
   });
 
-  for (const previousEntry of [undefined, 'Exec="/Applications/deleted-previous.AppImage" %U']) {
-    it.effect(
-      `prepares a ${previousEntry ? "stale" : "missing"} Linux desktop entry before startup yields`,
-      () => {
-        vi.stubEnv("VITE_DEV_SERVER_URL", "");
-        vi.stubEnv("XDG_DATA_HOME", "/xdg");
-        vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
-        getSwitchValueMock.mockReturnValue("");
-        let desktopName = "t3code.desktop";
-        let desktopEntry = previousEntry;
-        let iconCopy: { readonly source: string; readonly destination: string } | undefined;
-        copyFileSyncMock.mockImplementation((source: string, destination: string) => {
-          iconCopy = { source, destination };
-        });
-        setDesktopNameMock.mockImplementation((name: string) => {
-          desktopName = name;
-        });
-        writeFileSyncMock.mockImplementation((path: string, contents: string) => {
-          if (path === "/xdg/applications/t3code.desktop") desktopEntry = contents;
-        });
+  it.effect.each([
+    { previousEntry: undefined, label: "missing" },
+    { previousEntry: 'Exec="/Applications/deleted-previous.AppImage" %U', label: "stale" },
+  ])("prepares a $label Linux desktop entry before startup yields", ({ previousEntry }) => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "");
+    vi.stubEnv("XDG_DATA_HOME", "/xdg");
+    vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
+    getSwitchValueMock.mockReturnValue("");
+    let desktopName = "t3code.desktop";
+    let desktopEntry = previousEntry;
+    let iconCopy: { readonly source: string; readonly destination: string } | undefined;
+    copyFileSyncMock.mockImplementation((source: string, destination: string) => {
+      iconCopy = { source, destination };
+    });
+    setDesktopNameMock.mockImplementation((name: string) => {
+      desktopName = name;
+    });
+    writeFileSyncMock.mockImplementation((path: string, contents: string) => {
+      if (path === "/xdg/applications/t3code.desktop") desktopEntry = contents;
+    });
 
-        return Effect.scoped(
-          Effect.gen(function* () {
-            const portalIdentity = Promise.resolve().then(() => ({
-              desktopName,
-              desktopEntry,
-              iconCopy,
-            }));
-            yield* Layer.build(
-              DesktopPreReadyPlatform.layer.pipe(
-                Layer.provide(Layer.succeed(HostProcessPlatform, "linux")),
-              ),
-            );
-            const identity = yield* Effect.promise(() => portalIdentity);
-            assert.equal(identity.desktopName, "t3code.desktop");
-            assert.equal(
-              identity.desktopEntry,
-              [
-                "[Desktop Entry]",
-                "Type=Application",
-                "Name=Kata Code (Alpha)",
-                'Exec="/Applications/current.AppImage" %U',
-                "Icon=/xdg/icons/katacode-url-handler.desktop.png",
-                "Terminal=false",
-                "NoDisplay=true",
-                "StartupNotify=false",
-                "",
-              ].join("\n"),
-            );
-            assert.deepEqual(identity.iconCopy, {
-              source: "/tmp/.mount_Kata/resources/app.asar/apps/desktop/prod-resources/icon.png",
-              destination: "/xdg/icons/katacode-url-handler.desktop.png",
-            });
-          }),
-        ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
-      },
-    );
-  }
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const portalIdentity = Promise.resolve().then(() => ({
+          desktopName,
+          desktopEntry,
+          iconCopy,
+        }));
+        yield* Layer.build(
+          DesktopPreReadyPlatform.layer.pipe(
+            Layer.provide(Layer.succeed(HostProcessPlatform, "linux")),
+          ),
+        );
+        const identity = yield* Effect.promise(() => portalIdentity);
+        assert.equal(identity.desktopName, "t3code.desktop");
+        assert.equal(
+          identity.desktopEntry,
+          [
+            "[Desktop Entry]",
+            "Type=Application",
+            "Name=Kata Code (Alpha)",
+            'Exec="/Applications/current.AppImage" %U',
+            "Icon=/xdg/icons/katacode-url-handler.desktop.png",
+            "Terminal=false",
+            "NoDisplay=true",
+            "StartupNotify=false",
+            "",
+          ].join("\n"),
+        );
+        assert.deepEqual(identity.iconCopy, {
+          source: "/tmp/.mount_Kata/resources/app.asar/apps/desktop/prod-resources/icon.png",
+          destination: "/xdg/icons/katacode-url-handler.desktop.png",
+        });
+      }),
+    ).pipe(Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())));
+  });
 
-  for (const scenario of [
+  it.effect.each([
     {
       name: "packaged development entry claims no URL scheme",
       isPackaged: true,
@@ -197,28 +195,26 @@ describe("DesktopPreReadyPlatform", () => {
         "",
       ].join("\n"),
     },
-  ] as const) {
-    it.effect(scenario.name, () => {
-      appState.isPackaged = scenario.isPackaged;
-      vi.stubEnv("VITE_DEV_SERVER_URL", scenario.devServerUrl);
-      vi.stubEnv("XDG_DATA_HOME", "/xdg");
-      vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
-      getSwitchValueMock.mockReturnValue("");
-      const written = new Map<string, string>();
-      writeFileSyncMock.mockImplementation((path: string, contents: string) => {
-        written.set(path, contents);
-      });
-
-      return Effect.gen(function* () {
-        yield* DesktopPreReadyPlatform.make;
-        assert.equal(setDesktopNameMock.mock.calls[0]?.[0], scenario.entry);
-        assert.equal(written.get(`/xdg/applications/${scenario.entry}`), scenario.expected);
-      }).pipe(
-        Effect.provideService(HostProcessPlatform, "linux"),
-        Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
-      );
+  ] as const)("$name", (scenario) => {
+    appState.isPackaged = scenario.isPackaged;
+    vi.stubEnv("VITE_DEV_SERVER_URL", scenario.devServerUrl);
+    vi.stubEnv("XDG_DATA_HOME", "/xdg");
+    vi.stubEnv("APPIMAGE", "/Applications/current.AppImage");
+    getSwitchValueMock.mockReturnValue("");
+    const written = new Map<string, string>();
+    writeFileSyncMock.mockImplementation((path: string, contents: string) => {
+      written.set(path, contents);
     });
-  }
+
+    return Effect.gen(function* () {
+      yield* DesktopPreReadyPlatform.make;
+      assert.equal(setDesktopNameMock.mock.calls[0]?.[0], scenario.entry);
+      assert.equal(written.get(`/xdg/applications/${scenario.entry}`), scenario.expected);
+    }).pipe(
+      Effect.provideService(HostProcessPlatform, "linux"),
+      Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
+    );
+  });
 
   it.effect("still prepares the portal entry when the bundled icon cannot be copied", () => {
     getSwitchValueMock.mockReturnValue("");

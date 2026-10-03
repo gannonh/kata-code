@@ -10,7 +10,7 @@ checks the retained Kata outcomes listed in
 The current integration is frozen to these refs from [FORK.md](../../FORK.md):
 
 ```text
-upstream       54084ae1e6c32809db040e4fa571c80fdf2d8ae4
+upstream       fed41fa88bb27cb4325cb208d571393850bc63c2
 upstream-base  6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
 ```
 
@@ -26,7 +26,7 @@ vp run check:upstream-preservation -- \
   --mode human-review \
   --candidate <candidate-ref> \
   --base <base-ref> \
-  --upstream 54084ae1e6c32809db040e4fa571c80fdf2d8ae4 \
+  --upstream fed41fa88bb27cb4325cb208d571393850bc63c2 \
   --upstream-base 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f \
   --integration-record uat-evidence/<run-id>/integration-record.json \
   --manual-evidence uat-evidence/<run-id>/manual-evidence.json
@@ -291,7 +291,7 @@ node "$trusted_root/scripts/check-upstream-preservation.ts" \
   --inventory "$trusted_root/docs/upstream/retained-behavior.v1.json" \
   --candidate "$candidate" \
   --base "$candidate" \
-  --upstream 54084ae1e6c32809db040e4fa571c80fdf2d8ae4 \
+  --upstream fed41fa88bb27cb4325cb208d571393850bc63c2 \
   --upstream-base 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
 ```
 

@@ -1,323 +1,408 @@
-import { assert, it } from "@effect/vitest";
-import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
+import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
+import * as TerminalManager from "../terminal/Manager.ts";
+import { assert, it, vi } from "@effect/vitest";
 import {
   EnvironmentId,
-  EventId,
-  ModelSelection,
   ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
   RoutineError,
   RoutineId,
   RoutineRequestId,
-  RuntimeMode,
-  TurnId,
-  type OrchestrationProjectShell,
-  type RoutineProviderSubmission,
-  type RoutineRun,
-  type WorktreeSubmodules,
+  type RoutineDraft,
 } from "@kata-sh/code-contracts";
-import * as Clock from "effect/Clock";
-import * as DateTime from "effect/DateTime";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Ref from "effect/Ref";
+import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 
-import { GitWorkflowService } from "../git/GitWorkflowService.ts";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import { ProviderCommandReactor } from "../orchestration/Services/ProviderCommandReactor.ts";
+import * as GitWorkflow from "../git/GitWorkflowService.ts";
+import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import { ProjectSetupScriptRunner } from "../project/ProjectSetupScriptRunner.ts";
-import * as ServerSettingsModule from "../serverSettings.ts";
+import * as ProjectService from "../project/ProjectService.ts";
+import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
+import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
+import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistryMock.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
+import * as CommandReceiptStore from "../orchestration-v2/CommandReceiptStore.ts";
+import * as EffectOutbox from "../orchestration-v2/EffectOutbox.ts";
+import * as IdAllocator from "../orchestration-v2/IdAllocator.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as ProviderRuntimeRecovery from "../orchestration-v2/ProviderRuntimeRecoveryService.ts";
+import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter.ts";
+import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
+import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import { makeOrchestratorV2ReplayLayerWithRegistry } from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import { RoutineDispatcher, RoutineDispatcherLive } from "./RoutineDispatcher.ts";
+import {
+  RESTART_CANCELLED_DETAIL,
+  RoutineRunObserver,
+  RoutineRunObserverLive,
+} from "./RoutineRunObserver.ts";
 import { RoutineStore, RoutineStoreLive } from "./RoutineStore.ts";
 
 const environmentId = EnvironmentId.make("routine-dispatcher-environment");
-const configuration = {
-  name: "Long provider turn",
+const projectId = ProjectId.make("project:routine-dispatcher");
+const modelSelection = {
+  instanceId: ProviderInstanceId.make("codex"),
+  model: "gpt-5.1-codex",
+} as const;
+const project = {
+  id: projectId,
+  title: "Routine project",
+  workspaceRoot: "/repo",
+  repositoryIdentity: null,
+  faviconPath: null,
+  defaultModelSelection: modelSelection,
+  defaultThreadEnvMode: null,
+  scripts: [],
+  createdAt: "2026-09-23T00:00:00.000Z",
+  updatedAt: "2026-09-23T00:00:00.000Z",
+  deletedAt: null,
+} as const;
+const sharedConfiguration: RoutineDraft = {
+  name: "Nightly report",
   instruction: "Read every file and write a long report.",
-  projectId: ProjectId.make("routine-dispatcher-project"),
-  modelSelection: { instanceId: "cursor", model: "auto" } as ModelSelection,
-  runtimeMode: "approval-required" as RuntimeMode,
-  workspace: { kind: "shared" as const, directory: "/tmp/routine-dispatcher" },
-  trigger: { kind: "daily" as const, time: "09:00", timezone: "UTC" },
+  projectId,
+  modelSelection,
+  runtimeMode: "approval-required",
+  workspace: { kind: "shared", directory: "/repo" },
+  trigger: { kind: "daily", time: "09:00", timezone: "UTC" },
 };
 
-type ProviderTurn = (
-  store: RoutineStore["Service"],
-  input: { readonly run: RoutineRun; readonly submission: RoutineProviderSubmission },
-) => Effect.Effect<void, RoutineError>;
+const adapter = {
+  instanceId: modelSelection.instanceId,
+  driver: ProviderDriverKind.make("codex"),
+  getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
+  planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
+  openSession: () => Effect.die("provider execution is disabled in routine dispatcher tests"),
+} as ProviderAdapterV2Shape;
 
-type SettingsOverrides = Parameters<typeof ServerSettingsModule.layerTest>[0];
-
-interface DispatcherServices {
-  readonly settings?: SettingsOverrides;
-  readonly engine?: Partial<OrchestrationEngineService["Service"]>;
-  readonly projection?: Partial<ProjectionSnapshotQuery["Service"]>;
-  readonly git?: Partial<GitWorkflowService["Service"]>;
+interface HarnessOptions {
+  /** Wraps the real launch, for example to stop the process right after it. */
+  readonly wrapLaunch?: (
+    launch: ThreadLaunch.ThreadLaunchService["Service"]["launch"],
+  ) => ThreadLaunch.ThreadLaunchService["Service"]["launch"];
 }
 
-const dispatcherLayer = (providerTurn: ProviderTurn, services: DispatcherServices = {}) => {
-  const store = RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory));
-  const reactor = Layer.effect(
-    ProviderCommandReactor,
-    Effect.gen(function* () {
-      const routineStore = yield* RoutineStore;
-      return {
-        start: () => Effect.void,
-        drain: Effect.void,
-        recoverRoutineSubmission: (input) => providerTurn(routineStore, input).pipe(Effect.orDie),
-      };
+/** Real orchestration V2 launch over one in-memory database shared with the routine store. */
+function makeHarness(options: HarnessOptions = {}) {
+  const database = SqlitePersistenceMemory;
+  const orchestrator = makeOrchestratorV2ReplayLayerWithRegistry(
+    { name: "routine-dispatcher" },
+    ProviderAdapterRegistry.makeLayer([adapter]),
+    { databaseLayer: database, runEffectWorker: false },
+  );
+  const threadManagement = ThreadManagement.layer.pipe(Layer.provide(orchestrator));
+  const receipts = CommandReceiptStore.layer.pipe(Layer.provide(database));
+  const createWorktree = vi.fn<GitWorkflow.GitWorkflowService["Service"]["createWorktree"]>(
+    (input) =>
+      Effect.succeed({
+        worktree: { path: "/repo-worktrees/routine", refName: input.newRefName ?? input.refName },
+      } as never),
+  );
+  const runSetup = vi.fn<
+    ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
+  >(() => Effect.succeed({ status: "no-script" as const }));
+  const projects = Layer.succeed(ProjectService.ProjectService, {
+    create: () => Effect.die("unused"),
+    bootstrap: () => Effect.die("unused"),
+    update: () => Effect.die("unused"),
+    delete: () => Effect.die("unused"),
+    getById: (id) => Effect.succeed(id === projectId ? Option.some(project) : Option.none()),
+    getByWorkspaceRoot: () => Effect.succeed(Option.some(project)),
+    snapshot: Effect.die("unused"),
+    getShell: () => Effect.die("unused"),
+    listShells: () => Effect.die("unused"),
+  } as ProjectService.ProjectService["Service"]);
+  const git = Layer.mock(GitWorkflow.GitWorkflowService)({
+    listRefs: () =>
+      Effect.succeed({
+        refs: [
+          { name: "main", current: true, isDefault: true, worktreePath: null },
+          { name: "feature", current: false, isDefault: false, worktreePath: null },
+        ],
+        isRepo: true,
+        hasPrimaryRemote: false,
+        nextCursor: null,
+        totalCount: 2,
+      }),
+    createWorktree,
+    renameBranch: (input) => Effect.succeed({ branch: input.newBranch }),
+    fetchRemote: () => Effect.void,
+    remoteExists: () => Effect.succeed(false),
+    remoteBranchExists: () => Effect.succeed(false),
+    removeWorktree: () => Effect.void,
+  });
+  const externalServices = Layer.mergeAll(
+    WorktreeSetupTracker.layer,
+    Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ get: () => Effect.succeed(null) }),
+    Layer.mock(TerminalManager.TerminalManager)({ close: () => Effect.void }),
+    projects,
+    git,
+    Layer.succeed(ProjectSetupScriptRunner.ProjectSetupScriptRunner, { runForThread: runSetup }),
+    Layer.mock(TextGeneration.TextGeneration)({}),
+    ServerSettings.layerTest(),
+    makeProviderRegistryLayer(),
+    Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+      namedProjectsRoot: "/projects",
+      folderForThread: () => Effect.succeed(Option.none()),
     }),
   );
-  return RoutineDispatcherLive.pipe(
-    Layer.provideMerge(reactor),
-    Layer.provideMerge(store),
-    Layer.provide(Layer.mock(OrchestrationEngineService)(services.engine ?? {})),
-    Layer.provide(Layer.mock(ProjectionSnapshotQuery)(services.projection ?? {})),
-    Layer.provide(Layer.mock(GitWorkflowService)(services.git ?? {})),
-    Layer.provide(Layer.mock(ProjectSetupScriptRunner)({})),
-    Layer.provide(ServerSettingsModule.layerTest(services.settings)),
-    Layer.provide(NodeServices.layer),
+  const realLaunch = ThreadLaunch.layer.pipe(
+    Layer.provide(Layer.mergeAll(externalServices, threadManagement, receipts, IdAllocator.layer)),
   );
-};
-
-const claimAcceptedPrompt = Effect.gen(function* () {
-  const store = yield* RoutineStore;
-  yield* TestClock.setTime(10_000);
-  const routine = yield* store.save(
-    environmentId,
-    { id: RoutineId.make("routine-long-turn"), expectedRevision: 0, configuration },
-    10_000,
+  const launch =
+    options.wrapLaunch === undefined
+      ? realLaunch
+      : Layer.effect(
+          ThreadLaunch.ThreadLaunchService,
+          Effect.gen(function* () {
+            const service = yield* ThreadLaunch.ThreadLaunchService;
+            return ThreadLaunch.ThreadLaunchService.of({
+              launch: options.wrapLaunch!(service.launch),
+            });
+          }),
+        ).pipe(Layer.provide(realLaunch));
+  const store = RoutineStoreLive.pipe(Layer.provide(database));
+  const dispatcher = RoutineDispatcherLive.pipe(
+    Layer.provide(Layer.mergeAll(store, launch, projects, git)),
   );
-  yield* store.testRun(
-    environmentId,
-    {
-      id: routine.id,
-      expectedRevision: routine.revision,
-      requestId: RoutineRequestId.make("request-long-turn"),
-    },
-    10_000,
+  const observer = RoutineRunObserverLive.pipe(
+    Layer.provide(Layer.mergeAll(store, OrchestrationEventStoreLive.pipe(Layer.provide(database)))),
   );
-  const claim = yield* store.claim("worker-a", 10_000);
-  assert.isNotNull(claim);
-  yield* store.updatePreparation(
-    claim!,
-    { stage: "prompt-accepted", status: "starting", detail: null },
-    10_000,
+  // The same startup reconciliation the server runs after a restart.
+  const recovery = ProviderRuntimeRecovery.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        orchestrator,
+        ProjectionStore.layer.pipe(Layer.provide(database)),
+        EffectOutbox.layer.pipe(Layer.provide(database)),
+        IdAllocator.layer,
+        ServerSettings.layerTest(),
+      ),
+    ),
   );
   return {
-    routine,
-    claim: { ...claim!, run: { ...claim!.run, stage: "prompt-accepted" as const } },
+    layer: Layer.mergeAll(dispatcher, store, threadManagement, observer, recovery, database),
+    createWorktree,
+    runSetup,
   };
-});
+}
+
+const admitTestRun = (routineId: string, configuration: RoutineDraft = sharedConfiguration) =>
+  Effect.gen(function* () {
+    const store = yield* RoutineStore;
+    yield* TestClock.setTime(10_000);
+    const routine = yield* store.save(
+      environmentId,
+      { id: RoutineId.make(routineId), expectedRevision: 0, configuration },
+      10_000,
+    );
+    const run = yield* store.testRun(
+      environmentId,
+      {
+        id: routine.id,
+        expectedRevision: routine.revision,
+        requestId: RoutineRequestId.make(`${routineId}:request`),
+      },
+      10_000,
+    );
+    return { routine, run };
+  });
 
 it.effect(
-  "keeps a submitted provider turn running past lease renewal so Stop settles the run",
-  () =>
-    Effect.gen(function* () {
-      const stop = yield* Deferred.make<void>();
-      const interrupted = yield* Ref.make(false);
-      const turnId = TurnId.make("provider-turn-long");
-      const providerTurn: ProviderTurn = (store, { submission }) =>
-        Effect.gen(function* () {
-          yield* store.consumeSubmissionForProvider(submission, yield* Clock.currentTimeMillis);
-          yield* Deferred.await(stop);
-          const now = yield* Clock.currentTimeMillis;
-          yield* store.recordProviderTerminal(
-            {
-              eventId: EventId.make("provider-turn-long-cancelled"),
-              threadId: submission.threadId,
-              turnId,
-              messageId: submission.messageId,
-              status: "interrupted",
-              detail: "Stopped by user.",
-            },
-            now,
-          );
-          yield* store.bindProviderTurn(submission, turnId, now);
-        }).pipe(Effect.onInterrupt(() => Ref.set(interrupted, true)));
+  "launches a retried dispatch once: one thread, one message, one run after a crash past the launch",
+  () => {
+    let launches = 0;
+    const harness = makeHarness({
+      // The first process stops right after orchestration accepted the launch,
+      // before the routine store recorded the handoff.
+      wrapLaunch: (launch) => (input) =>
+        launch(input).pipe(
+          Effect.tap(() => {
+            launches += 1;
+            return launches === 1 ? Effect.interrupt : Effect.void;
+          }),
+        ),
+    });
+    return Effect.gen(function* () {
+      const store = yield* RoutineStore;
+      const dispatcher = yield* RoutineDispatcher;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const { routine, run } = yield* admitTestRun("routine-retried-dispatch");
 
-      yield* Effect.gen(function* () {
-        const store = yield* RoutineStore;
-        const dispatcher = yield* RoutineDispatcher;
-        const { routine, claim } = yield* claimAcceptedPrompt;
-        const dispatch = yield* dispatcher.dispatchClaim(claim).pipe(Effect.forkChild);
-        yield* TestClock.adjust("12 seconds");
-        yield* Deferred.succeed(stop, undefined);
-        const exit = yield* Fiber.await(dispatch);
+      const firstClaim = yield* store.claim("worker-a", 10_000);
+      assert.equal(firstClaim?.run.id, run.id);
+      const first = yield* dispatcher.dispatchClaim(firstClaim!).pipe(Effect.forkChild);
+      const firstExit = yield* Fiber.await(first);
+      assert.isTrue(Exit.hasInterrupts(firstExit));
+      assert.deepEqual(
+        (yield* store.history(environmentId, { id: routine.id })).runs.map(({ stage, status }) => ({
+          stage,
+          status,
+        })),
+        [{ stage: "submitting", status: "starting" }],
+      );
 
-        assert.isTrue(Exit.isSuccess(exit));
-        assert.isFalse(yield* Ref.get(interrupted));
-        const history = yield* store.history(environmentId, { id: routine.id });
-        assert.deepEqual(
-          history.runs.map(({ stage, status, turnId }) => ({ stage, status, turnId })),
-          [{ stage: "terminal", status: "interrupted", turnId }],
-        );
-        assert.deepEqual(yield* store.activeRuns(), []);
-      }).pipe(Effect.provide(dispatcherLayer(providerTurn)));
-    }),
+      // The stale lease expires and another worker retries the same run.
+      yield* TestClock.setTime(40_001);
+      const retryClaim = yield* store.claim("worker-b", 40_001);
+      assert.equal(retryClaim?.run.id, run.id);
+      yield* dispatcher.dispatchClaim(retryClaim!);
+
+      assert.equal(launches, 2);
+      const projection = yield* threads.getThreadProjection(run.threadId);
+      assert.deepEqual(
+        projection.messages.map((message) => ({ id: message.id, text: message.text })),
+        [{ id: run.messageId, text: sharedConfiguration.instruction }],
+      );
+      assert.deepEqual(
+        projection.runs.map((v2Run) => v2Run.userMessageId),
+        [run.messageId],
+      );
+      assert.equal(projection.thread.title, sharedConfiguration.name);
+      assert.isNull(projection.thread.worktreePath);
+      const history = yield* store.history(environmentId, { id: routine.id });
+      assert.deepEqual(
+        history.runs.map(({ stage, status, conversation }) => ({ stage, status, conversation })),
+        [
+          {
+            stage: "prompt-accepted",
+            status: "starting",
+            conversation: { kind: "confirmed", threadId: run.threadId },
+          },
+        ],
+      );
+      assert.equal(yield* store.renew(retryClaim!, 40_002), "handed-off");
+      assert.isNull(yield* store.claim("worker-c", 80_000));
+    }).pipe(Effect.provide(harness.layer));
+  },
 );
 
-const fenceLosses = {
-  "the routine is paused": (
-    store: RoutineStore["Service"],
-    routine: { id: RoutineId; revision: number },
-  ) =>
-    store.change(
+it.effect("launches a worktree routine on its routine branch from the resolved base", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const store = yield* RoutineStore;
+    const dispatcher = yield* RoutineDispatcher;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const { run } = yield* admitTestRun("routine-worktree", {
+      ...sharedConfiguration,
+      // A base branch that no longer exists falls back to the default branch.
+      workspace: {
+        kind: "worktree",
+        baseBranch: "release",
+        startFromOrigin: false,
+        runSetupScript: true,
+      },
+    });
+    const claim = yield* store.claim("worker-a", 10_000);
+    yield* dispatcher.dispatchClaim(claim!);
+
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if (harness.createWorktree.mock.calls.length > 0) break;
+      yield* Effect.yieldNow;
+    }
+    assert.deepEqual(
+      harness.createWorktree.mock.calls.map(([input]) => ({
+        refName: input.refName,
+        newRefName: input.newRefName,
+        baseRefName: input.baseRefName,
+      })),
+      [{ refName: "main", newRefName: `routine/${run.id}`, baseRefName: "main" }],
+    );
+    const shell = yield* threads.getThreadShell(run.threadId);
+    assert.equal(shell?.projectId, projectId);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("blocks a shared routine whose directory no longer matches the project", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const store = yield* RoutineStore;
+    const dispatcher = yield* RoutineDispatcher;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const { routine, run } = yield* admitTestRun("routine-moved-directory", {
+      ...sharedConfiguration,
+      workspace: { kind: "shared", directory: "/old-repo" },
+    });
+    yield* dispatcher.drain("worker-a");
+
+    const history = yield* store.history(environmentId, { id: routine.id });
+    assert.deepEqual(
+      history.runs.map(({ stage, status }) => ({ stage, status })),
+      [{ stage: "terminal", status: "blocked" }],
+    );
+    assert.include(
+      history.runs[0]?.detail ?? "",
+      "Saved routine directory '/old-repo' no longer matches project '/repo'.",
+    );
+    assert.isNull(yield* threads.getThreadShell(run.threadId));
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("does not launch a run whose routine was paused before the launch", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const store = yield* RoutineStore;
+    const dispatcher = yield* RoutineDispatcher;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const { routine, run } = yield* admitTestRun("routine-paused-before-launch");
+    const claim = yield* store.claim("worker-a", 10_000);
+    yield* store.change(
       environmentId,
       { id: routine.id, expectedRevision: routine.revision, action: "pause" },
-      13_000,
-    ),
-  "another owner reclaims the run": (store: RoutineStore["Service"]) =>
-    store.claim("worker-b", 40_001),
-};
+      10_001,
+    );
 
-for (const [scenario, loseFence] of Object.entries(fenceLosses)) {
-  it.effect(`stops dispatch before submission when ${scenario}`, () =>
-    Effect.gen(function* () {
-      const interrupted = yield* Ref.make(false);
-      const providerTurn: ProviderTurn = () =>
-        Effect.never.pipe(Effect.onInterrupt(() => Ref.set(interrupted, true)));
+    const error = yield* dispatcher.dispatchClaim(claim!).pipe(Effect.flip);
+    assert.instanceOf(error, RoutineError);
+    assert.include(error.message, "Routine preparation ownership expired or was canceled.");
+    assert.isNull(yield* threads.getThreadShell(run.threadId));
+    const history = yield* store.history(environmentId, { id: routine.id });
+    assert.deepEqual(
+      history.runs.map(({ stage, status }) => ({ stage, status })),
+      [{ stage: "terminal", status: "skipped" }],
+    );
+  }).pipe(Effect.provide(harness.layer));
+});
 
-      yield* Effect.gen(function* () {
-        const store = yield* RoutineStore;
-        const dispatcher = yield* RoutineDispatcher;
-        const { routine, claim } = yield* claimAcceptedPrompt;
-        const dispatch = yield* dispatcher.dispatchClaim(claim).pipe(Effect.forkChild);
-        yield* TestClock.adjust("3 seconds");
-        yield* loseFence(store, routine);
-        yield* TestClock.adjust("3 seconds");
-        const error = yield* Fiber.join(dispatch).pipe(Effect.flip);
+it.effect("settles a launched run as needs-attention after startup recovery cancels it", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const store = yield* RoutineStore;
+    const dispatcher = yield* RoutineDispatcher;
+    const observer = yield* RoutineRunObserver;
+    const recovery = yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const { routine, run } = yield* admitTestRun("routine-cut-off-by-restart");
+    const claim = yield* store.claim("worker-a", 10_000);
+    yield* dispatcher.dispatchClaim(claim!);
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const projection = yield* threads.getThreadProjection(run.threadId);
+      if (projection.runs.some((v2Run) => v2Run.status !== "preparing")) break;
+      yield* Effect.yieldNow;
+    }
+    yield* observer.observe;
+    assert.equal(
+      (yield* store.history(environmentId, { id: routine.id })).runs[0]?.status,
+      "starting",
+    );
 
-        assert.instanceOf(error, RoutineError);
-        assert.include(error.message, "Routine preparation ownership expired or was canceled.");
-        assert.isTrue(yield* Ref.get(interrupted));
-      }).pipe(Effect.provide(dispatcherLayer(providerTurn)));
-    }),
-  );
-}
+    yield* recovery.reconcile("startup");
+    yield* observer.observe;
 
-const submoduleSettings: ReadonlyArray<{
-  readonly scenario: string;
-  readonly settings: SettingsOverrides;
-  readonly expected: WorktreeSubmodules;
-  readonly existingBranch?: boolean;
-}> = [
-  {
-    scenario: "the project overrides it to none",
-    settings: {
-      worktreeSubmodules: "recursive",
-      projectSettingsOverrides: { [configuration.projectId]: { worktreeSubmodules: "none" } },
-    },
-    expected: "none",
-  },
-  {
-    scenario: "the environment sets it to top-level",
-    settings: { worktreeSubmodules: "top-level" },
-    expected: "top-level",
-  },
-  {
-    scenario: "it attaches an existing routine branch",
-    settings: { worktreeSubmodules: "none" },
-    expected: "none",
-    existingBranch: true,
-  },
-];
-
-for (const { scenario, settings, expected, existingBranch = false } of submoduleSettings) {
-  it.effect(`creates a routine worktree with ${expected} submodules when ${scenario}`, () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const tempDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "routine-dispatcher-submodules-",
-      });
-      const workspaceRoot = `${tempDir}/repo`;
-      const project = {
-        id: configuration.projectId,
-        title: "Routine project",
-        workspaceRoot,
-        defaultModelSelection: null,
-        scripts: [],
-        createdAt: "2026-09-23T00:00:00.000Z",
-        updatedAt: "2026-09-23T00:00:00.000Z",
-      } as unknown as OrchestrationProjectShell;
-      const createWorktreeCalls = yield* Ref.make<
-        ReadonlyArray<Parameters<GitWorkflowService["Service"]["createWorktree"]>[1]>
-      >([]);
-      const services: DispatcherServices = {
-        settings,
-        engine: { dispatch: () => Effect.succeed({ sequence: 1 }) },
-        projection: {
-          getProjectShellById: () => Effect.succeedSome(project),
-          getThreadShellById: () => Effect.succeedNone,
-        },
-        git: {
-          listRefs: ({ query }) =>
-            Effect.succeed({
-              refs: [
-                { name: "main", current: true, isDefault: true, worktreePath: null },
-                // The dispatcher looks its routine branch up by name.
-                ...(existingBranch && query !== undefined
-                  ? [{ name: query, current: false, isDefault: false, worktreePath: null }]
-                  : []),
-              ],
-              isRepo: true,
-              hasPrimaryRemote: false,
-              nextCursor: null,
-              totalCount: 1,
-            }),
-          createWorktree: (input, options) =>
-            Ref.update(createWorktreeCalls, (calls) => [...calls, options]).pipe(
-              Effect.as({
-                worktree: { refName: input.newRefName ?? input.refName, path: input.path! },
-              }),
-            ),
-        },
-      };
-
-      yield* Effect.gen(function* () {
-        const store = yield* RoutineStore;
-        const dispatcher = yield* RoutineDispatcher;
-        // Preparation updates stamp wall-clock time, so the lease must be current.
-        const now = DateTime.toEpochMillis(DateTime.nowUnsafe());
-        yield* TestClock.setTime(now);
-        const routine = yield* store.save(
-          environmentId,
-          {
-            id: RoutineId.make("routine-worktree-submodules"),
-            expectedRevision: 0,
-            configuration: {
-              ...configuration,
-              workspace: {
-                kind: "worktree",
-                baseBranch: "main",
-                startFromOrigin: false,
-                runSetupScript: false,
-              },
-            },
-          },
-          now,
-        );
-        yield* store.testRun(
-          environmentId,
-          {
-            id: routine.id,
-            expectedRevision: routine.revision,
-            requestId: RoutineRequestId.make("request-worktree-submodules"),
-          },
-          now,
-        );
-        const claim = yield* store.claim("worker-a", now);
-        assert.isNotNull(claim);
-        yield* dispatcher.dispatchClaim(claim!);
-
-        assert.deepEqual(yield* Ref.get(createWorktreeCalls), [{ submodules: expected }]);
-      }).pipe(Effect.provide(dispatcherLayer(() => Effect.void, services)));
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
-  );
-}
+    const settled = (yield* store.history(environmentId, { id: routine.id })).runs[0];
+    assert.deepEqual(
+      { stage: settled?.stage, status: settled?.status, detail: settled?.detail },
+      { stage: "terminal", status: "needs-attention", detail: RESTART_CANCELLED_DETAIL },
+    );
+    assert.deepEqual(yield* store.activeRuns(), []);
+  }).pipe(Effect.provide(harness.layer));
+});

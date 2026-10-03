@@ -9,17 +9,17 @@ Hard fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code) at
 | ------------------------------ | ------------------------------------------ | ----------------------------------------------- |
 | Archive of pre-cut Kata `main` | `3bd3df5beebdc5546ab5b86e95b4746de131035f` | `archive/kata-2026-08` branch and annotated tag |
 | T3 pin (new `main` root)       | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f` | `pingdotgg/t3code` `main` at Build start        |
-| Current T3 pin                 | `54084ae1e6c32809db040e4fa571c80fdf2d8ae4` | Upstream pull, KAT-3623                         |
+| Current T3 pin                 | `fed41fa88bb27cb4325cb208d571393850bc63c2` | Upstream pull, KAT-3635                         |
 
 Vendor-pull runs **forward from the current T3 pin**. The chosen tip is
 fixed for this run; a different tip requires a new intake. See the
-[intake](docs/upstream/kat-3623-intake.md) and
-[conflict decisions](docs/upstream/kat-3623-decisions.tsv). The previous
-accounted-for pin remains `71a90ae70e3ff880396363809bd9bfcfd520f30c`.
+[intake](docs/upstream/kat-3635-intake.md) and
+[conflict decisions](docs/upstream/kat-3635-decisions.tsv). The previous
+accounted-for pin remains `54084ae1e6c32809db040e4fa571c80fdf2d8ae4`.
 
 ```bash
 git fetch upstream
-# next scan starts at 54084ae1e
+# next scan starts at fed41fa88
 ```
 
 ## Remotes

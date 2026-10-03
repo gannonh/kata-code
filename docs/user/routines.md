@@ -10,7 +10,7 @@ Chat requests need a clear schedule such as “every weekday at 9 AM.” If the 
 
 A routine runs only while its server is running. If the server is down when a schedule comes due, the next startup records one skipped run for the missed interval and moves on to the next future occurrence; it does not run the missed occurrences late.
 
-Pause a routine to stop future admissions and cancel queued work. Resume recalculates the next occurrence from the current time. Deleting a routine keeps its run history available to the server while removing it from the library. If a server restarts after a provider submission cannot be confirmed, the run remains active and is marked **Needs attention** until matching provider evidence arrives.
+Pause a routine to stop future admissions and cancel queued work. Resume recalculates the next occurrence from the current time. Deleting a routine keeps its run history available to the server while removing it from the library. If the server restarts or shuts down while a run is starting or working, the run is marked **Needs attention** and the routine can run again; open its conversation to check what finished before running it again. A run that was queued behind other work when the server restarted is also marked **Needs attention** and continues once you resume that conversation's queue.
 
 Routine changes use the saved revision. If another browser or environment changes the routine first, reload the editor and resolve the conflict before saving again. Offline environments keep their saved routines visible and disable mutations until they reconnect.
 

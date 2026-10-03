@@ -1,6 +1,9 @@
 import { Connection } from "@kata-sh/code-client-runtime/connection";
-import { shellSnapshotLoaderLayer } from "@kata-sh/code-client-runtime/state/shell";
-import { threadSnapshotLoaderLayer } from "@kata-sh/code-client-runtime/state/threads";
+import { ShellSnapshotLoader } from "@kata-sh/code-client-runtime/state/shell";
+import {
+  boundedThreadSnapshotLoaderLayer,
+  ThreadHistoryController,
+} from "@kata-sh/code-client-runtime/state/threads";
 import * as Layer from "effect/Layer";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -20,7 +23,11 @@ const providedConnectionPlatformLayer = connectionPlatformLayer.pipe(
   Layer.provide(runtimeContextLayer),
 );
 
-const snapshotLoaderLayer = Layer.merge(threadSnapshotLoaderLayer, shellSnapshotLoaderLayer);
+const snapshotLoaderLayer = Layer.mergeAll(
+  boundedThreadSnapshotLoaderLayer,
+  ShellSnapshotLoader.layer,
+  ThreadHistoryController.layer,
+);
 
 type ConnectionLayerSource =
   | typeof Connection.layer

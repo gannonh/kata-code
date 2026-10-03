@@ -75,8 +75,9 @@ it.effect(
   },
 );
 
-for (const entry of ["startup", "open-url", "second-instance"] as const) {
-  it.effect(`receives hosted web sign-in through the desktop ${entry} handler`, () =>
+it.effect.each(["startup", "open-url", "second-instance"] as const)(
+  "receives hosted web sign-in through the desktop %s handler",
+  (entry) =>
     Effect.gen(function* () {
       const port = yield* Effect.promise(async () => {
         const server = NodeHttp.createServer();
@@ -150,5 +151,4 @@ for (const entry of ["startup", "open-url", "second-instance"] as const) {
         ),
       );
     }).pipe(Effect.scoped),
-  );
-}
+);

@@ -4,7 +4,6 @@ import { useNativePaste } from "../../lib/useNativePaste";
 import { convertPastedImagesToAttachments } from "../../lib/composerImages";
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
-  type ApprovalRequestId,
   type UserInputQuestion,
 } from "@kata-sh/code-contracts";
 import { useAtomValue } from "@effect/atom-react";
@@ -32,7 +31,7 @@ import {
 } from "../../state/question-attachments";
 
 export function QuestionAttachments(props: {
-  requestId: ApprovalRequestId;
+  requestId: string;
   question: UserInputQuestion;
   questions: ReadonlyArray<UserInputQuestion>;
   disabled: boolean;
