@@ -27,7 +27,7 @@ const routinePromptText = (run: RoutineRun): string =>
     : run.configuration.instruction;
 
 /** The routine branch name stays stable across retries of the same run. */
-export const routineBranchName = (run: Pick<RoutineRun, "id">) => `routine/${run.id}`;
+const routineBranchName = (run: Pick<RoutineRun, "id">) => `routine/${run.id}`;
 
 const detailFromCause = (cause: Cause.Cause<unknown>) => Cause.pretty(cause).slice(0, 4_000);
 

@@ -9,8 +9,15 @@ export const UPGRADE_IN_FLIGHT_DETAIL =
  * Routines launch through orchestration V2 from this migration on. Runs the
  * previous orchestrator had started (a thread, an accepted prompt, a provider
  * submission, or a bound provider turn) cannot be observed any more, so they
- * settle as needs-attention and free the routine's active slot. Admitted runs
- * that never reached the orchestrator stay queued and launch through V2.
+ * settle as needs-attention and free the routine's active slot.
+ *
+ * The previous dispatcher also worked on a run while it was still
+ * `admitted`: once a worker claimed it (`generation > 0`), it could create the
+ * `routine/<run id>` branch and worktree, run the setup script, and create the
+ * thread before recording any later stage. Nothing records how far that got,
+ * so a claimed run settles too. Admitted runs no worker ever claimed stay
+ * queued and launch through V2.
+ *
  * The provider-event buffer only served the previous orchestrator.
  */
 export default Effect.gen(function* () {
@@ -22,6 +29,7 @@ export default Effect.gen(function* () {
     JOIN routines ON routines.id = routine_runs.routine_id
     WHERE routine_runs.active = 1 AND (
       routine_runs.submission_consumed = 1
+      OR routine_runs.generation > 0
       OR routine_runs.stage IN ('thread-created', 'prompt-accepted', 'submitting', 'provider-bound')
     )
   `;
@@ -39,6 +47,7 @@ export default Effect.gen(function* () {
       )
     WHERE routine_runs.active = 1 AND (
       routine_runs.submission_consumed = 1
+      OR routine_runs.generation > 0
       OR routine_runs.stage IN ('thread-created', 'prompt-accepted', 'submitting', 'provider-bound')
     )
   `;

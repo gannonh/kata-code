@@ -3,6 +3,7 @@ import {
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2StoredEvent,
   type RoutineRun,
+  type RunId,
 } from "@kata-sh/code-contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -19,7 +20,7 @@ import { RoutineStore } from "./RoutineStore.ts";
  * under this command id prefix (ProviderRuntimeRecoveryService). A run cut off
  * that way did not stop by request, so the routine needs attention.
  */
-export const RUNTIME_RECONCILE_COMMAND_PREFIX = "command:runtime-reconcile:";
+const RUNTIME_RECONCILE_COMMAND_PREFIX = "command:runtime-reconcile:";
 
 export const RESTART_CANCELLED_DETAIL =
   "The server restarted before this run finished. Open the conversation to check what completed before running the routine again.";
@@ -46,9 +47,7 @@ export type RoutineRunProgress = Pick<RoutineRun, "status" | "stage" | "detail">
  * routine progress. Orchestration's `waiting` is post-turn drain (checkpoint
  * capture or background work), not an approval, so it still counts as running.
  */
-export const progressFromRunEvent = (
-  stored: OrchestrationV2StoredEvent,
-): RoutineRunProgress | null => {
+const progressFromRunEvent = (stored: OrchestrationV2StoredEvent): RoutineRunProgress | null => {
   if (stored.event.type !== "run.updated") return null;
   const run = stored.event.payload;
   switch (run.status) {
@@ -100,6 +99,39 @@ export const foldRoutineRunProgress = (
     progress = progressFromRunEvent(stored) ?? progress;
   }
   return progress;
+};
+
+/** The routine's initial-message run that this window of events failed, if any. */
+const failedRunId = (
+  run: Pick<RoutineRun, "messageId">,
+  runEvents: ReadonlyArray<OrchestrationV2StoredEvent>,
+): RunId | null => {
+  for (const stored of runEvents) {
+    if (stored.event.type !== "run.updated") continue;
+    const payload = stored.event.payload;
+    if (payload.userMessageId === run.messageId && payload.status === "failed") return payload.id;
+  }
+  return null;
+};
+
+/**
+ * The failure orchestration recorded on a failed run as an error turn item,
+ * such as a workspace preparation failure (branch already exists, setup
+ * script exit code) or a provider error. Capped like the dispatcher's details.
+ */
+const runFailureDetail = (
+  runId: RunId,
+  turnItemEvents: ReadonlyArray<OrchestrationV2StoredEvent>,
+): string | null => {
+  let detail: string | null = null;
+  for (const stored of turnItemEvents) {
+    if (stored.event.type !== "turn-item.updated") continue;
+    const item = stored.event.payload;
+    if (item.type === "error" && item.runId === runId) {
+      detail = item.failure.message.slice(0, 4_000);
+    }
+  }
+  return detail;
 };
 
 /** True when the thread's latest runtime-request state leaves an approval pending. */
@@ -158,6 +190,18 @@ const makeRoutineRunObserver = Effect.gen(function* () {
         eventType: "run.updated",
       });
       let progress = foldRoutineRunProgress(run, runEvents);
+      const failed = progress.status === "failed" ? failedRunId(run, runEvents) : null;
+      if (failed !== null) {
+        const turnItemEvents = yield* collect({
+          threadId: run.threadId,
+          throughSequence: through,
+          eventType: "turn-item.updated",
+        });
+        progress = {
+          ...progress,
+          detail: runFailureDetail(failed, turnItemEvents) ?? FAILED_DETAIL,
+        };
+      }
       if (progress.status === "running") {
         const requestEvents = yield* collect({
           threadId: run.threadId,

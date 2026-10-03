@@ -25,6 +25,7 @@ import {
   type ServerProvider,
   ThreadId,
 } from "@kata-sh/code-contracts";
+import { formatGeneratedBranchName } from "@kata-sh/code-shared/git";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as DateTime from "effect/DateTime";
@@ -1100,6 +1101,38 @@ it.effect("names the worktree itself when the client provides no branch", () =>
           .getThreadProjection(launched.threadId)
           .pipe(Effect.map((projection) => projection.thread.branch === "generated-branch")),
       );
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("names a default-settings worktree branch under the katacode prefix", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness({
+      generateBranchName: (input) =>
+        Effect.succeed({ branch: formatGeneratedBranchName("Add search", input.naming) }),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "command:launch:default-prefix",
+          thread: "thread:launch:default-prefix",
+          message: "Add search",
+          workspace: { type: "worktree", baseRef: "main" },
+        }),
+      );
+      yield* waitUntil(() =>
+        threads
+          .getThreadProjection(launched.threadId)
+          .pipe(Effect.map((projection) => projection.thread.branch === "katacode/add-search")),
+      );
+      assert.deepEqual(harness.generateBranchName.mock.calls[0]?.[0]?.naming, {
+        mode: "static",
+        prefix: "katacode",
+        instructions: "",
+      });
+      assert.equal(harness.renameBranch.mock.calls[0]?.[0]?.newBranch, "katacode/add-search");
     }).pipe(Effect.provide(harness.layer));
   }),
 );

@@ -302,10 +302,10 @@ describe("withoutGitRepositoryEnv", () => {
 });
 
 describe("formatGeneratedBranchName", () => {
-  it.each(["t3code", "t3code/"])("joins static prefix %s with one slash", (prefix) => {
+  it.each(["katacode", "katacode/"])("joins static prefix %s with one slash", (prefix) => {
     expect(
       formatGeneratedBranchName("Add Search", { mode: "static", prefix, instructions: "" }),
-    ).toBe("t3code/add-search");
+    ).toBe("katacode/add-search");
   });
   it("supports an empty prefix and preserves user prefix casing", () => {
     expect(

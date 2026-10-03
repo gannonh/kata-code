@@ -17,7 +17,10 @@ import {
   type ThreadId,
 } from "@kata-sh/code-contracts";
 import { derivePendingBackgroundWork } from "@kata-sh/code-shared/orchestrationV2PendingBackgroundWork";
-import { getProviderOptionCurrentLabel, getProviderOptionDescriptors } from "@kata-sh/code-shared/model";
+import {
+  getProviderOptionCurrentLabel,
+  getProviderOptionDescriptors,
+} from "@kata-sh/code-shared/model";
 import { formatDuration } from "@kata-sh/code-shared/orchestrationTiming";
 import * as DateTime from "effect/DateTime";
 

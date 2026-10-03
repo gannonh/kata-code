@@ -328,7 +328,7 @@ export function OutdatedServerUpdateAction({
       toastManager.add({
         type: "success",
         title: `${serverLabel} updated`,
-        description: `Reconnected on t3@${result.value.targetVersion}.`,
+        description: `Reconnected on @kata-sh/code-cli@${result.value.targetVersion}.`,
       });
     } catch (error) {
       toastManager.add({

@@ -64,6 +64,7 @@ export default defineConfig({
     exclude: [
       "**/.repos/**",
       "**/.t3/**",
+      "**/.katacode/**",
       "**/node_modules/**",
       "**/dist/**",
       "**/dist-electron/**",

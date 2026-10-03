@@ -59,7 +59,13 @@ import {
 } from "./Sidebar.logic";
 import { threadSearchMatchKey } from "@kata-sh/code-client-runtime/state/thread-search";
 import { sortSettledThreads } from "@kata-sh/code-client-runtime/state/thread-sort";
-import { EnvironmentId, ProjectId, ProviderInstanceId, RunId, ThreadId } from "@kata-sh/code-contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
+} from "@kata-sh/code-contracts";
 
 import {
   DEFAULT_INTERACTION_MODE,

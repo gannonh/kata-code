@@ -14,7 +14,8 @@
  * identifier, and the SDK reads only the store of the agent's git top level.
  * Forwarded HTTP servers carry the login from the thread's folder, else from
  * the Kata project folder, so a worktree thread can use the logins the user
- * completed in the project folder.
+ * completed in the project folder. Plugins are user-scoped, so after those
+ * come other folders' logins, most recently written first.
  *
  * Installed plugin roots come from `CursorInstalledPlugins`; each root's
  * `mcp.json` holds the launch config.
@@ -39,11 +40,16 @@ const PLUGIN_ROOT_VARS = ["CURSOR_PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"] as const;
 const PLUGIN_MANIFEST_DIRS = [".cursor-plugin", ".claude-plugin", ".codex-plugin"] as const;
 const TEMPLATE_PLACEHOLDER = /\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/g;
 const PLUGIN_AUTH_PROBE_TIMEOUT_MS = 5_000;
+/** Bounds the pre-start probes and refreshes spent on one server's stored logins. */
+const MAX_LOGIN_CANDIDATES = 3;
 
 export type CursorPluginMcpFetch = typeof globalThis.fetch;
 
-/** The folder whose Cursor login a forwarded server carries. */
-export type CursorPluginLoginFolder = "thread" | "project";
+/**
+ * The folder whose Cursor login a forwarded server carries: the thread's, the
+ * Kata project's, or another folder where the user signed in to the plugin.
+ */
+export type CursorPluginLoginFolder = "thread" | "project" | "other";
 
 export interface CursorPluginMcpServer {
   readonly config: McpServerConfig;
@@ -104,22 +110,17 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
     if (pluginRoots.length === 0) return {};
 
     const projectsDir = NodePath.join(cursorDataDir(input.env, userHome), "projects");
-    const stores = [
-      { folder: "thread" as const, slug: cursorWorkspaceSlug(input.cwd) },
-      ...(input.projectRoot === undefined
-        ? []
-        : [{ folder: "project" as const, slug: cursorWorkspaceSlug(input.projectRoot) }]),
-    ]
-      .filter((store, index, all) => all.findIndex((other) => other.slug === store.slug) === index)
-      .map((store) => {
-        const authFile = NodePath.join(projectsDir, store.slug, "mcp-auth.json");
-        return { folder: store.folder, authFile, tokens: readAccessTokens(authFile) };
-      });
+    const stores = loginStores(projectsDir, input.cwd, input.projectRoot).map((store) => ({
+      ...store,
+      tokens: readAccessTokens(store.authFile),
+    }));
     const loginsFor = (identifier: string): ReadonlyArray<StoredLogin> =>
-      stores.flatMap(({ folder, authFile, tokens }) => {
-        const accessToken = tokens.get(identifier);
-        return accessToken === undefined ? [] : [{ folder, authFile, accessToken }];
-      });
+      stores
+        .flatMap(({ folder, authFile, tokens }) => {
+          const accessToken = tokens.get(identifier);
+          return accessToken === undefined ? [] : [{ folder, authFile, accessToken }];
+        })
+        .slice(0, MAX_LOGIN_CANDIDATES);
 
     const servers = yield* Effect.forEach(
       readPluginServers(pluginRoots, loginsFor, input.env),
@@ -129,6 +130,48 @@ export const discoverCursorPluginMcpServers = Effect.fn("discoverCursorPluginMcp
     return Object.fromEntries(servers);
   },
 );
+
+/**
+ * Cursor's login stores, best first: the thread's folder, the Kata project
+ * folder, then, because plugins are user-scoped, every other folder by most
+ * recent write. A store's mtime also moves when another plugin's login
+ * changes, so it only ranks candidates; a rejected login falls through to the
+ * next.
+ */
+function loginStores(
+  projectsDir: string,
+  cwd: string,
+  projectRoot: string | undefined,
+): ReadonlyArray<{ readonly folder: CursorPluginLoginFolder; readonly authFile: string }> {
+  const authFileFor = (slug: string) => NodePath.join(projectsDir, slug, "mcp-auth.json");
+  const preferred = [
+    { folder: "thread" as const, authFile: authFileFor(cursorWorkspaceSlug(cwd)) },
+    ...(projectRoot === undefined
+      ? []
+      : [{ folder: "project" as const, authFile: authFileFor(cursorWorkspaceSlug(projectRoot)) }]),
+  ].filter(
+    (store, index, all) => all.findIndex((other) => other.authFile === store.authFile) === index,
+  );
+  let slugs: string[];
+  try {
+    slugs = NodeFS.readdirSync(projectsDir);
+  } catch {
+    slugs = [];
+  }
+  const others = slugs
+    .map(authFileFor)
+    .filter((authFile) => !preferred.some((store) => store.authFile === authFile))
+    .flatMap((authFile) => {
+      try {
+        return [{ folder: "other" as const, authFile, mtimeMs: NodeFS.statSync(authFile).mtimeMs }];
+      } catch {
+        return [];
+      }
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .map(({ folder, authFile }) => ({ folder, authFile }));
+  return [...preferred, ...others];
+}
 
 /**
  * Nothing refreshes a token forwarded to the SDK, so a rejected one is
@@ -162,7 +205,17 @@ const withUsableLogin = Effect.fn("withUsableCursorPluginLogin")(function* (
       }),
     );
     if (refresh._tag === "Refreshed") {
-      return [server.identifier, withLogin(config, login.folder, refresh.accessToken)];
+      const stillRejected = yield* Effect.promise(() =>
+        oauthChallenge(config, refresh.accessToken, fetchFn),
+      );
+      if (stillRejected === undefined) {
+        return [server.identifier, withLogin(config, login.folder, refresh.accessToken)];
+      }
+      yield* Effect.logWarning("Cursor plugin server rejected a refreshed OAuth token.", {
+        identifier: server.identifier,
+        authFile: login.authFile,
+      });
+      continue;
     }
     yield* Effect.logWarning("Cursor plugin OAuth refresh failed.", {
       identifier: server.identifier,

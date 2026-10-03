@@ -1349,7 +1349,9 @@ export const ServerSettings = Schema.Struct({
   branchNamingMode: BranchNamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("static" as const)),
   ),
-  branchNamePrefix: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("t3code"))),
+  // Matches WORKTREE_BRANCH_PREFIX in packages/shared/src/branding.ts. Contracts
+  // cannot import shared (shared depends on contracts), so the value is repeated.
+  branchNamePrefix: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed("katacode"))),
   branchNameInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   sourceControlWritingStyle: SourceControlWritingStyleSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed({})),

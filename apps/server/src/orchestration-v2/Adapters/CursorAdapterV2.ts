@@ -307,7 +307,7 @@ const CURSOR_AGENT_SETTING_SOURCES = [
 export interface CursorPluginMcpServers {
   /**
    * For agent options, where the SDK's plugin loader also runs but reads only
-   * the thread folder's logins: the servers carrying the project folder's.
+   * the thread folder's logins: the servers carrying another folder's.
    */
   readonly agent: Record<string, McpServerConfig>;
   /**
@@ -337,7 +337,7 @@ function withPluginMcpServers(
  * Send-level MCP servers. Sent only with T3's server, because any send-level
  * server turns off the SDK's own project, user, and plugin MCP loading.
  */
-export function cursorSendMcpServers(
+function cursorSendMcpServers(
   threadId: ThreadId,
   pluginMcpServers: CursorPluginMcpServers | undefined,
 ): Record<string, McpServerConfig> | undefined {
@@ -960,7 +960,9 @@ export function makeCursorAdapterV2(
           const servers: CursorPluginMcpServers = {
             agent: Object.fromEntries(
               discovered.flatMap(([name, server]) =>
-                server.loginFolder === "project" ? [[name, server.config]] : [],
+                server.loginFolder === undefined || server.loginFolder === "thread"
+                  ? []
+                  : [[name, server.config]],
               ),
             ),
             send: Object.fromEntries(discovered.map(([name, server]) => [name, server.config])),

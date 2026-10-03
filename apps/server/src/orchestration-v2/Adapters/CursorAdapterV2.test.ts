@@ -1057,10 +1057,15 @@ function linearOAuthServer(validAccessToken: string) {
 /**
  * A Cursor home with the Linear plugin enabled and a Kata project folder with
  * one worktree. `logins` maps a folder to the Linear access token Cursor
- * stored for it.
+ * stored for it; a folder other than `project` or `worktree` names an
+ * unrelated folder under `dev/`, and `modifiedAtSeconds` sets its store's mtime.
  */
 const makeCursorPluginFixture = Effect.fn("makeCursorPluginFixture")(function* (
-  logins: ReadonlyArray<{ readonly folder: "project" | "worktree"; readonly accessToken: string }>,
+  logins: ReadonlyArray<{
+    readonly folder: string;
+    readonly accessToken: string;
+    readonly modifiedAtSeconds?: number;
+  }>,
   otherPlugins: ReadonlyArray<{
     readonly folder: string;
     readonly name: string;
@@ -1095,7 +1100,11 @@ const makeCursorPluginFixture = Effect.fn("makeCursorPluginFixture")(function* (
   const authFile = (folder: string) =>
     path.join(dataDir, "projects", cursorWorkspaceSlug(folder), "mcp-auth.json");
   for (const login of logins) {
-    yield* writeJson(authFile(folders[login.folder]), {
+    const folder =
+      login.folder === "project" || login.folder === "worktree"
+        ? folders[login.folder]
+        : path.join(root, "dev", login.folder);
+    yield* writeJson(authFile(folder), {
       "plugin-linear-linear": {
         tokens: {
           access_token: login.accessToken,
@@ -1105,6 +1114,9 @@ const makeCursorPluginFixture = Effect.fn("makeCursorPluginFixture")(function* (
         clientInfo: { client_id: "linear-client" },
       },
     });
+    if (login.modifiedAtSeconds !== undefined) {
+      yield* fileSystem.utimes(authFile(folder), login.modifiedAtSeconds, login.modifiedAtSeconds);
+    }
   }
   return {
     ...folders,
@@ -1415,6 +1427,84 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         expires_in: 3600,
         refresh_token: "rotated-refresh-token",
       });
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("falls back to the newest login another folder holds", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture([
+        {
+          folder: "aaa-older",
+          accessToken: "older-linear-token",
+          modifiedAtSeconds: 1_767_225_600,
+        },
+        {
+          folder: "zzz-newer",
+          accessToken: "newer-linear-token",
+          modifiedAtSeconds: 1_780_272_000,
+        },
+      ]);
+      const linear = linearOAuthServer("newer-linear-token");
+      const worktree = yield* cursorMcpServersForTurn({
+        cwd: fixture.worktree,
+        projectRoot: fixture.project,
+        env: fixture.env,
+        fetch: linear.fetchFn,
+      });
+      const forwarded = {
+        "plugin-linear-linear": linearServer("newer-linear-token"),
+        "t3-code": T3_MCP_SERVER,
+      };
+      // The SDK's plugin loader reads only the worktree's store, so the agent
+      // options carry the other folder's login too.
+      assert.deepEqual(worktree.opened, [forwarded]);
+      assert.deepEqual(worktree.sent, [forwarded]);
+      assert.deepEqual(linear.probedTokens, ["Bearer newer-linear-token"]);
+      assert.deepEqual(linear.tokenRequests, []);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("tries at most three stored logins, the thread's and project's first", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture([
+        { folder: "project", accessToken: "project-linear-token" },
+        {
+          folder: "first-other",
+          accessToken: "first-other-token",
+          modifiedAtSeconds: 1_780_272_000,
+        },
+        {
+          folder: "second-other",
+          accessToken: "second-other-token",
+          modifiedAtSeconds: 1_777_593_600,
+        },
+        {
+          folder: "third-other",
+          accessToken: "third-other-token",
+          modifiedAtSeconds: 1_775_001_600,
+        },
+      ]);
+      const linear = linearOAuthServer("third-other-token");
+      // Every stored login is rejected and none refreshes.
+      const fetchFn: typeof globalThis.fetch = (input, init) =>
+        String(input) === "https://mcp.linear.app/token"
+          ? Promise.resolve(new Response(null, { status: 400 }))
+          : linear.fetchFn(input, init);
+      const worktree = yield* cursorMcpServersForTurn({
+        cwd: fixture.worktree,
+        projectRoot: fixture.project,
+        env: fixture.env,
+        fetch: fetchFn,
+      });
+      assert.deepEqual(linear.probedTokens, [
+        "Bearer project-linear-token",
+        "Bearer first-other-token",
+        "Bearer second-other-token",
+      ]);
+      // With no usable login the best one is forwarded unchanged.
+      assert.deepEqual(worktree.sent, [
+        { "plugin-linear-linear": linearServer("project-linear-token"), "t3-code": T3_MCP_SERVER },
+      ]);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 });

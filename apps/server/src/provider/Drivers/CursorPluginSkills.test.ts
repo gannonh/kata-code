@@ -14,7 +14,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "@effect/vitest";
 
 import { cursorDataDir } from "../acp/CursorInstalledPlugins.ts";
 import { cursorSkillInvocation, discoverCursorSkills, probeCursorSkills } from "./CursorSkills.ts";
@@ -23,7 +23,7 @@ const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const runNode = <A, E>(
   effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>,
-): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(NodeServices.layer)));
+): Effect.Effect<A, E> => effect.pipe(Effect.provide(NodeServices.layer));
 
 // Skill discovery reports realpaths, and macOS puts tmpdir behind the /var -> /private/var link.
 const makeSkillFixtureDirectory = Effect.fn("makeSkillFixtureDirectory")(function* (
@@ -36,8 +36,8 @@ const makeSkillFixtureDirectory = Effect.fn("makeSkillFixtureDirectory")(functio
 });
 
 describe("Cursor plugin skills", () => {
-  it("discovers skills from the enabled Cursor plugin install", async () =>
-    await runNode(
+  it.effect("discovers skills from the enabled Cursor plugin install", () =>
+    runNode(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -199,10 +199,11 @@ describe("Cursor plugin skills", () => {
           enabled: true,
         });
       }),
-    ));
+    ),
+  );
 
-  it("uses the manifest commit under the plugin id when that id is enabled", async () =>
-    await runNode(
+  it.effect("uses the manifest commit under the plugin id when that id is enabled", () =>
+    runNode(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -257,10 +258,11 @@ describe("Cursor plugin skills", () => {
           },
         ]);
       }),
-    ));
+    ),
+  );
 
-  it("reports a filesystem error when Cursor's install database is unreadable", async () =>
-    await runNode(
+  it.effect("reports a filesystem error when Cursor's install database is unreadable", () =>
+    runNode(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -275,10 +277,11 @@ describe("Cursor plugin skills", () => {
         expect(result._tag).toBe("Failure");
         if (result._tag === "Failure") expect(result.failure.reason).toBe("filesystem-error");
       }),
-    ));
+    ),
+  );
 
-  it("reads installed plugin ids from XDG_CONFIG_HOME", async () =>
-    await runNode(
+  it.effect("reads installed plugin ids from XDG_CONFIG_HOME", () =>
+    runNode(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -368,10 +371,11 @@ describe("Cursor plugin skills", () => {
           },
         ]);
       }),
-    ));
+    ),
+  );
 
-  it("uses the cwd window's object plugin ids and ignores a stale window", async () =>
-    await runNode(
+  it.effect("uses the cwd window's object plugin ids and ignores a stale window", () =>
+    runNode(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -471,7 +475,8 @@ describe("Cursor plugin skills", () => {
           },
         ]);
       }),
-    ));
+    ),
+  );
 
   it("turns a chosen skill mention into Cursor's bare slash command", () => {
     expect(cursorSkillInvocation("$poteto-mode", new Set(["poteto-mode"]))).toBe("/poteto-mode");

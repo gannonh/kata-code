@@ -12,6 +12,7 @@ import {
   RoutineRequestId,
   RunId,
   RuntimeRequestId,
+  TurnItemId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2Run,
   type OrchestrationV2RuntimeRequest,
@@ -118,6 +119,39 @@ const requestUpdated = (
       },
       createdAt: at,
       resolvedAt: status === "pending" ? null : at,
+    },
+  };
+};
+const runFailed = (
+  threadId: ThreadId,
+  userMessageId: MessageId,
+  message: string,
+): OrchestrationV2DomainEvent => {
+  eventCounter += 1;
+  const runId = RunId.make(`run:${threadId}:${userMessageId}`);
+  return {
+    id: EventId.make(`event:observer:${eventCounter}`),
+    type: "turn-item.updated",
+    threadId,
+    runId,
+    occurredAt: at,
+    payload: {
+      id: TurnItemId.make(`turn-item:failure:${eventCounter}`),
+      threadId,
+      runId,
+      nodeId: null,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      parentItemId: null,
+      ordinal: eventCounter,
+      status: "failed",
+      title: "Workspace preparation failed",
+      startedAt: at,
+      completedAt: at,
+      updatedAt: at,
+      type: "error",
+      failure: { class: "validation_error", message, code: null, retryable: false },
     },
   };
 };
@@ -411,4 +445,55 @@ it.effect("does not let an observer that read an older cursor overwrite newer pr
       detail: null,
     });
   }).pipe(Effect.provide(makeLayer())),
+);
+
+it.effect(
+  "carries the failure orchestration recorded on a failed run, capped at 4,000 characters",
+  () =>
+    Effect.gen(function* () {
+      const observer = yield* RoutineRunObserver;
+      const events = yield* EventStore.EventStoreV2;
+      const branchExists = yield* launchedRun("routine-branch-exists");
+      yield* events.append({
+        commandId: CommandId.make("command:prepared-run.fail"),
+        events: [
+          runFailed(
+            branchExists.run.threadId,
+            branchExists.run.messageId,
+            "fatal: a branch named 'routine/run-1' already exists",
+          ),
+          runUpdated(branchExists.run.threadId, branchExists.run.messageId, "failed"),
+        ],
+      });
+      const longSetupFailure = yield* launchedRun("routine-setup-failed");
+      yield* events.append({
+        events: [
+          runFailed(
+            longSetupFailure.run.threadId,
+            longSetupFailure.run.messageId,
+            `Setup script exited with code 2: ${"x".repeat(4_050)}`,
+          ),
+          runUpdated(longSetupFailure.run.threadId, longSetupFailure.run.messageId, "failed"),
+        ],
+      });
+      const unexplained = yield* launchedRun("routine-unexplained");
+      yield* events.append({
+        events: [runUpdated(unexplained.run.threadId, unexplained.run.messageId, "failed")],
+      });
+      yield* observer.observe;
+
+      assert.deepEqual(yield* latestRun(branchExists.routine.id), {
+        stage: "terminal",
+        status: "failed",
+        detail: "fatal: a branch named 'routine/run-1' already exists",
+      });
+      const setupDetail = (yield* latestRun(longSetupFailure.routine.id)).detail;
+      assert.equal(setupDetail?.length, 4_000);
+      assert.isTrue(setupDetail?.startsWith("Setup script exited with code 2: xxx"));
+      assert.deepEqual(yield* latestRun(unexplained.routine.id), {
+        stage: "terminal",
+        status: "failed",
+        detail: FAILED_DETAIL,
+      });
+    }).pipe(Effect.provide(makeLayer())),
 );

@@ -8,7 +8,10 @@
  * this stays a pure fold over `runs` and `subagents`.
  */
 import * as DateTime from "effect/DateTime";
-import type { OrchestrationV2Subagent, OrchestrationV2ThreadProjection } from "@kata-sh/code-contracts";
+import type {
+  OrchestrationV2Subagent,
+  OrchestrationV2ThreadProjection,
+} from "@kata-sh/code-contracts";
 import { copySorted } from "@kata-sh/code-shared/Array";
 
 import { isActiveSubagentStatus, isTerminalSubagentStatus } from "./subagentRuntime.ts";

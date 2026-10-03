@@ -10,7 +10,10 @@ import { environmentThreadDetails } from "../../state/threads";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import * as DateTime from "effect/DateTime";
 import { WorkLogRow } from "./WorkLog";
-import { resolveHandoffEndpoints, type HandoffTimelineRun } from "@kata-sh/code-client-runtime/handoff";
+import {
+  resolveHandoffEndpoints,
+  type HandoffTimelineRun,
+} from "@kata-sh/code-client-runtime/handoff";
 import { Fragment } from "react";
 import { formatSubagentDisplayTitle } from "@kata-sh/code-client-runtime/state/subagent-display";
 import {
