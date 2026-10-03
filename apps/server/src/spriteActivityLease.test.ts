@@ -1,11 +1,14 @@
-import type { TurnId } from "@kata-sh/code-contracts";
+import type { OrchestrationV2ProviderSession } from "@kata-sh/code-contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
+import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import {
   hasSpriteActivity,
   nextSpriteLeaseState,
+  readOpenProviderSessions,
   SPRITE_IDLE_GRACE_MS,
   SPRITE_TASK_REFRESH_MS,
   runSpriteTaskCommand,
@@ -39,27 +42,46 @@ function runnerResult(stdout: string, code = 0 as ChildProcessSpawner.ExitCode) 
 it("detects client, provider, and terminal activity", () => {
   const activity = (input: {
     connectedClientCount?: number;
-    activeTurnId?: string;
-    providerStatus?: "ready" | "running";
+    providerStatus?: OrchestrationV2ProviderSession["status"];
     hasRunningSubprocess?: boolean;
   }) =>
     hasSpriteActivity({
       connectedClientCount: input.connectedClientCount ?? 0,
-      providerSessions: [
-        {
-          activeTurnId: input.activeTurnId as TurnId | undefined,
-          status: input.providerStatus ?? "ready",
-        },
-      ],
+      providerSessions: [{ status: input.providerStatus ?? "ready" }],
       terminals: [{ hasRunningSubprocess: input.hasRunningSubprocess ?? false }],
     });
 
   assert.isTrue(activity({ connectedClientCount: 1 }));
-  assert.isTrue(activity({ activeTurnId: "turn-1" }));
+  assert.isTrue(activity({ providerStatus: "starting" }));
   assert.isTrue(activity({ providerStatus: "running" }));
+  assert.isTrue(activity({ providerStatus: "waiting" }));
   assert.isTrue(activity({ hasRunningSubprocess: true }));
   assert.isFalse(activity({}));
+  assert.isFalse(activity({ providerStatus: "error" }));
+  assert.isFalse(activity({ providerStatus: "stopped" }));
 });
+
+it.effect("reads open provider sessions from the V2 projection", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    for (const [id, status] of [
+      ["session-running", "running"],
+      ["session-ready", "ready"],
+      ["session-stopped", "stopped"],
+    ] as const) {
+      yield* sql`
+        INSERT INTO orchestration_v2_projection_provider_sessions (
+          provider_session_id, thread_id, provider, status, model, updated_at, payload_json
+        ) VALUES (${id}, NULL, 'codex', ${status}, NULL, '2026-10-03T00:00:00.000Z', '{}')
+      `;
+    }
+    const sessions = yield* readOpenProviderSessions;
+    assert.deepEqual(sessions.map((session) => session.status).toSorted(), ["ready", "running"]);
+    assert.isTrue(
+      hasSpriteActivity({ connectedClientCount: 0, providerSessions: sessions, terminals: [] }),
+    );
+  }).pipe(Effect.provide(SqlitePersistenceMemory)),
+);
 
 it.effect("handles automatic Sprite task HTTP results", () =>
   Effect.gen(function* () {

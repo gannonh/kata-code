@@ -4,9 +4,9 @@
  *
  * Cursor keeps plugin OAuth in `~/.cursor/projects/<slug>/mcp-auth.json`
  * under the plugin's server name and refreshes it only when one of its own
- * clients connects. `agent acp` stores OAuth for session servers under a
- * different, config-hashed key, so a token Kata forwards is never refreshed
- * there. Kata refreshes with the stored refresh token and client registration
+ * clients connects. The Cursor SDK stores OAuth for inline servers under an
+ * `inline:<name>` key, so a token Kata forwards is never refreshed there. Kata
+ * refreshes with the stored refresh token and client registration
  * and writes the result back under the same key, so Cursor's clients keep a
  * valid refresh token if the server rotates it.
  */

@@ -223,7 +223,7 @@ const config: ExpoConfig = {
   // fields below stay for the way back in docs/operations/supported-platforms.md.
   platforms: ["ios"],
   scheme: variant.scheme,
-  version: "1.3.1",
+  version: "2.0.0",
   runtimeVersion: {
     // Development manifests resolve on every launch, so avoid fingerprint's
     // expensive native-project calculation there. Preview and production stay

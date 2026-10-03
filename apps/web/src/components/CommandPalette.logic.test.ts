@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@kata-sh/code-contracts";
 import type { Project, Thread } from "../types";
+import { makeThreadFixture } from "../test-fixtures";
 import {
   buildBrowseGroups,
   buildCommandPaletteProjectMetadata,
@@ -318,7 +319,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
 }
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
-  return {
+  return makeThreadFixture({
     id: ThreadId.make("thread-1"),
     environmentId: LOCAL_ENVIRONMENT_ID,
     projectId: PROJECT_ID,
@@ -326,7 +327,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
     runtimeMode: "full-access",
     interactionMode: "default",
-    session: null,
+    runtime: null,
     messages: [],
     proposedPlans: [],
     createdAt: "2026-03-01T00:00:00.000Z",
@@ -335,14 +336,11 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     settledAt: null,
     deletedAt: null,
     updatedAt: "2026-03-01T00:00:00.000Z",
-    latestTurn: null,
+    latestRun: null,
     branch: null,
     worktreePath: null,
-    checkpoints: [],
-    pullRequests: [],
-    activities: [],
     ...overrides,
-  };
+  });
 }
 
 describe("buildProjectActionItems", () => {

@@ -603,6 +603,17 @@ export const make = Effect.gen(function* () {
     installContextMenu(window, window.webContents);
     window.webContents.on("did-attach-webview", (_event, contents) => {
       installContextMenu(window, contents);
+      // Detached from the attach event, so a failure must not become an
+      // unhandled rejection in the main process.
+      void runPromise(
+        previewManager
+          .prepareWebview(contents)
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Preview webview preparation failed.", { cause }),
+            ),
+          ),
+      );
     });
 
     window.webContents.setWindowOpenHandler(({ url }) => {

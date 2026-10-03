@@ -3,7 +3,6 @@ import {
   CommandId,
   EVENT_ROUTINE_NEXT_DUE_AT,
   EnvironmentId,
-  EventId,
   MessageId,
   Routine,
   RoutineChangeInput,
@@ -13,14 +12,12 @@ import {
   RoutineError,
   RoutineHistoryInput,
   type RoutineLinearMetadata,
-  RoutineProviderSubmission,
   RoutineRun,
   RoutineRunId,
   RoutineSaveInput,
   RoutineSubscriptionEvent,
   RoutineTestInput,
   ThreadId,
-  TurnId,
   isScheduleTrigger,
   previewRoutineSchedule,
 } from "@kata-sh/code-contracts";
@@ -89,8 +86,6 @@ export type RoutineClaim = {
   readonly run: RoutineRun;
   readonly owner: string;
   readonly generation: number;
-  /** A durable marker prevents setup from being skipped after a worker crash. */
-  readonly setupComplete: boolean;
 };
 export type RoutineCursor = { readonly admittedAt: number; readonly id: string };
 export interface RoutineSaveOptions {
@@ -358,7 +353,8 @@ export const makeRoutineStore = Effect.gen(function* () {
     Effect.gen(function* () {
       const rows = yield* sql<{
         record: string;
-      }>`SELECT record FROM routine_runs WHERE routine_id=${id} AND active=1 AND submission_consumed=0`;
+      }>`SELECT record FROM routine_runs WHERE routine_id=${id} AND active=1 AND submission_consumed=0
+        AND stage <> 'submitting'`;
       for (const row of rows) {
         const run = decodeRun(row.record);
         yield* writeRun(
@@ -797,25 +793,23 @@ export const makeRoutineStore = Effect.gen(function* () {
         const rows = yield* sql<{
           record: string;
           generation: number;
-          intentEvent: string | null;
         }>`UPDATE routine_runs SET owner=${owner}, generation=generation+1, lease_until=${now + 30_000}
       WHERE id=(SELECT id FROM routine_runs WHERE active=1 AND submission_consumed=0 AND lease_until<=${now} ORDER BY id LIMIT 1)
-      RETURNING record,generation,intent_event AS intentEvent`;
+      RETURNING record,generation`;
         return rows[0]
           ? {
               run: decodeRun(rows[0].record),
               owner,
               generation: rows[0].generation,
-              setupComplete: rows[0].intentEvent === "setup-complete",
             }
           : null;
       }),
     );
   const lostPreparation = () =>
     failure("lost-fence", "Routine preparation ownership expired or was canceled.");
-  // Reclaims only match unconsumed runs, so a consumed run keeps the owner and
-  // generation that submitted it. That claim has handed preparation to the
-  // provider path; every other mismatch is a lost fence.
+  // Reclaims only match unlaunched runs, so a launched run keeps the owner and
+  // generation that launched it. That claim has handed the run to the
+  // orchestration observer; every other mismatch is a lost fence.
   const preparationLease = (claim: RoutineClaim, now: number) =>
     Effect.gen(function* () {
       const rows = yield* sql<{
@@ -843,25 +837,6 @@ export const makeRoutineStore = Effect.gen(function* () {
         return lease;
       }),
     );
-  const consumeSubmission = (claim: RoutineClaim, now: number) =>
-    transaction(
-      Effect.gen(function* () {
-        yield* assertClaim(claim, now);
-        const routine = yield* readRoutine(claim.run.environmentId, claim.run.routineId);
-        if (routine.state !== "enabled")
-          return yield* failure("blocked", "Routine is no longer enabled.");
-        const rows = yield* sql<{
-          record: string;
-        }>`UPDATE routine_runs SET submission_consumed=1 WHERE id=${claim.run.id} AND submission_consumed=0 RETURNING record`;
-        if (!rows[0])
-          return yield* failure("lost-fence", "Submission permission was already consumed.");
-        const run = decodeRun(rows[0].record);
-        yield* writeRun(
-          { ...run, stage: "submitting", status: "starting", updatedAt: isoAt(now) },
-          true,
-        );
-      }),
-    );
   const updatePreparation = (
     claim: RoutineClaim,
     patch: Pick<RoutineRun, "status" | "stage" | "detail"> &
@@ -870,13 +845,11 @@ export const makeRoutineStore = Effect.gen(function* () {
   ) =>
     transaction(
       Effect.gen(function* () {
-        // After handoff the provider path owns the run. Late preparation
-        // progress or a dispatcher failure must not overwrite a turn that may
-        // already be running.
+        // After handoff the orchestration observer owns the run. A late
+        // dispatcher failure must not overwrite a launched run.
         if ((yield* preparationLease(claim, now)) === "handed-off") return;
-        // A dispatcher may spend time preparing a workspace while another
-        // transaction records a thread or command receipt. Re-read the current
-        // record so this progress update cannot erase those durable fields.
+        // Re-read the current record so this update cannot erase fields another
+        // transaction wrote while the dispatcher was working.
         const rows = yield* sql<{
           record: string;
         }>`SELECT record FROM routine_runs WHERE id=${claim.run.id}`;
@@ -888,403 +861,100 @@ export const makeRoutineStore = Effect.gen(function* () {
         );
       }),
     );
-  const markSetupComplete = (claim: RoutineClaim, now: number) =>
+  /**
+   * Records the launch intent before the orchestration launch. A paused or
+   * deleted routine no longer cancels the run after this point: the launch is
+   * idempotent, so a reclaimed run completes it instead of guessing whether the
+   * first attempt reached orchestration.
+   */
+  const beginLaunch = (claim: RoutineClaim, now: number) =>
     transaction(
       Effect.gen(function* () {
         yield* assertClaim(claim, now);
-        yield* sql`UPDATE routine_runs SET intent_event='setup-complete' WHERE id=${claim.run.id}`;
-      }),
-    );
-  const submissionClaim = (submission: RoutineProviderSubmission) =>
-    Effect.gen(function* () {
-      const rows = yield* sql<{
-        record: string;
-      }>`SELECT record FROM routine_runs WHERE id=${submission.runId}
-      AND owner=${submission.owner} AND generation=${submission.generation}
-      AND thread_id=${submission.threadId} AND message_id=${submission.messageId} AND command_id=${submission.commandId}`;
-      if (!rows[0])
-        return yield* failure("lost-fence", "Routine submission ownership is no longer current.");
-      return {
-        run: decodeRun(rows[0].record),
-        owner: submission.owner,
-        generation: submission.generation,
-        setupComplete: false,
-      } satisfies RoutineClaim;
-    }).pipe(Effect.mapError(persistenceError));
-  const consumeSubmissionForProvider = (submission: RoutineProviderSubmission, now: number) =>
-    submissionClaim(submission).pipe(Effect.flatMap((claim) => consumeSubmission(claim, now)));
-  const beginSessionPreparation = (submission: RoutineProviderSubmission) =>
-    transaction(
-      Effect.gen(function* () {
-        const marker = `session-preparing:${submission.generation}`;
         const rows = yield* sql<{
           record: string;
-        }>`UPDATE routine_runs SET intent_event=${marker}
-      WHERE id=${submission.runId} AND owner=${submission.owner} AND generation=${submission.generation}
-      AND thread_id=${submission.threadId} AND message_id=${submission.messageId} AND command_id=${submission.commandId}
-      AND submission_consumed=0 AND active=1
-      AND (intent_event IS NULL OR intent_event='setup-complete' OR (
-        intent_event LIKE 'session-preparing:%' AND intent_event != ${marker}
-      ))
+        }>`SELECT record FROM routine_runs WHERE id=${claim.run.id}`;
+        if (!rows[0]) return yield* failure("not-found", "Routine run no longer exists.");
+        const current = decodeRun(rows[0].record);
+        if (current.stage === "submitting") return;
+        const routine = yield* readRoutine(claim.run.environmentId, claim.run.routineId);
+        if (routine.state !== "enabled")
+          return yield* failure("blocked", "Routine is no longer enabled.");
+        yield* writeRun(
+          { ...current, stage: "submitting", status: "starting", updatedAt: isoAt(now) },
+          true,
+        );
+      }),
+    );
+  /** Hands the run to orchestration once the launch accepted its thread and message. */
+  const markLaunched = (claim: RoutineClaim, now: number) =>
+    transaction(
+      Effect.gen(function* () {
+        yield* assertClaim(claim, now);
+        const rows = yield* sql<{
+          record: string;
+        }>`UPDATE routine_runs SET submission_consumed=1 WHERE id=${claim.run.id} AND submission_consumed=0 RETURNING record`;
+        if (!rows[0]) return yield* lostPreparation();
+        const current = decodeRun(rows[0].record);
+        yield* writeRun(
+          {
+            ...current,
+            stage: "prompt-accepted",
+            status: "starting",
+            detail: null,
+            conversation: { kind: "confirmed", threadId: current.threadId },
+            updatedAt: isoAt(now),
+          },
+          true,
+        );
+      }),
+    );
+  /** Launched runs whose orchestration outcome is still open, with their event cursor. */
+  const launchedRuns = () =>
+    sql<{
+      record: string;
+      eventCursor: number;
+    }>`SELECT record, event_cursor AS eventCursor FROM routine_runs
+      WHERE active=1 AND submission_consumed=1 ORDER BY admitted_at ASC, id ASC`.pipe(
+      Effect.map((rows) =>
+        rows.map((row) => ({ run: decodeRun(row.record), eventCursor: row.eventCursor })),
+      ),
+      Effect.mapError(persistenceError),
+    );
+  /**
+   * Applies observed orchestration progress and advances the run's event
+   * cursor. The cursor is compared first, so two observers reading the same
+   * range cannot apply an older fold over a newer one.
+   */
+  const recordOrchestrationProgress = (
+    input: {
+      readonly runId: RoutineRunId;
+      readonly fromCursor: number;
+      readonly toCursor: number;
+      readonly progress: Pick<RoutineRun, "status" | "stage" | "detail"> | null;
+    },
+    now: number,
+  ) =>
+    transaction(
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          record: string;
+        }>`UPDATE routine_runs SET event_cursor=${input.toCursor}
+      WHERE id=${input.runId} AND event_cursor=${input.fromCursor} AND active=1 AND submission_consumed=1
       RETURNING record`;
         if (!rows[0]) return false;
-        const run = decodeRun(rows[0].record);
-        return (
-          run.stage === "admitted" ||
-          run.stage === "thread-created" ||
-          run.stage === "prompt-accepted"
-        );
-      }),
-    );
-  const settleOnSessionExit = (
-    input: {
-      readonly threadId: ThreadId;
-      readonly detail?: string | null | undefined;
-    },
-    now: number,
-  ) =>
-    transaction(
-      Effect.gen(function* () {
-        const rows = yield* sql<{ record: string }>`SELECT record FROM routine_runs
-      WHERE thread_id=${input.threadId} AND active=1 AND submission_consumed=1
-      ORDER BY admitted_at DESC, id DESC`;
-        const current = rows
-          .map((row) => decodeRun(row.record))
-          .find((run) => run.stage !== "terminal");
-        if (!current) return false;
-        if (current.stage === "submitting" || current.turnId === null) {
-          yield* writeRun(
-            {
-              ...current,
-              status: "needs-attention",
-              detail:
-                input.detail ?? "The provider session exited before this routine turn was bound.",
-              updatedAt: isoAt(now),
-            },
-            true,
-          );
-          return true;
-        }
-        yield* writeRun(
-          {
-            ...current,
-            stage: "terminal",
-            status: "interrupted",
-            detail:
-              input.detail ?? "The provider session exited before the routine turn completed.",
-            updatedAt: isoAt(now),
-          },
-          false,
-        );
-        return true;
-      }),
-    );
-  const bindProviderTurn = (submission: RoutineProviderSubmission, turnId: string, now: number) =>
-    transaction(
-      Effect.gen(function* () {
-        const rows = yield* sql<{
-          record: string;
-        }>`SELECT record FROM routine_runs WHERE id=${submission.runId}
-      AND owner=${submission.owner} AND generation=${submission.generation}
-      AND thread_id=${submission.threadId} AND message_id=${submission.messageId} AND command_id=${submission.commandId}
-      AND submission_consumed=1`;
-        if (!rows[0])
-          return yield* failure(
-            "lost-fence",
-            "Routine provider result belongs to an expired owner.",
-          );
         const current = decodeRun(rows[0].record);
-        // A provider can emit its first terminal event before sendTurn resolves.
-        // Reconciliation then owns the durable terminal result and releases the
-        // active slot. The late adapter return is an idempotent acknowledgement;
-        // it must not resurrect that result or report a false fence loss.
-        if (current.stage === "terminal") return;
-        const terminalEvents = yield* sql<{
-          status: string;
-          detail: string | null;
-          initialMessageId: string | null;
-        }>`SELECT status, detail, initial_message_id AS initialMessageId FROM routine_provider_events
-      WHERE thread_id=${submission.threadId} AND provider_turn_id=${turnId}`;
-        const terminalEvent = terminalEvents[0];
-        // The provider turn returned by this exact submission is the only
-        // admissible correlation for the initial run. Drop terminal evidence for
-        // other turns so a later manual conversation cannot be replayed against
-        // this run after a restart.
-        yield* sql`DELETE FROM routine_provider_events
-      WHERE thread_id=${submission.threadId} AND provider_turn_id <> ${turnId}`;
+        const progress = input.progress;
         if (
-          terminalEvent &&
-          (terminalEvent.status === "succeeded" ||
-            terminalEvent.status === "failed" ||
-            terminalEvent.status === "interrupted") &&
-          (terminalEvent.initialMessageId === null ||
-            terminalEvent.initialMessageId === String(submission.messageId))
-        ) {
-          yield* sql`DELETE FROM routine_provider_events WHERE thread_id=${submission.threadId} AND provider_turn_id=${turnId}`;
-          yield* writeRun(
-            {
-              ...current,
-              stage: "terminal",
-              status: terminalEvent.status,
-              turnId: TurnId.make(turnId),
-              detail: terminalEvent.detail,
-              updatedAt: isoAt(now),
-            },
-            false,
-          );
-          return;
-        }
-        if (terminalEvent?.status === "waiting-for-approval") {
-          yield* sql`DELETE FROM routine_provider_events WHERE thread_id=${submission.threadId} AND provider_turn_id=${turnId}`;
-          yield* writeRun(
-            {
-              ...current,
-              stage: "provider-bound",
-              status: "waiting-for-approval",
-              turnId: TurnId.make(turnId),
-              detail: terminalEvent.detail,
-              updatedAt: isoAt(now),
-            },
-            true,
-          );
-          return;
-        }
-        yield* writeRun(
-          {
-            ...current,
-            stage: "provider-bound",
-            status: "running",
-            turnId: TurnId.make(turnId),
-            updatedAt: isoAt(now),
-          },
-          true,
-        );
-      }),
-    );
-  const markNeedsAttention = (submission: RoutineProviderSubmission, detail: string, now: number) =>
-    transaction(
-      Effect.gen(function* () {
-        const rows = yield* sql<{
-          record: string;
-        }>`SELECT record FROM routine_runs WHERE id=${submission.runId}
-      AND owner=${submission.owner} AND generation=${submission.generation} AND submission_consumed=1 AND active=1`;
-        if (!rows[0]) return;
-        const current = decodeRun(rows[0].record);
-        // The uncertainty state keeps the irreversible submission active. It must
-        // remain eligible for exact provider evidence to settle it, while still
-        // being excluded from preparation claims by submission_consumed=1.
-        yield* writeRun(
-          { ...current, status: "needs-attention", detail, updatedAt: isoAt(now) },
-          true,
-        );
-      }),
-    );
-  const markBlockedBeforeSubmission = (
-    submission: RoutineProviderSubmission,
-    detail: string,
-    now: number,
-  ) =>
-    transaction(
-      Effect.gen(function* () {
-        // Provider session setup and routing happen before ProviderService's
-        // irreversible submission CAS. A missing project/session/model therefore
-        // blocks this run and releases its slot instead of leaving a claim that
-        // the scheduler retries forever.
-        const rows = yield* sql<{
-          record: string;
-        }>`SELECT record FROM routine_runs WHERE id=${submission.runId}
-      AND owner=${submission.owner} AND generation=${submission.generation}
-      AND thread_id=${submission.threadId} AND message_id=${submission.messageId} AND command_id=${submission.commandId}
-      AND submission_consumed=0 AND active=1`;
-        if (!rows[0]) return false;
-        const current = decodeRun(rows[0].record);
-        yield* writeRun(
-          { ...current, stage: "terminal", status: "blocked", detail, updatedAt: isoAt(now) },
-          false,
-        );
-        return true;
-      }),
-    );
-  const markWaitingForApproval = (
-    input: {
-      readonly threadId: ThreadId;
-      readonly turnId: TurnId;
-      readonly detail?: string | null | undefined;
-    },
-    now: number,
-  ) =>
-    transaction(
-      Effect.gen(function* () {
-        const rows = yield* sql<{ record: string }>`SELECT record FROM routine_runs
-      WHERE thread_id=${input.threadId} AND active=1 AND submission_consumed=1
-      ORDER BY admitted_at DESC, id DESC`;
-        const current = rows
-          .map((row) => decodeRun(row.record))
-          .find(
-            (run) =>
-              run.stage === "provider-bound" &&
-              run.turnId !== null &&
-              String(run.turnId) === String(input.turnId),
-          );
-        if (!current) {
-          yield* sql`INSERT INTO routine_provider_events(event_id, thread_id, provider_turn_id, initial_message_id, status, detail, observed_at)
-        VALUES (${EventId.make(`routine-approval:${input.threadId}:${input.turnId}`)}, ${input.threadId}, ${input.turnId}, ${null}, ${"waiting-for-approval"}, ${input.detail ?? null}, ${now})
-        ON CONFLICT(thread_id, provider_turn_id) DO UPDATE SET
-          detail=COALESCE(excluded.detail, routine_provider_events.detail)
-        WHERE routine_provider_events.status='waiting-for-approval'`;
+          progress === null ||
+          (progress.status === current.status &&
+            progress.stage === current.stage &&
+            progress.detail === current.detail)
+        )
           return false;
-        }
-        if (current.status === "waiting-for-approval") return true;
         yield* writeRun(
-          {
-            ...current,
-            status: "waiting-for-approval",
-            detail: input.detail ?? null,
-            updatedAt: isoAt(now),
-          },
-          true,
-        );
-        return true;
-      }),
-    );
-  const markProviderApprovalResolved = (
-    input: {
-      readonly threadId: ThreadId;
-      readonly turnId: TurnId;
-    },
-    now: number,
-  ) =>
-    transaction(
-      Effect.gen(function* () {
-        const rows = yield* sql<{ record: string }>`SELECT record FROM routine_runs
-      WHERE thread_id=${input.threadId} AND active=1 AND submission_consumed=1
-      ORDER BY admitted_at DESC, id DESC`;
-        const current = rows
-          .map((row) => decodeRun(row.record))
-          .find(
-            (run) =>
-              run.stage === "provider-bound" &&
-              run.turnId !== null &&
-              String(run.turnId) === String(input.turnId),
-          );
-        if (!current || current.status !== "waiting-for-approval") return false;
-        yield* writeRun(
-          { ...current, status: "running", detail: null, updatedAt: isoAt(now) },
-          true,
-        );
-        return true;
-      }),
-    );
-  const recordProviderTerminal = (
-    input: {
-      readonly eventId: EventId;
-      readonly threadId: ThreadId;
-      readonly turnId: TurnId;
-      readonly messageId?: MessageId | undefined;
-      readonly status: Extract<RoutineRun["status"], "succeeded" | "failed" | "interrupted">;
-      readonly detail?: string | null | undefined;
-    },
-    now: number,
-  ) =>
-    transaction(
-      Effect.gen(function* () {
-        // Terminal evidence is durable before it is matched to the run. This
-        // closes the adapter-return/bind gap and allows a later bind to consume
-        // only the exact provider turn that returned from the adapter.
-        const activeRuns = yield* sql<{ record: string }>`SELECT record FROM routine_runs
-      WHERE thread_id=${input.threadId} AND active=1 AND submission_consumed=1
-      ORDER BY admitted_at DESC, id DESC`;
-        if (activeRuns.length === 0) return false;
-        yield* sql`INSERT INTO routine_provider_events(event_id, thread_id, provider_turn_id, initial_message_id, status, detail, observed_at)
-      VALUES (${input.eventId}, ${input.threadId}, ${input.turnId}, ${input.messageId ?? null}, ${input.status}, ${input.detail ?? null}, ${now})
-      ON CONFLICT(thread_id, provider_turn_id) DO UPDATE SET
-        initial_message_id=COALESCE(routine_provider_events.initial_message_id, excluded.initial_message_id),
-        status=excluded.status,
-        detail=excluded.detail,
-        observed_at=excluded.observed_at`;
-        const rows = yield* sql<{ record: string }>`SELECT record FROM routine_runs
-      WHERE thread_id=${input.threadId} AND active=1 AND submission_consumed=1
-      ORDER BY admitted_at DESC, id DESC`;
-        const current =
-          rows
-            .map((row) => decodeRun(row.record))
-            .find(
-              (run) =>
-                run.stage !== "terminal" &&
-                run.turnId !== null &&
-                String(run.turnId) === String(input.turnId) &&
-                (input.messageId === undefined ||
-                  String(run.messageId) === String(input.messageId)),
-            ) ??
-          (input.messageId === undefined
-            ? undefined
-            : rows
-                .map((row) => decodeRun(row.record))
-                .find(
-                  (run) =>
-                    run.stage !== "terminal" && String(run.messageId) === String(input.messageId),
-                ));
-        if (!current) return false;
-        yield* sql`DELETE FROM routine_provider_events WHERE thread_id=${input.threadId} AND provider_turn_id=${input.turnId}`;
-        yield* writeRun(
-          {
-            ...current,
-            stage: "terminal",
-            status: input.status,
-            turnId: input.turnId,
-            detail: input.detail ?? null,
-            updatedAt: isoAt(now),
-          },
-          false,
-        );
-        return true;
-      }),
-    );
-  const completeProviderTurn = (
-    input: {
-      readonly threadId: ThreadId;
-      readonly messageId: MessageId;
-      readonly turnId: TurnId;
-      readonly status: Extract<RoutineRun["status"], "succeeded" | "failed" | "interrupted">;
-      readonly detail?: string | null | undefined;
-    },
-    now: number,
-  ) =>
-    transaction(
-      Effect.gen(function* () {
-        // The initial message is the durable correlation anchor. A provider turn
-        // id alone is insufficient while the first adapter response is still
-        // pending: a later manual turn in the same thread must never settle this
-        // run. Requiring the message id also makes omitted ids fail closed when a
-        // stale caller reaches this boundary through an untyped path.
-        if (input.messageId === undefined || input.turnId === undefined) return false;
-        const rows = yield* sql<{ record: string }>`SELECT record FROM routine_runs
-      WHERE thread_id=${input.threadId} AND message_id=${input.messageId}
-        AND active=1 AND submission_consumed=1
-      ORDER BY admitted_at DESC, id DESC`;
-        const current = rows
-          .map((row) => decodeRun(row.record))
-          .find((run) => {
-            if (run.stage === "terminal") return false;
-            // Before the adapter returns there is no trustworthy provider-turn
-            // identity to attach to a terminal event. Such evidence is persisted
-            // by recordProviderTerminal and consumed by bindProviderTurn after
-            // the adapter returns. A direct completion can only settle a bound
-            // initial turn, and a missing id never acts as a wildcard.
-            if (run.stage === "submitting") return false;
-            return run.turnId !== null && String(run.turnId) === String(input.turnId);
-          });
-        if (!current) return false;
-        yield* writeRun(
-          {
-            ...current,
-            stage: "terminal",
-            status: input.status,
-            ...(current.turnId === null ? { turnId: input.turnId } : {}),
-            detail: input.detail ?? null,
-            updatedAt: isoAt(now),
-          },
-          false,
+          { ...current, ...progress, updatedAt: isoAt(now) },
+          progress.stage !== "terminal",
         );
         return true;
       }),
@@ -1334,137 +1004,6 @@ export const makeRoutineStore = Effect.gen(function* () {
       Effect.map((rows) => rows.map((row) => decodeRun(row.record))),
       Effect.mapError(persistenceError),
     );
-  const recoverConsumed = (now: number) =>
-    transaction(
-      Effect.gen(function* () {
-        // A process can die after the irreversible provider submission CAS and
-        // before the adapter result is bound. Such runs are deliberately absent
-        // from preparation claims; surface them as attention while retaining the
-        // active slot for exact provider evidence or an operator decision.
-        const rows = yield* sql<{
-          record: string;
-          runOwner: string | null;
-        }>`SELECT record, owner AS runOwner FROM routine_runs
-      WHERE active=1 AND submission_consumed=1 ORDER BY admitted_at ASC, id ASC`;
-        for (const row of rows) {
-          const current = decodeRun(row.record);
-          if (current.stage === "terminal") continue;
-
-          // A terminal event may have been durably recorded while the process was
-          // exiting. Reconcile it only when its provider turn exactly matches the
-          // run's already-bound initial turn.
-          if (current.turnId !== null) {
-            const terminalRows = yield* sql<{
-              status: Extract<RoutineRun["status"], "succeeded" | "failed" | "interrupted">;
-              detail: string | null;
-              initialMessageId: string | null;
-            }>`SELECT status, detail, initial_message_id AS initialMessageId FROM routine_provider_events
-          WHERE thread_id=${current.threadId} AND provider_turn_id=${current.turnId}
-            AND status IN ('succeeded', 'failed', 'interrupted')`;
-            const terminalEvent = terminalRows[0];
-            if (
-              terminalEvent &&
-              (terminalEvent.initialMessageId === null ||
-                terminalEvent.initialMessageId === String(current.messageId))
-            ) {
-              yield* sql`DELETE FROM routine_provider_events
-            WHERE thread_id=${current.threadId} AND provider_turn_id=${current.turnId}`;
-              yield* writeRun(
-                {
-                  ...current,
-                  stage: "terminal",
-                  status: terminalEvent.status,
-                  detail: terminalEvent.detail,
-                  updatedAt: isoAt(now),
-                },
-                false,
-              );
-              continue;
-            }
-          }
-
-          // A provider may have completed after submission was consumed but before
-          // the adapter returned its turn id. Normalized ingestion records the
-          // initial message on that durable event. Reconcile only that exact
-          // message/turn pair; a same-thread manual turn remains buffered.
-          if (current.turnId === null) {
-            const correlatedTerminalRows = yield* sql<{
-              providerTurnId: string;
-              status: Extract<RoutineRun["status"], "succeeded" | "failed" | "interrupted">;
-              detail: string | null;
-            }>`SELECT provider_turn_id AS providerTurnId, status, detail FROM routine_provider_events
-          WHERE thread_id=${current.threadId} AND initial_message_id=${current.messageId}
-            AND status IN ('succeeded', 'failed', 'interrupted')`;
-            // The projection is the normalized durable fallback when the runtime
-            // subscriber stopped after ProviderService persisted raw evidence but
-            // before it could annotate that row with the initial message id.
-            const projectedTerminalRows =
-              correlatedTerminalRows.length > 0
-                ? []
-                : yield* sql<{
-                    providerTurnId: string;
-                    status: Extract<RoutineRun["status"], "succeeded" | "failed" | "interrupted">;
-                    detail: string | null;
-                  }>`SELECT events.provider_turn_id AS providerTurnId, events.status, events.detail
-              FROM routine_provider_events AS events
-              JOIN projection_turns AS turns
-                ON turns.thread_id = events.thread_id
-                AND turns.turn_id = events.provider_turn_id
-                AND turns.pending_message_id = ${current.messageId}
-              WHERE events.thread_id=${current.threadId}
-                AND events.status IN ('succeeded', 'failed', 'interrupted')`;
-            const terminalEvent = correlatedTerminalRows[0] ?? projectedTerminalRows[0];
-            if (terminalEvent) {
-              yield* sql`DELETE FROM routine_provider_events
-            WHERE thread_id=${current.threadId} AND provider_turn_id=${terminalEvent.providerTurnId}`;
-              yield* writeRun(
-                {
-                  ...current,
-                  stage: "terminal",
-                  status: terminalEvent.status,
-                  turnId: TurnId.make(terminalEvent.providerTurnId),
-                  detail: terminalEvent.detail,
-                  updatedAt: isoAt(now),
-                },
-                false,
-              );
-              continue;
-            }
-          }
-
-          // A live scheduler heartbeat means the owner may still be between the
-          // irreversible CAS and the adapter response. Only a stale or missing
-          // owner heartbeat is evidence that a process died and startup recovery
-          // may surface the uncertain submission.
-          const ownerHeartbeat =
-            row.runOwner === null
-              ? []
-              : yield* sql<{ lastSeenAt: number }>`SELECT last_seen_at AS lastSeenAt
-          FROM routine_scheduler_workers WHERE owner=${row.runOwner}`;
-          if (
-            ownerHeartbeat[0] !== undefined &&
-            ownerHeartbeat[0].lastSeenAt > now - SCHEDULER_LEASE_MS
-          ) {
-            continue;
-          }
-
-          if (current.status !== "needs-attention") {
-            yield* writeRun(
-              {
-                ...current,
-                status: "needs-attention",
-                detail:
-                  "The server restarted after provider submission; inspect the provider conversation before retrying.",
-                updatedAt: isoAt(now),
-              },
-              true,
-            );
-          }
-        }
-      }),
-    );
-  const findInitial = (submission: RoutineProviderSubmission) =>
-    submissionClaim(submission).pipe(Effect.map((claim) => claim.run));
   return {
     list,
     get,
@@ -1476,23 +1015,12 @@ export const makeRoutineStore = Effect.gen(function* () {
     tick,
     claim,
     renew,
-    consumeSubmission,
-    consumeSubmissionForProvider,
-    beginSessionPreparation,
-    bindProviderTurn,
-    markNeedsAttention,
-    markBlockedBeforeSubmission,
-    markWaitingForApproval,
-    markProviderApprovalResolved,
-    recordProviderTerminal,
-    completeProviderTurn,
-    settleOnSessionExit,
+    beginLaunch,
+    markLaunched,
     updatePreparation,
-    markSetupComplete,
     activeRuns,
-    recoverConsumed,
-    findInitial,
-    submissionClaim,
+    launchedRuns,
+    recordOrchestrationProgress,
     listConnections,
     getConnection,
     findConnection,
