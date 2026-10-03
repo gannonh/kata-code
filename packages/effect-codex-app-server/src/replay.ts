@@ -204,6 +204,9 @@ function normalizeReplayFrame(value: unknown): unknown {
         ...params,
         clientInfo: {
           ...(params.clientInfo as Record<string, unknown>),
+          // Recorded upstream fixtures name the T3 client; the fork's client identity is asserted elsewhere.
+          name: "<ignored>",
+          title: "<ignored>",
           version: "<ignored>",
         },
       };

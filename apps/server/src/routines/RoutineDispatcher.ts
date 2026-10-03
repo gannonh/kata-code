@@ -186,6 +186,10 @@ const makeRoutineDispatcher = Effect.gen(function* () {
         runtimeMode: run.configuration.runtimeMode,
         interactionMode: "default",
         workspaceStrategy: strategy,
+        // Shared routines never ran the setup script; worktree routines follow their setting.
+        runSetupScript:
+          run.configuration.workspace.kind === "worktree" &&
+          run.configuration.workspace.runSetupScript,
         initialMessage: {
           messageId: run.messageId,
           text: routinePromptText(run),

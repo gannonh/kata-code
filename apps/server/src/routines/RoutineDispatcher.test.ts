@@ -322,6 +322,33 @@ it.effect("launches a worktree routine on its routine branch from the resolved b
   }).pipe(Effect.provide(harness.layer));
 });
 
+it.effect("runs the setup script only for worktree routines that ask for it", () => {
+  const requested: Array<boolean | undefined> = [];
+  const harness = makeHarness({
+    wrapLaunch: (launch) => (input) => {
+      requested.push(input.runSetupScript);
+      return launch(input);
+    },
+  });
+  return Effect.gen(function* () {
+    const store = yield* RoutineStore;
+    const dispatcher = yield* RoutineDispatcher;
+    yield* admitTestRun("routine-shared-setup", sharedConfiguration);
+    yield* dispatcher.dispatchClaim((yield* store.claim("worker-a", 10_000))!);
+    yield* admitTestRun("routine-worktree-no-setup", {
+      ...sharedConfiguration,
+      workspace: {
+        kind: "worktree",
+        baseBranch: "main",
+        startFromOrigin: false,
+        runSetupScript: false,
+      },
+    });
+    yield* dispatcher.dispatchClaim((yield* store.claim("worker-a", 10_000))!);
+    assert.deepEqual(requested, [false, false]);
+  }).pipe(Effect.provide(harness.layer));
+});
+
 it.effect("blocks a shared routine whose directory no longer matches the project", () => {
   const harness = makeHarness();
   return Effect.gen(function* () {

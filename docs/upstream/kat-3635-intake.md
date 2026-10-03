@@ -1,0 +1,125 @@
+# KAT-3635 upstream intake
+
+## Frozen refs
+
+| Value                  | Commit                                                                       |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| Kata base              | `151832f103b418de46a92c0053d9032ffd337a4d` (`origin/main` 2026-10-03T07:00Z) |
+| Previous upstream pin  | `54084ae1e6c32809db040e4fa571c80fdf2d8ae4`                                   |
+| Frozen upstream target | `fed41fa88bb27cb4325cb208d571393850bc63c2` (frozen 2026-10-03T07:00:20Z)     |
+| Original upstream root | `6a687ee43bf222672ab8d3f4c0bab3d8d174f79f`                                   |
+
+Run `kat-upstream-20261003T070037Z-claude-mini` froze 43 commits that change 1,992 paths: 848 modified, 959 added, 175 deleted, and 10 renamed. The previous pin is an ancestor of the target. One commit dominates the range. `de34391427` "feat(orchestrator): introduce new orchestrator (#2829)" changes 1,907 files (+379,874 / −202,796). It deletes `apps/server/src/orchestration/`, the V1 provider service and adapters, and the projection persistence services, and it replaces them with `apps/server/src/orchestration-v2/`. Of the 35 later commits in the range, 18 build on V2.
+
+During the run, `main` gained KAT-3637 (`0e943f74bf`, PR #344), which unfroze `scripts/build-desktop-artifact.test.ts` for this integration. The branch merged it as `1cb6134c69`.
+
+## Ancestry
+
+KAT-3623 landed the previous pin through PR #335 as squash `f92e9a4af7d02e64cde73e623f8587681a0d37c1`. `54084ae1e6` is therefore not an ancestor of `origin/main`. `FORK.md` and `docs/upstream/kat-3623-intake.md` at the base account for exactly that pin, so the run recorded it with the guarded anchor:
+
+```bash
+git merge --strategy=ours --no-ff 54084ae1e6c32809db040e4fa571c80fdf2d8ae4
+```
+
+The anchor is `d73b3c446d0b6f4218fe18d64e5fe0b85893b968`, with parents `151832f103` and `54084ae1e6` and the base's tree. `git merge-base --all d73b3c446d fed41fa88b` returns exactly `54084ae1e6`.
+
+The three-way merge of `fed41fa88b` is `3714889205e52dc516977d695cec7f50c4759a52`, with parents the anchor and `fed41fa88b`.
+
+## Decision before Build
+
+The first merge census produced 420 conflicted files (265 content, 150 where upstream deleted a file Kata modified, 3 where Kata deleted a file upstream modified, 2 add conflicts). The run stopped at intake and reported `NEEDS_ACTION` on KAT-3635, because taking V2 changes accepted Kata outcomes. Gannon Hall decided on 2026-10-03:
+
+- **Adopt V2** (option A). Kata behavior moves onto V2 instead of staying on V1.
+- **Take the V2 mobile client.** The previous Kata mobile build cannot talk to a V2 server.
+- **Keep both Kata Routines and upstream Scheduled Tasks** until Gannon has used both.
+- **Keep Kata's desktop Electron profile** (`katacode`, legacy `Kata Code (Alpha)`, dev `katacode-dev`). Upstream's per-version `t3code-v2` profile is skipped.
+- **Unfreeze `scripts/build-desktop-artifact.test.ts` through the runbook's two-PR path** (KAT-3637), so desktop builds can package `@cursor/sdk`.
+
+Accepted outcomes that change with V2:
+
+| Outcome                     | Before                                      | After                                                                                                |
+| --------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Mixed fleet                 | V2-era clients could still drive V1 servers | `ORCHESTRATION_PROTOCOL_VERSION` is 2; clients ask the user to update an older Kata Code server      |
+| Server state database       | `state.sqlite`                              | One-time copy into `statev2.sqlite`, migrated there; a rollback loses data written after the upgrade |
+| Routine worktree path       | `.kata-routines/<runId>`                    | Chosen by V2's worktree service; the branch stays `routine/<runId>`                                  |
+| Shared routine setup script | Never ran                                   | Still never runs (`runSetupScript: false`)                                                           |
+
+## Resolution method
+
+1. **Identity-only files.** For 243 conflicts, Kata's delta from the previous pin was an identity rename (`@t3tools/` → `@kata-sh/code-`, `T3 Code` → `Kata Code`, `T3CODE_` → `KATACODE_`). The resolver checked that the transform maps the previous-pin blob exactly to Kata's blob. It then took upstream's blob through the same transform (150 files), or accepted upstream's deletion (93 files).
+2. **Renamed-base merge.** For the remaining both-modified files, `git merge-file --diff3` reran with the renamed previous-pin text as the base. Pure renames stopped conflicting, and 26 files merged cleanly.
+3. **Scope rename.** 555 upstream-added or cleanly merged files imported `@t3tools/*`. They now import `@kata-sh/code-*`.
+4. **Lanes.** The last 80 content conflicts and the V2 ports went to five lanes with disjoint file ownership: server core, providers, web and packages, desktop/mobile/root, and routines.
+5. **Manifests and lockfile.** These were resolved sequentially. The lockfile was regenerated from Kata's base lockfile with `vp install`. All 17 dependency resolutions new in the range match upstream's lockfile. vite-plus stays 0.3.3. The range changes no `patchedDependencies`.
+
+## TAKE
+
+All 43 commits, with the adaptations below. Android- and Windows-only changes (`42b5885c90` #14850, Android parts of `fd7ee2c30a`, `8283b481a3` #15021) are taken as `unsupported platform`.
+
+| Upstream                                  | Change                                                         | Kata adaptation                                                                                                                            |
+| ----------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `de34391427` #2829                        | Orchestration V2                                               | See "Ports onto V2"                                                                                                                        |
+| `ddcd310282` #15041                       | Docs, dev scripts, and CI catch up with V2                     | Kata CI keeps its own jobs; see "SKIP"                                                                                                     |
+| `e9298af6f5`, `4804036e04`, `8ed276c246`  | Mobile 2.0.0, 1.4.0, OTA major guard                           | Mobile becomes 2.0.0, so 1.x store builds never receive V2 updates; iOS only                                                               |
+| `fd7ee2c30a` #14921                       | Lint: no tests declared in loops                               | Registered as `kata-code/no-test-in-loop`; Kata test loops became `.each`. The rule is off only for the frozen `DesktopLifecycle.test.ts`. |
+| `5b31001eac`                              | Release v0.0.45                                                | Kata package versions stay Kata-owned (0.0.43)                                                                                             |
+| `22e9d35613` #15002                       | Update outdated servers when the client can't connect          | Copy uses `APP_BASE_NAME`                                                                                                                  |
+| `a7b3ce8c08`, `1e7c8e0f24`, `43bd667739`  | Provider settings, MCP tool names, skill names                 |                                                                                                                                            |
+| Remaining server/web/client-runtime fixes | Claude, Codex, OpenCode, subagents, reconnects, timers, panels | Kata copy where user-visible                                                                                                               |
+
+## SKIP
+
+- `apps/desktop/src/app/DesktopUserData.ts`, `DesktopPreReadyFileSystem.ts`, and their tests, plus the `t3code-v2` cases in `DesktopClerk.test.ts` and `DesktopAppIdentity.test.ts`. Gannon's decision keeps Kata's profile. Kata already creates the Clerk bridge synchronously before Electron is ready.
+- `reconcileV2PreviewMigration.ts` and its test. It hardcodes upstream migration IDs 53–56, no Kata database ever held a V2 preview ledger, and if it fired it would write IDs that collide with Kata's.
+- In `ci.yml`: the `transfer-report` job and its result upload (Kata removed those artifacts in KAT-3312), and the `build-essential` step (`ubuntu-24.04` runners already have a compiler).
+- Upstream `AGENTS.md`, `.agents/skills/contribution-triage`, and `.github/TRIAGE_EXEMPTIONS.td` edits. Kata deleted those files.
+- Material You (Android) docs, and `CONTRIBUTING.md` text about the triage exemptions file.
+- A mobile test expecting 50-character truncated titles. Kata keeps 72-character text titles under the frozen `projectThreadStartTurn.test.ts`.
+- Carried forward: upstream identity on product surfaces, artwork, unlicensed assets, and parked infrastructure.
+
+## Ports onto V2
+
+| Kata behavior                                                      | V1 owner (deleted)                                        | V2 owner                                                                                                                         | Proof                                                                                                                                                           |
+| ------------------------------------------------------------------ | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Routines dispatch, at most once                                    | `RoutineDispatcher` + V1 engine + `ProviderService` fence | `RoutineDispatcher` → `ThreadLaunchService` with the run's fixed command, thread, and message IDs                                | `RoutineDispatcher.test.ts`: a launch cut off after commit and retried by another worker yields one thread, one message, one run                                |
+| Routine outcomes                                                   | `ProviderService` event tap, `ProviderRuntimeIngestion`   | New `RoutineRunObserver` over V2 stored events with the durable `routine_runs.event_cursor`                                      | `RoutineRunObserver.test.ts` (20 cases)                                                                                                                         |
+| A run cut off by a restart settles as needs-attention              | `RoutineStore` recovery                                   | Observer matches V2's `command:runtime-reconcile:startup` / `shutdown` cancellations                                             | `RoutineDispatcher.test.ts` runs V2's real startup reconcile                                                                                                    |
+| V1 runs in flight at upgrade free their slot                       | —                                                         | Kata migration `061_RoutinesOnOrchestrationV2` (also drops `routine_provider_events`)                                            | `061_RoutinesOnOrchestrationV2.test.ts`                                                                                                                         |
+| Shared routines skip the setup script                              | `RoutineDispatcher`                                       | `ThreadLaunchService` `runSetupScript?: boolean`                                                                                 | `ThreadLaunchService.test.ts`, `RoutineDispatcher.test.ts`                                                                                                      |
+| Worktree submodules setting (KAT-3442)                             | V1 worktree creation                                      | `ThreadLaunchService` passes the project's `worktreeSubmodules`; upstream had dropped it for every V2 worktree                   | `ThreadLaunchService.test.ts`                                                                                                                                   |
+| Routines RPCs, scopes, scheduler startup                           | `ws.ts`, `RpcAuthorization.ts`, `serverRuntimeStartup.ts` | Same files on V2; the draft handler reads `projectService.listShells()`                                                          | `server.kata.test.ts`, routines suites                                                                                                                          |
+| KAT-3453 storage cleanup through symlinked roots                   | `storageCleanup.ts`, `ThreadSettlementReactor.test.ts`    | `storageCleanup.ts` on V2's shape                                                                                                | `storageCleanup.symlink.test.ts` (8). Also fixes upstream reading the always-empty `archived.threads`                                                           |
+| Sprite activity lease                                              | `ProviderService.listSessions()`                          | Reads non-stopped rows of `orchestration_v2_projection_provider_sessions`; a failed read keeps the Sprite awake                  | `spriteActivityLease.test.ts`                                                                                                                                   |
+| Server-level Kata cases                                            | `server.test.ts`, `bin.test.ts` (deleted upstream)        | `server.kata.test.ts` (9), `bin.kata.test.ts` (11)                                                                               | Covers routine webhook readiness, `/.well-known/kata/environment`, relay config and link state, managed callback, Kata Connect, KAT-3578 scopes, `katacode` CLI |
+| KAT-3551 Claude Stop                                               | `ClaudeAdapter`, `ProviderCommandReactor`                 | `ClaudeAdapterV2`: a send that hits a closed query fails and settles; a rejected interrupt still closes                          | Two `ClaudeAdapterV2` tests that fail without the fix; cross-thread concurrency in `KeyedSerialExecutor.test.ts`                                                |
+| Cursor plugin MCP servers and OAuth                                | `CursorPluginMcp.ts`, `CursorPluginOAuth.ts` over ACP     | The Cursor SDK's `plugins` setting source loads plugin MCP servers and reads their tokens itself; the ACP forwarding was deleted | SDK source, recorded in the decisions log                                                                                                                       |
+| Cursor plugin OAuth in worktrees (KAT-3447/3449)                   | `ProviderService` `workspaceRoot` + `CursorAdapter`       | See "Open items"                                                                                                                 |                                                                                                                                                                 |
+| Bare `$skill` pick sent as `/name`                                 | `CursorAdapter`                                           | `CursorAdapterV2` user-message resolution                                                                                        | `CursorAdapterV2.test.ts`                                                                                                                                       |
+| ACP `session/cancel` on interrupt                                  | `AcpSessionRuntime`                                       | Obsolete: V2 cancels explicitly (`AcpAdapterV2.interruptTurn`). Keeping it would send a stray cancel after Grok's fallback       | —                                                                                                                                                               |
+| KAT-3496 Cursor usage guard                                        | `UsageService.ts`                                         | Unchanged                                                                                                                        | `UsageService.test.ts`                                                                                                                                          |
+| `KATACODE_CODEX_LAUNCH_ARGS`, `KATACODE_CONTEXT_HANDOFF_TOKEN_CAP` | —                                                         | Operator-facing names                                                                                                            | `CodexAdapterV2.test.ts`; `docs/user/portable-handoffs.md`                                                                                                      |
+| KAT-3542 usage-limits panel after queued sends                     | `sendQueuedMessage.ts`, `QueuedMessageSender.tsx`         | V2 queues on the server, so the panel key includes the latest run's start time, and V2 plan follow-ups record spend              | Four `ChatView.logic.test.ts` cases                                                                                                                             |
+| Routine drafting on every text-generation provider                 | `textGeneration/*`                                        | Ported onto the Cursor SDK text generation and added to OpenCode2, Pi, and the ACP Registry stub                                 | `textGeneration` suites                                                                                                                                         |
+
+`threadPullRequestCompatibility` and `translateLegacyProjectOverridePatch` remain and are tested. With protocol 2, the single-link path for V1 servers is no longer reachable at runtime.
+
+**Cross-process dispatch guard.** Kata's V1 `orchestration_dispatch_lock` protected decisions made from a stale in-memory model. V2 reads SQLite on every dispatch (`ProjectionStore`) and keeps command receipts idempotent inside the commit transaction (`EventSink`). It has no per-database single-writer lock: thread locks are per process (`threadDispatch.withLock`). The routines lease and claim logic stays as the cross-process guard for routine dispatch. Porting the V1 lock would hold the SQLite connection across provider calls, so the run did not port it. Supporting two server processes on one state database is not a goal of this integration.
+
+## Preservation gate
+
+Trusted test files keep their base bytes, apart from the planned KAT-3637 file. Upstream coverage added to trusted files moved to companion suites: `DesktopWindow.upstream.test.ts`, `build-desktop-artifact.upstream.test.ts`, and `projectThreadStartTurn.upstream.test.ts`.
+
+`scripts/build-desktop-artifact.test.ts` (`desktop-packaging-asset-identity`) pins the exact packaging lists. Packaging the Cursor SDK changes three of them. KAT-3637 (PR #344, merge `0e943f74bf`) unfroze the file on `main`. This branch adds the `@cursor/sdk` exclusions, asar ignore globs, and the `cursor-sdk` extra resource, then removes the `RETIREMENTS` entry, which re-freezes the file at its new bytes (`eca00ac483`).
+
+## Pin consumers
+
+`FORK.md`, both `Lint`-job literals in `.github/workflows/ci.yml` (`UPSTREAM_TIP`, `UPSTREAM_SHA`), the runbook's frozen refs and command examples, and `currentUpstreamSha` in `scripts/check-upstream-preservation.test.ts` all name `fed41fa88b`. The original root stays `6a687ee43b`.
+
+## Open items
+
+- **Cursor plugin OAuth in worktree threads (KAT-3447/3449).** The SDK reads OAuth tokens from the thread folder's Cursor project state, and V2 does not pass the project root to the adapter. A port is in progress on this branch.
+- **`AntigravityAdapterV2.test.ts`.** Two client file-system tests fail on macOS in upstream code that this merge did not change. See "Verification".
+
+## Verification
+
+Recorded after the candidate is committed.
