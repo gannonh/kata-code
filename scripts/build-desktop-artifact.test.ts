@@ -561,6 +561,9 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }
 
     assert.deepStrictEqual(DESKTOP_FILE_EXCLUSIONS, [
+      "!**/node_modules/@cursor/sdk-*/**/*",
+      "!apps/desktop/prod-resources/cursor-sdk",
+      "!apps/desktop/prod-resources/cursor-sdk/**/*",
       "!**/node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
       "!apps/desktop/resources/browser-secret",
       "!apps/desktop/resources/browser-secret/**/*",
@@ -642,6 +645,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       ]);
       assert.deepStrictEqual(win.extraResources, [
         {
+          from: "apps/desktop/prod-resources/cursor-sdk",
+          to: "node_modules/@cursor",
+        },
+        {
           from: "apps/desktop/prod-resources/resource-monitor",
           to: "resource-monitor",
         },
@@ -652,14 +659,20 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       // so listing it here would fail the build on a missing source file.
       assert.deepStrictEqual(winWithoutWslPrebuild.extraResources, [
         {
+          from: "apps/desktop/prod-resources/cursor-sdk",
+          to: "node_modules/@cursor",
+        },
+        {
           from: "apps/desktop/prod-resources/resource-monitor",
           to: "resource-monitor",
         },
         ...WINDOWS_SERVER_EXTRA_RESOURCES,
       ]);
       assert.deepStrictEqual(win.nsis, { differentialPackage: true });
-      // The Claude SDK platform packages and .bin shims never ship.
+      // The Cursor and Claude SDK platform packages and .bin shims never ship in app.asar.
       assert.deepStrictEqual(WINDOWS_SERVER_ASAR_IGNORE_GLOBS, [
+        "**/node_modules/@cursor/sdk-*",
+        "**/node_modules/@cursor/sdk-*/**",
         "**/node_modules/@anthropic-ai/claude-agent-sdk-*",
         "**/node_modules/@anthropic-ai/claude-agent-sdk-*/**",
         "**/node_modules/.bin",
@@ -1889,6 +1902,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("stages the resource monitor as an external executable resource", () => {
     assert.deepStrictEqual(DESKTOP_EXTRA_RESOURCES, [
+      {
+        from: "apps/desktop/prod-resources/cursor-sdk",
+        to: "node_modules/@cursor",
+      },
       {
         from: "apps/desktop/prod-resources/resource-monitor",
         to: "resource-monitor",
