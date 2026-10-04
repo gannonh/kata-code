@@ -145,7 +145,7 @@ describe("composerSubmissionIntentForKey", () => {
           isDraftThread: true,
           event: modEnter,
         }),
-      ).toBe("foreground");
+      ).toBe("background");
       expect(
         composerSubmissionIntentForKey({ ...running, event: { ...enter, shiftKey: true } }),
       ).toBeNull();

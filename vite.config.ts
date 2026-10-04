@@ -173,6 +173,7 @@ export default defineConfig({
       "kata-code/no-manual-effect-runtime-in-tests": "error",
       "kata-code/no-native-title-tooltip": "error",
       "kata-code/no-test-in-loop": "error",
+      "kata-code/no-unscoped-has": "error",
       "kata-code/namespace-node-imports": "error",
     },
     overrides: [

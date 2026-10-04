@@ -265,24 +265,32 @@ describe("mobile connection storage", () => {
     expect(fallback.updatedAt).toEqual(expect.any(Number));
   });
 
-  it("persists thread list shelf expansion preferences", async () => {
+  it("persists thread list shelf preferences", async () => {
     await expect(
       savePreferencesPatch({
         threadListV2SettledShelfExpanded: false,
         threadListV2SnoozedShelfExpanded: true,
+        threadListV2WorkingShelfExpanded: true,
+        workingShelfEnabled: true,
       }),
     ).resolves.toEqual({
       threadListV2SettledShelfExpanded: false,
       threadListV2SnoozedShelfExpanded: true,
+      threadListV2WorkingShelfExpanded: true,
+      workingShelfEnabled: true,
     });
 
     await expect(loadPreferences()).resolves.toEqual({
       threadListV2SettledShelfExpanded: false,
       threadListV2SnoozedShelfExpanded: true,
+      threadListV2WorkingShelfExpanded: true,
+      workingShelfEnabled: true,
     });
     expect(JSON.parse(mocks.getPreferencesJson() ?? "")).toEqual({
       threadListV2SettledShelfExpanded: false,
       threadListV2SnoozedShelfExpanded: true,
+      threadListV2WorkingShelfExpanded: true,
+      workingShelfEnabled: true,
     });
   });
 

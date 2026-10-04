@@ -274,4 +274,7 @@ On web and desktop, HTML and PDF files open as rendered pages. Switch an HTML
 file to source view to read its markup; a link to a specific line opens source
 automatically. HTML previews cannot access your Kata Code session.
 
+The file viewer recognizes images, HTML, and PDF files by their filename extension,
+including filenames or folders containing `#` or `?`.
+
 On mobile, select a PDF attachment or link to open it in the native iOS viewer.
