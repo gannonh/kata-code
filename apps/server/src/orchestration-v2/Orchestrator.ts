@@ -5164,6 +5164,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ...(dispatchMode.type === "defer_start" && dispatchMode.workspaceStrategy !== undefined
             ? { workspacePreparation: dispatchMode.workspaceStrategy }
             : {}),
+          ...(dispatchMode.type === "defer_start" && dispatchMode.runSetupScript === false
+            ? { runSetupScript: false }
+            : {}),
           ...wakeWorkStartedAt(projection.runs, command),
         };
         const attempt: OrchestrationV2RunAttempt = {

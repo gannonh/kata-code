@@ -48,7 +48,7 @@ import { makeProviderFailure } from "./ProviderFailure.ts";
 import { randomUuidV4 } from "./RandomUuid.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
-export type ThreadLaunchWorkspaceStrategy = (
+export type ThreadLaunchWorkspaceStrategy =
   | { readonly type: "root"; readonly branch?: string | undefined }
   | {
       readonly type: "existing_worktree";
@@ -60,11 +60,7 @@ export type ThreadLaunchWorkspaceStrategy = (
       readonly baseRef: string;
       readonly branch?: string | undefined;
       readonly startFromOrigin?: boolean | undefined;
-    }
-) & {
-  /** Recorded on the run so a retried preparation keeps a routine's setting. */
-  readonly runSetupScript?: boolean | undefined;
-};
+    };
 
 export interface ThreadLaunchInitialMessage {
   readonly messageId?: MessageId;
@@ -844,10 +840,8 @@ const make = Effect.gen(function* () {
               modelSelection: input.modelSelection,
               dispatchMode: {
                 type: "defer_start",
-                workspaceStrategy:
-                  input.runSetupScript === false
-                    ? { ...workspaceStrategy, runSetupScript: false }
-                    : workspaceStrategy,
+                workspaceStrategy,
+                ...(input.runSetupScript === false ? { runSetupScript: false } : {}),
               },
               createdBy: input.createdBy,
               creationSource: input.creationSource,
@@ -977,7 +971,7 @@ const make = Effect.gen(function* () {
         projectId: projection.thread.projectId,
         workspaceStrategy: reuse?.strategy ?? workspacePreparation,
         ...(reuse === null ? {} : { reusedWorktree: reuse.reusedWorktree }),
-        ...(workspacePreparation.runSetupScript === false ? { runSetupScript: false } : {}),
+        ...(run.runSetupScript === false ? { runSetupScript: false } : {}),
         ...(message === undefined
           ? {}
           : {

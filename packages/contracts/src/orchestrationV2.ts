@@ -508,26 +508,21 @@ export const OrchestrationV2RunBackgroundWorkCancelled = Schema.Struct({
 export type OrchestrationV2RunBackgroundWorkCancelled =
   typeof OrchestrationV2RunBackgroundWorkCancelled.Type;
 
-// Kata routines record `runSetupScript: false` on a run's workspace preparation,
-// so retrying a failed preparation still skips the project's setup script.
 export const OrchestrationV2ThreadLaunchWorkspaceStrategy = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("root"),
     branch: Schema.optional(TrimmedNonEmptyString),
-    runSetupScript: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("existing_worktree"),
     worktreePath: TrimmedNonEmptyString,
     branch: Schema.optional(TrimmedNonEmptyString),
-    runSetupScript: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("worktree"),
     baseRef: TrimmedNonEmptyString,
     branch: Schema.optional(TrimmedNonEmptyString),
     startFromOrigin: Schema.optional(Schema.Boolean),
-    runSetupScript: Schema.optional(Schema.Boolean),
   }),
 ]);
 export type OrchestrationV2ThreadLaunchWorkspaceStrategy =
@@ -579,6 +574,8 @@ export const OrchestrationV2Run = Schema.Struct({
   delegatedCompletion: Schema.optional(OrchestrationV2DelegatedCompletionCohort),
   /** How a launch prepares this run's workspace; prepared-run.retry repeats it. */
   workspacePreparation: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
+  /** Kata: `false` when the launch skipped the setup script; prepared-run.retry keeps it. */
+  runSetupScript: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2Run = typeof OrchestrationV2Run.Type;
 
@@ -2724,6 +2721,8 @@ export const OrchestrationV2Command = Schema.Union([
       Schema.Struct({
         type: Schema.Literal("defer_start"),
         workspaceStrategy: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
+        /** Kata: recorded on the run so a retried preparation skips the setup script too. */
+        runSetupScript: Schema.optional(Schema.Boolean),
       }),
       Schema.Struct({ type: Schema.Literal("steer_active"), targetRunId: RunId }),
       Schema.Struct({ type: Schema.Literal("restart_active"), targetRunId: RunId }),

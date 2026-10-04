@@ -2352,7 +2352,7 @@ it.effect("keeps a launch's setup-script opt-out when its failed preparation is 
         .pipe(Effect.map((projection) => projection.runs[0]?.status === "failed")),
     );
     const failed = yield* threads.getThreadProjection(launched.threadId);
-    assert.equal(failed.runs[0]?.workspacePreparation?.runSetupScript, false);
+    assert.equal(failed.runs[0]?.runSetupScript, false);
 
     yield* launches.retryPreparation({
       commandId: CommandId.make("command:launch:kata-retry-no-setup:1"),
