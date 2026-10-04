@@ -207,6 +207,8 @@ overrides:
   "@expo/dom-webview": 58.0.2
   "@expo/metro-config": 58.0.6
   expo-constants: 58.0.9
+  # Hold the patched version; a fresh resolve otherwise picks a newer patch release.
+  expo-modules-core: 58.0.11
   expo-router: 58.0.10
   "expo-sharing>@expo/config-plugins": 58.0.4
   "expo-sharing>@expo/config-types": 58.0.2
