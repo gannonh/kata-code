@@ -111,4 +111,36 @@ Two independent Opus reviews covered the complete delta, split by path with no o
 
 ## Verification
 
-Pending.
+Candidate `3611da0a891144190c9379d3451939f317edd95a` on base `3b12b15c9699457cc558437ff68ec6be32d0dcba`. The commit recording this section changes only this document.
+
+**Local checks** (clean checkout, macOS):
+
+- Pass: branding (product and agent-facing) and its tests, workflow references and their test, the nightly gate test, the preview-artifact test, `vp run knip:check`, `vp check`, `vpr typecheck`, desktop build and preload verification, `lint:mobile`, release smoke.
+- The non-server partition passes, including the darwin-only `permissions-service` and `notification-center-manager` tests (2 files, 5 tests), run explicitly as well.
+- `@kata-sh/code-web` passes.
+- `@kata-sh/code-cli` on `3611da0a89`: 497 files pass, 7 skipped (6,669 tests). An earlier run on `8036478648` hit one projection timeout in `OrchestratorMcpToolkit.integration.test.ts` while a typecheck ran beside it. That file passes alone (2 of 2).
+
+**PR CI:** run 37186061311 on `3611da0a89`, all 17 jobs green.
+
+**Trusted checker**, archived from base `3b12b15c96` and run on a clean checkout of the candidate:
+
+- `--mode ci`: exit 0. The inventory and 28 checks PASS. `icon-composer-live-evidence` and `human-device-provider-evidence` are NOT RUN.
+- `--mode human-review` with exact-ref records:
+  - `CHANGED_RETAINED_OUTCOMES status=PASS`, 6 TAKE: product identity, Connect wire identity, and state isolation (all for `FORK.md`), plus mobile shelf preferences, mobile config identity, and Connect early access.
+  - `INTEGRATION_RECORD status=PASS`.
+  - It prints `HUMAN_REVIEW_ACCEPTANCE status=FAIL detail=Missing mandatory manual evidence for icon-composer-live-evidence.` The only open items are the two live checks under the standing waiver (Gannon Hall, 2026-09-25), recorded as NOT RUN.
+
+**Web** (`verify-katacode`): run `web-20261004-074321-09865f8b` on `main`, run `web-20261004-074500-746b2d0e` on the candidate. All 10 scenarios pass:
+
+1. Pairing and the empty landing match `main` (70 of 1.26M pixels differ, anti-aliasing).
+2. Add a local project and reach the draft composer.
+3. General shows the version and no nightly mobile-beta row. The Working section toggle persists after a reload, and settings search works.
+4. Usage switches between Cost, Tokens, and Limits, and its breakdowns render.
+5. The command palette opens, filters, and jumps to Settings.
+6. The bare Kata sidebar header renders without the T3 wordmark, and a draft thread has a context menu (#10637).
+7. The routine editor shows next runs. It was discarded without saving.
+8. Scheduled Tasks renders with Kata copy.
+9. Provider rows render. Partial: "Update now" (#15416) was not reachable, because no installed provider CLI was out of date.
+10. No user-visible T3 product copy appears on any page visited; "T3 Chat" is a theme name.
+
+No message was sent to a provider, to avoid a billed call. Screenshots and a 44-second 1 fps video are on PR #346; usage figures are blurred.
