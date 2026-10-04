@@ -92,7 +92,9 @@ export const make = Effect.gen(function* () {
                   ? "unauthenticated"
                   : error.reason === "rate-limit"
                     ? "rate-limited"
-                    : "failed",
+                    : error.reason === "not-found"
+                      ? "not-found"
+                      : "failed",
           }),
       ),
     );

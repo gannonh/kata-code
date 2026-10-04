@@ -7,8 +7,14 @@ import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentSnapshotAtom } from "./shell";
 
+export const environmentProjects = createEnvironmentProjectAtoms({
+  catalogValueAtom: environmentCatalog.catalogValueAtom,
+  snapshotAtom: environmentSnapshotAtom,
+});
 export const projectEnvironment: ReturnType<typeof createProjectEnvironmentAtoms> =
-  createProjectEnvironmentAtoms(connectionAtomRuntime);
+  createProjectEnvironmentAtoms(connectionAtomRuntime, {
+    projectAtom: environmentProjects.projectAtom,
+  });
 /**
  * Web-only: project content search backs the ⇧⌘F dialog, which has no mobile
  * surface, so the atom family lives here instead of the shared client-runtime
@@ -19,8 +25,4 @@ export const projectContentSearch = createEnvironmentRpcQueryAtomFamily(connecti
   tag: WS_METHODS.projectsSearchContents,
   staleTimeMs: 5_000,
   idleTtlMs: 60_000,
-});
-export const environmentProjects = createEnvironmentProjectAtoms({
-  catalogValueAtom: environmentCatalog.catalogValueAtom,
-  snapshotAtom: environmentSnapshotAtom,
 });
