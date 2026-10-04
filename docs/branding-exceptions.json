@@ -30,11 +30,6 @@
     "reason": "Internal source comment; no rendered product copy."
   },
   {
-    "path": "apps/server/src/provider/providerMaintenance.ts",
-    "line": "* owns that path; anything unproven stays manual-only so T3 Code never runs",
-    "reason": "Internal source comment; no rendered product copy."
-  },
-  {
     "path": "apps/server/src/project/AgentSessionScanner.ts",
     "line": "* T3 Code runs its own agent sessions inside disposable worktrees. Their",
     "reason": "Internal source comment; no rendered product copy."

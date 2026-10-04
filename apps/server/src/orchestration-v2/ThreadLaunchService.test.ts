@@ -2315,3 +2315,58 @@ it.effect("skips the setup script when the launch opts out", () =>
     }).pipe(Effect.provide(harness.layer));
   }),
 );
+
+// Kata: a routine's setup-script opt-out survives a retried preparation.
+it.effect("keeps a launch's setup-script opt-out when its failed preparation is retried", () => {
+  let fetchFailures = 1;
+  const harness = makeHarness({
+    fetchRemote: () =>
+      fetchFailures-- > 0
+        ? Effect.fail(
+            new GitCommandError({
+              operation: "GitVcsDriver.fetchRemote",
+              command: "git",
+              cwd: project.workspaceRoot,
+              detail: "Git could not update a local reference.",
+              exitCode: 1,
+            }),
+          )
+        : Effect.void,
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const outbox = yield* EffectOutbox.EffectOutboxV2;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch({
+      ...launchInput({
+        command: "command:launch:kata-retry-no-setup",
+        thread: "thread:launch:kata-retry-no-setup",
+        message: "Retry without setup",
+        workspace: { type: "worktree", baseRef: "main", startFromOrigin: true },
+      }),
+      runSetupScript: false,
+    });
+    yield* waitUntil(() =>
+      threads
+        .getThreadProjection(launched.threadId)
+        .pipe(Effect.map((projection) => projection.runs[0]?.status === "failed")),
+    );
+    const failed = yield* threads.getThreadProjection(launched.threadId);
+    assert.equal(failed.runs[0]?.workspacePreparation?.runSetupScript, false);
+
+    yield* launches.retryPreparation({
+      commandId: CommandId.make("command:launch:kata-retry-no-setup:1"),
+      threadId: launched.threadId,
+      runId: failed.runs[0]!.id,
+    });
+    yield* waitUntil(() =>
+      outbox
+        .listByCommandId(CommandId.make("command:launch:kata-retry-no-setup:1:release"))
+        .pipe(Effect.map((effects) => effects.length === 1)),
+    );
+    const retried = yield* threads.getThreadProjection(launched.threadId);
+    assert.equal(retried.runs[0]?.status, "starting");
+    assert.equal(harness.createWorktree.mock.calls.length, 1);
+    assert.equal(harness.runSetup.mock.calls.length, 0);
+  }).pipe(Effect.provide(harness.layer));
+});

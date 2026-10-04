@@ -1,3 +1,4 @@
+// @effect-diagnostics deterministicKeys:off - FORK.md retains internal upstream service identifiers.
 import {
   CommandId,
   MessageId,

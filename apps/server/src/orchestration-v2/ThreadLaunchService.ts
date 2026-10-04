@@ -48,7 +48,7 @@ import { makeProviderFailure } from "./ProviderFailure.ts";
 import { randomUuidV4 } from "./RandomUuid.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
-export type ThreadLaunchWorkspaceStrategy =
+export type ThreadLaunchWorkspaceStrategy = (
   | { readonly type: "root"; readonly branch?: string | undefined }
   | {
       readonly type: "existing_worktree";
@@ -60,7 +60,11 @@ export type ThreadLaunchWorkspaceStrategy =
       readonly baseRef: string;
       readonly branch?: string | undefined;
       readonly startFromOrigin?: boolean | undefined;
-    };
+    }
+) & {
+  /** Recorded on the run so a retried preparation keeps a routine's setting. */
+  readonly runSetupScript?: boolean | undefined;
+};
 
 export interface ThreadLaunchInitialMessage {
   readonly messageId?: MessageId;
@@ -103,7 +107,7 @@ export interface ThreadLaunchInput {
 /** What workspace preparation reads from a launch; a retry rebuilds it from the run. */
 type PreparationInput = Pick<
   ThreadLaunchInput,
-  "commandId" | "projectId" | "workspaceStrategy" | "initialMessage"
+  "commandId" | "projectId" | "workspaceStrategy" | "initialMessage" | "runSetupScript"
 > & {
   /**
    * Set when a retry reuses the worktree its failed attempt created and
@@ -838,7 +842,13 @@ const make = Effect.gen(function* () {
               ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
               ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
               modelSelection: input.modelSelection,
-              dispatchMode: { type: "defer_start", workspaceStrategy },
+              dispatchMode: {
+                type: "defer_start",
+                workspaceStrategy:
+                  input.runSetupScript === false
+                    ? { ...workspaceStrategy, runSetupScript: false }
+                    : workspaceStrategy,
+              },
               createdBy: input.createdBy,
               creationSource: input.creationSource,
             })
@@ -967,6 +977,7 @@ const make = Effect.gen(function* () {
         projectId: projection.thread.projectId,
         workspaceStrategy: reuse?.strategy ?? workspacePreparation,
         ...(reuse === null ? {} : { reusedWorktree: reuse.reusedWorktree }),
+        ...(workspacePreparation.runSetupScript === false ? { runSetupScript: false } : {}),
         ...(message === undefined
           ? {}
           : {

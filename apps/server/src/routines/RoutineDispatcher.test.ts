@@ -167,6 +167,7 @@ function makeHarness(options: HarnessOptions = {}) {
             const service = yield* ThreadLaunch.ThreadLaunchService;
             return ThreadLaunch.ThreadLaunchService.of({
               launch: options.wrapLaunch!(service.launch),
+              retryPreparation: service.retryPreparation,
             });
           }),
         ).pipe(Layer.provide(realLaunch));

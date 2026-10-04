@@ -7909,6 +7909,7 @@ describe("ClaudeAdapterV2 Stop races (KAT-3551)", () => {
               messages: input.messages,
               offer: input.offer,
               setModel: () => Effect.void,
+              setPermissionMode: () => Effect.void,
               interrupt: input.interrupt,
               close: input.close,
             }),
