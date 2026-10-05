@@ -76,11 +76,8 @@ export class ReleaseManifestUnreadableError extends Schema.TaggedError<ReleaseMa
 }
 
 /**
- * The feeds a nightly or stable release must carry, one per desktop platform in
- * docs/operations/supported-platforms.md, named `<nightly|latest><suffix>.yml`.
- * Turning a parked platform back on adds its feed here; Windows's suffix is "".
- * The mac feed is merged from the two macOS builds, so it must also name the
- * update zip each architecture installs.
+ * One feed per desktop platform in docs/operations/supported-platforms.md.
+ * Re-enabling a parked platform adds its feed here.
  */
 const REQUIRED_UPDATER_FEEDS = [
   {
@@ -95,11 +92,6 @@ const REQUIRED_UPDATER_FEEDS = [
   { suffix: "-linux-arm64", platform: "Linux arm64", archUpdateFiles: [] },
 ] as const;
 
-/**
- * Every required feed the build did not produce for the channel `tag` belongs
- * to, and every macOS architecture the mac feed leaves without an update zip.
- * Preview releases carry no feeds.
- */
 export function findMissingUpdaterFeedProblems(
   tag: string,
   manifests: ReadonlyArray<{ readonly name: string; readonly manifest: UpdateManifest }>,
