@@ -263,16 +263,18 @@ which are far longer. A release whose checks fail never creates a production dep
 `deploy_web` runs after the GitHub Release is published. Stable releases alias the
 same deployment to both the `latest` channel and the router domain so the router
 rules stay current. Nightly releases only alias the `nightly` channel. If any job
-before it fails, the staged deployment stays unaliased and the channel domains keep the
+before it fails, the channel domains never move to the staged deployment and keep the
 previous release's deployment.
 
-`--skip-domain` stages the production deployment without assigning it a domain. The 2026-10-03
-nightly, the one release that ran `build_web` while the project still had its own
-`katacode-web.vercel.app` hostname, left that hostname on its earlier deployment. As of
-2026-10-05 the `katacode-web` project has no registered domains, so `build_web` moves no hostname.
-The channel and router domains are aliases, and in the release workflow only `deploy_web`'s
-`vercel alias set` moves them. Until then the staged build answers only at its own deployment
-URL, which redirects to Vercel sign-in.
+`--skip-domain` disables Vercel's automatic promotion of the project's domains to the staged
+build. The `katacode-web` project has no registered domains. The channel and router domains are
+aliases, and in the release workflow only `deploy_web`'s `vercel alias set` moves them. Vercel
+still points the project's generated production URL, `katacode-web-astro-labs.vercel.app`, at
+each production deployment, so that URL serves the staged build as soon as `build_web` deploys
+it, before the GitHub Release exists. That URL and each deployment's own URL redirect to Vercel
+sign-in because the project's Vercel Authentication setting (`all_except_custom_domains`) covers
+them. If that protection is turned off, anyone who knows either URL can load a client that was
+never released and whose matching server package may not be on npm yet.
 
 One-time Vercel dashboard setup:
 
@@ -398,9 +400,9 @@ The workflow enforces this ordering:
 1. `publish_cli` publishes the exact release version to npm, on every channel.
 2. `release` depends on `publish_cli` before exposing desktop artifacts in GitHub Releases.
 3. `deploy_web` depends on `release` before moving the hosted channel to the new client.
-   `build_web` builds that client earlier, with `--skip-domain`, which assigns the build no
-   domain. The project has no registered domains, so the channel domains stay on the previous
-   client until `deploy_web` aliases them (see
+   `build_web` builds that client earlier, with `--skip-domain`. The channel domains stay on the
+   previous client until `deploy_web` aliases them. The project's generated production URL moves
+   to the new client at build time, behind Vercel sign-in (see
    [Hosted web app release deployment](#hosted-web-app-release-deployment)).
 
 Preserve these dependencies when changing the release graph. Publishing a client first would leave
