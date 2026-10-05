@@ -1195,13 +1195,7 @@ const makeCursorPluginFixture = Effect.fn("makeCursorPluginFixture")(function* (
   };
 });
 
-/**
- * Opens a Cursor session in `cwd` and runs one turn per T3 MCP authorization
- * header, setting T3's MCP session to that header before the turn. Returns
- * what the SDK received: each agent open, the MCP servers on each send, and
- * which opened agents were closed.
- */
-const cursorMcpServersForTurn = Effect.fn("cursorMcpServersForTurn")(function* (input: {
+const runCursorTurns = Effect.fn("runCursorTurns")(function* (input: {
   readonly cwd: string;
   readonly projectRoot: string;
   readonly env: NodeJS.ProcessEnv;
@@ -1365,7 +1359,7 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         { folder: "project", accessToken: "project-linear-token" },
       ]);
       const linear = linearOAuthServer("project-linear-token");
-      const worktree = yield* cursorMcpServersForTurn({
+      const worktree = yield* runCursorTurns({
         cwd: fixture.worktree,
         projectRoot: fixture.project,
         env: fixture.env,
@@ -1375,8 +1369,6 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         "plugin-linear-linear": linearServer("project-linear-token"),
         "t3-code": T3_MCP_SERVER,
       };
-      // The SDK's own plugin loader does not load installed plugins in local
-      // runs, so the agent options carry the project's login.
       assert.deepEqual(worktree.opened, [forwarded]);
       assert.deepEqual(worktree.sent, [undefined]);
       // One probe per folder pair, not one per turn or per agent open.
@@ -1392,7 +1384,7 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
           { folder: "project", accessToken: "project-linear-token" },
         ]);
         const linear = linearOAuthServer("project-linear-token");
-        const project = yield* cursorMcpServersForTurn({
+        const project = yield* runCursorTurns({
           cwd: fixture.project,
           projectRoot: fixture.project,
           env: fixture.env,
@@ -1415,7 +1407,7 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         { folder: "worktree", accessToken: "worktree-linear-token" },
       ]);
       const linear = linearOAuthServer("worktree-linear-token");
-      const worktree = yield* cursorMcpServersForTurn({
+      const worktree = yield* runCursorTurns({
         cwd: fixture.worktree,
         projectRoot: fixture.project,
         env: fixture.env,
@@ -1457,7 +1449,7 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
           ],
         );
         const linear = linearOAuthServer("project-linear-token");
-        const project = yield* cursorMcpServersForTurn({
+        const project = yield* runCursorTurns({
           cwd: fixture.project,
           projectRoot: fixture.project,
           env: { ...fixture.env, TOOLS_API_KEY: "tools-key" },
@@ -1497,7 +1489,7 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         { folder: "project", accessToken: "expired-linear-token" },
       ]);
       const linear = linearOAuthServer("fresh-linear-token");
-      const worktree = yield* cursorMcpServersForTurn({
+      const worktree = yield* runCursorTurns({
         cwd: fixture.worktree,
         projectRoot: fixture.project,
         env: fixture.env,
@@ -1535,7 +1527,7 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         },
       ]);
       const linear = linearOAuthServer("newer-linear-token");
-      const worktree = yield* cursorMcpServersForTurn({
+      const worktree = yield* runCursorTurns({
         cwd: fixture.worktree,
         projectRoot: fixture.project,
         env: fixture.env,
@@ -1578,7 +1570,7 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         String(input) === "https://mcp.linear.app/token"
           ? Promise.resolve(new Response(null, { status: 400 }))
           : linear.fetchFn(input, init);
-      const worktree = yield* cursorMcpServersForTurn({
+      const worktree = yield* runCursorTurns({
         cwd: fixture.worktree,
         projectRoot: fixture.project,
         env: fixture.env,
@@ -1603,7 +1595,7 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         { folder: "project", accessToken: "project-linear-token" },
       ]);
       const linear = linearOAuthServer("project-linear-token");
-      const turns = yield* cursorMcpServersForTurn({
+      const turns = yield* runCursorTurns({
         cwd: fixture.worktree,
         projectRoot: fixture.project,
         env: fixture.env,
@@ -1625,7 +1617,7 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         { folder: "project", accessToken: "project-linear-token" },
       ]);
       const linear = linearOAuthServer("project-linear-token");
-      const turns = yield* cursorMcpServersForTurn({
+      const turns = yield* runCursorTurns({
         cwd: fixture.worktree,
         projectRoot: fixture.project,
         env: fixture.env,
@@ -1647,7 +1639,6 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
           },
         },
       ]);
-      // The first agent is closed before the reopen; the second stays live.
       assert.deepEqual(turns.closed, [0]);
       assert.deepEqual(turns.sent, [undefined, undefined]);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),

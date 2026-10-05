@@ -325,7 +325,6 @@ export function makeCursorAgentOptions(input: {
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   readonly threadId: ThreadId;
-  /** Every installed plugin server, keyed by its Cursor `plugin-` identifier. */
   readonly pluginMcpServers?: Record<string, McpServerConfig>;
 }): AgentOptions {
   const policy = cursorRuntimeAgentPolicy(input.runtimePolicy);
@@ -861,8 +860,7 @@ interface ActiveCursorTurn {
 interface CursorLiveAgent {
   readonly nativeThreadId: string;
   readonly session: CursorAgentSdk.CursorAgentSdkSession;
-  /** The agent-level MCP servers it was opened with. */
-  readonly mcpServers: AgentOptions["mcpServers"];
+  readonly openedMcpServers: AgentOptions["mcpServers"];
 }
 
 export interface CursorAdapterV2Options {
@@ -2145,7 +2143,7 @@ export function makeCursorAdapterV2(
             existing !== null &&
             openInput.operation === "resume" &&
             existing.nativeThreadId === openInput.agentId &&
-            Equal.equals(existing.mcpServers, options.mcpServers)
+            Equal.equals(existing.openedMcpServers, options.mcpServers)
           ) {
             return existing;
           }
@@ -2163,7 +2161,7 @@ export function makeCursorAdapterV2(
           const next = {
             nativeThreadId: sdkSession.agentId,
             session: sdkSession,
-            mcpServers: options.mcpServers,
+            openedMcpServers: options.mcpServers,
           } satisfies CursorLiveAgent;
           yield* Ref.set(liveAgent, next);
           return next;

@@ -3,8 +3,8 @@
  * Cursor plugin MCP servers as inline `@cursor/sdk` `mcpServers` entries.
  *
  * Kata forwards every installed plugin server as an agent-level inline server
- * alongside T3's own, because in local SDK runs the SDK's plugin loader does
- * not load them and reads only the agent folder's logins. Each entry is keyed
+ * alongside T3's own, so they do not depend on the SDK's plugin loader, which
+ * reads only the agent folder's logins. Each entry is keyed
  * by the plugin identifier Cursor uses, `plugin-<plugin.json name>-<server
  * key>`. The SDK loads inline servers first and keeps the first client of each
  * name, so a forwarded server replaces the loader's copy instead of adding a
