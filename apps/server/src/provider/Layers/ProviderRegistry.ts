@@ -469,7 +469,7 @@ export const ProviderRegistryLive = Layer.effect(
     const workspaceRefreshesRef = yield* Ref.make<
       ReadonlyMap<ProviderInstance, ReadonlySet<string>>
     >(new Map());
-    // Bumped by each fresh scan of a cwd. A scan writes only while the
+    // Bumped for every instance by each fresh scan of a cwd. A scan writes only while the
     // generation it started under is still current. Plain mutable state so the
     // check runs inside the same synchronous update as the write.
     const workspaceScanGenerations = new WeakMap<ProviderInstance, Map<string, number>>();
@@ -979,20 +979,32 @@ export const ProviderRegistryLive = Layer.effect(
         // registry does not hold yet, so a publication still queued from it is
         // filtered too.
         const instances = yield* instanceRegistry.listInstances;
-        yield* updateState((state) => ({
-          providers: state.providers.map((candidate) =>
-            candidate.instanceId === input.instanceId
-              ? candidate
-              : dropProviderWorkspaceSnapshot(candidate, input.cwd),
-          ),
-          dropped: instances.reduce(
-            (dropped, other) =>
-              other.instanceId === input.instanceId
-                ? dropped
-                : setWorkspaceDropped(dropped, other.instanceId, input.cwd, true),
-            state.dropped,
-          ),
-        }));
+        yield* updateState((state) => {
+          // A scan another instance started before the drop must not write
+          // its result back, so the drop also advances that scan's generation.
+          for (const other of instances) {
+            if (other.instanceId === input.instanceId) continue;
+            const generations = workspaceScanGenerations.get(other);
+            const generation = generations?.get(input.cwd);
+            if (generations && generation !== undefined) {
+              generations.set(input.cwd, generation + 1);
+            }
+          }
+          return {
+            providers: state.providers.map((candidate) =>
+              candidate.instanceId === input.instanceId
+                ? candidate
+                : dropProviderWorkspaceSnapshot(candidate, input.cwd),
+            ),
+            dropped: instances.reduce(
+              (dropped, other) =>
+                other.instanceId === input.instanceId
+                  ? dropped
+                  : setWorkspaceDropped(dropped, other.instanceId, input.cwd, true),
+              state.dropped,
+            ),
+          };
+        });
       }
       const providers = yield* readProviders;
       const provider = providers.find((candidate) => candidate.instanceId === input.instanceId);
