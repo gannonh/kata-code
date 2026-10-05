@@ -266,11 +266,13 @@ rules stay current. Nightly releases only alias the `nightly` channel. If any jo
 before it fails, the staged deployment stays unaliased and the channel domains keep the
 previous release's deployment.
 
-The `katacode-web` project has no registered domains, so `--skip-domain` moves no hostname
-when `build_web` deploys. The channel and router domains are aliases, and only `deploy_web`'s
-`vercel alias set` moves them. Upstream's release doc says `--skip-domain` still moves the
-project's own `*.vercel.app` production hostname. Kata's project has no such hostname, because
-KAT-3631 removed `katacode-web.vercel.app`.
+`--skip-domain` stages the production deployment without assigning it a domain. The 2026-10-03
+nightly, the one release that ran `build_web` while the project still had its own
+`katacode-web.vercel.app` hostname, left that hostname on its earlier deployment. As of
+2026-10-05 the `katacode-web` project has no registered domains, so `build_web` moves no hostname.
+The channel and router domains are aliases, and in the release workflow only `deploy_web`'s
+`vercel alias set` moves them. Until then the staged build answers only at its own deployment
+URL, which redirects to Vercel sign-in.
 
 One-time Vercel dashboard setup:
 
@@ -396,9 +398,9 @@ The workflow enforces this ordering:
 1. `publish_cli` publishes the exact release version to npm, on every channel.
 2. `release` depends on `publish_cli` before exposing desktop artifacts in GitHub Releases.
 3. `deploy_web` depends on `release` before moving the hosted channel to the new client.
-   `build_web` builds that client earlier, with `--skip-domain`. The project has no registered
-   domains, so the build moves no hostname, and the channel domains stay on the previous client
-   until `deploy_web` aliases them (see
+   `build_web` builds that client earlier, with `--skip-domain`, which assigns the build no
+   domain. The project has no registered domains, so the channel domains stay on the previous
+   client until `deploy_web` aliases them (see
    [Hosted web app release deployment](#hosted-web-app-release-deployment)).
 
 Preserve these dependencies when changing the release graph. Publishing a client first would leave
