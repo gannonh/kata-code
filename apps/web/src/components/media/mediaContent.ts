@@ -28,7 +28,7 @@ async function readMediaBlob(src: string): Promise<Blob> {
 // Kata desktop's connect-src excludes blob:, so in-memory media is never fetched.
 // Anchors download it and images decode it from its own URL instead.
 function isInMemoryMediaUrl(src: string): boolean {
-  return src.startsWith("blob:");
+  return /^blob:/i.test(src);
 }
 
 /** Downloads the original bytes with their original filename, without changing playback URLs. */
