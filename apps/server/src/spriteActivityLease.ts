@@ -189,32 +189,33 @@ const make = Effect.gen(function* () {
     acceptNotFound: true,
   });
 
+  // The watch sweep reads this same list, so when it is unreadable no watch can fire.
+  const readPullRequestThreads = projections.getThreadsWithPullRequests().pipe(
+    Effect.catch((cause) =>
+      Effect.logWarning("Failed to read pull request watches for Sprite activity", {
+        cause,
+      }).pipe(Effect.as([])),
+    ),
+  );
+
   const tick = Effect.gen(function* () {
-    const [connectedClientCount, sessions, pullRequestThreads, terminalSessions, current, now] =
-      yield* Effect.all([
-        backgroundPolicy.connectedClientCount,
-        // An unreadable session table must not let the Sprite sleep mid-turn, so a
-        // failed read counts as provider activity until the next poll.
-        readOpenProviderSessions.pipe(
-          Effect.provideService(SqlClient.SqlClient, sql),
-          Effect.catch((cause) =>
-            Effect.logWarning("Failed to read provider sessions for Sprite activity", {
-              cause,
-            }).pipe(Effect.as([{ status: "running" as const }])),
-          ),
+    const [connectedClientCount, sessions, terminalSessions, current, now] = yield* Effect.all([
+      backgroundPolicy.connectedClientCount,
+      // An unreadable session table must not let the Sprite sleep mid-turn, so a
+      // failed read counts as provider activity until the next poll.
+      readOpenProviderSessions.pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.catch((cause) =>
+          Effect.logWarning("Failed to read provider sessions for Sprite activity", {
+            cause,
+          }).pipe(Effect.as([{ status: "running" as const }])),
         ),
-        // The watch sweep reads this same list, so when it is unreadable no watch can fire.
-        projections.getThreadsWithPullRequests().pipe(
-          Effect.catch((cause) =>
-            Effect.logWarning("Failed to read pull request watches for Sprite activity", {
-              cause,
-            }).pipe(Effect.as([])),
-          ),
-        ),
-        Ref.get(terminalState),
-        Ref.get(leaseState),
-        Clock.currentTimeMillis,
-      ]);
+      ),
+      Ref.get(terminalState),
+      Ref.get(leaseState),
+      Clock.currentTimeMillis,
+    ]);
+    const pullRequestThreads = yield* readPullRequestThreads;
     const demand = hasSpriteActivity({
       connectedClientCount,
       providerSessions: sessions,
