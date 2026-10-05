@@ -13,6 +13,10 @@ Freeze these values in the intake before changing files:
 
 Verify full commit IDs, trusted remote URLs, a clean issue worktree, no unfinished Git operation, and `previous_pin` ancestry of `upstream`. Fetch missing objects from authoritative upstream. An object-fetch failure does not prove divergence or no change. The new tip stays frozen throughout the run.
 
+## Stop at intake for an outcome-changing rewrite
+
+Census the range before resolving anything. `git merge-tree --write-tree --name-only <anchor or base> "$upstream"` lists the conflicted files without touching the worktree. Read the dominant commits against the retained-behavior inventory, not just the count. When a commit changes accepted outcomes (protocol versions, state databases, routine semantics, desktop profiles), stop at intake. Report `NEEDS_ACTION` with the census and explicit options, including the census for the range before that commit. Resume against the same frozen tip once the decision is recorded in the issue. [KAT-3635 / PR #345](https://github.com/gannonh/kata-code/pull/345) stopped this way on `de34391427` (#2829, Orchestration V2); see [history](history.md#an-outcome-changing-rewrite-is-an-intake-decision).
+
 ## Recover ancestry lost to a squash
 
 PR #194 was prepared as a merge, then squashed. Its upstream tip is absent from main's ancestry. Verify with `git merge-base --is-ancestor` and `git merge-base --all`; do not infer ancestry from the PR title.
@@ -44,6 +48,14 @@ A conflict exit is expected when files overlap. Inspect it instead of retrying o
 
 Resolve each outcome, stage reviewed files, and commit the merge. Never use `-s ours`, `-X ours`, blanket checkout, or blanket renaming for new upstream content. Inspect reused rerere resolutions as carefully as new ones. Preserve approved deletions when upstream modifies or reintroduces deleted tooling.
 
+## Resolve identity-only conflicts with a proven transform
+
+A conflict where Kata's only change since the previous pin is the identity rename needs no manual merge. For each file, apply the identity transform (`@t3tools/` → `@kata-sh/code-`, `T3 Code` → `Kata Code`, `T3CODE_` → `KATACODE_`) to the previous-pin blob and require the result to equal Kata's blob byte for byte. Only then take upstream's blob through the same transform, or accept upstream's deletion. A file that fails the byte check carries Kata behavior and gets a normal resolution. The per-file check is what separates this from the blanket renaming forbidden above.
+
+For the remaining both-modified files, rerun `git merge-file --diff3` with the renamed previous-pin text as the base. Pure renames stop conflicting and semantic hunks remain. Give the leftover conflicts to lanes with disjoint file ownership, and keep shared contracts, manifests, lockfiles, and migration numbering sequential.
+
+[KAT-3635 / PR #345](https://github.com/gannonh/kata-code/pull/345) resolved 243 of its 420 conflicts this way (150 transformed, 93 deletions accepted), and the renamed base cleared 26 more.
+
 ## Dependency manifests and the lockfile
 
 When the range changes dependencies, do these intake steps before resolving source conflicts:
@@ -56,7 +68,7 @@ Before publishing, prove that base and upstream are both ancestors of candidate.
 
 ## Repeat and resume
 
-Prefer GitHub's merge-commit method when permitted. As of 2026-10-02 the repository disallows squash merges (`allow_squash_merge: false`), but rebase merges remain allowed, and a rebase also drops the upstream tip as a parent. Verify actual landed parents. If the PR landed without the upstream tip as a parent, record that result; the next run must re-establish the documented previous pin using the guarded procedure. Do not write follow-up issues whose plan depends on the landing method.
+Prefer GitHub's merge-commit method when permitted. The repository's squash setting has changed between runs (`allow_squash_merge` was `false` on 2026-10-02 and `true` on 2026-10-05), and rebase merges are allowed; a squash or a rebase drops the upstream tip as a parent. Verify actual landed parents. If the PR landed without the upstream tip as a parent, record that result; the next run must re-establish the documented previous pin using the guarded procedure. Do not write follow-up issues whose plan depends on the landing method.
 
 On retry, inspect the existing worktree's HEAD, Git operation, PR head, and intake. Continue its merge only if frozen refs and ownership match. Preserve work and report a mismatch. Do not hard-reset a partially resolved integration or create another PR for the same target.
 
