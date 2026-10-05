@@ -83,3 +83,46 @@ The range changes two inventory owner paths and no trusted test file:
 ## Pin consumers
 
 `FORK.md`, both `Lint`-job literals in `.github/workflows/ci.yml` (`UPSTREAM_TIP`, `UPSTREAM_SHA`), the runbook's frozen refs and command examples, and `currentUpstreamSha` in `scripts/check-upstream-preservation.test.ts` all name `250e052f44`. The original root stays `6a687ee43b`.
+
+## Independent review
+
+Two independent Opus reviews covered the complete delta, split by path with no overlap. The first covered the server, contracts, shared, scripts, workflows, internal docs, and patches. The second covered web, mobile, desktop, client-runtime, user docs, and dependency resolution. Each compared Kata's divergence from upstream before and after the merge, file by file, so cleanly merged files got the same check as conflicts.
+
+- Server lens: PASS+NOTES. Kata-only server features (routine setup-script opt-out, Linear OAuth, manual relay endpoint, Cursor usage guard, Sprite lease, KAT-3551 stop handling) keep identical marker counts. The #15539 package mapping matches `scripts/build-npm-platform-packages.ts`. No Kata code depends on the calling-thread assumption #15219 relaxes.
+- Client lens: FAIL on one finding, now fixed. Three new client-runtime tests expected T3's `/.well-known/t3/environment` path; they now use Kata's `/.well-known/kata/environment` (`29f0b90591`). The local non-server run on `4dc23f0807` had caught the same three failures.
+- Also fixed: `docs/internals/remote.md` and a mobile test title say Kata Code Connect.
+- Routed to Backlog: KAT-3670, the pre-existing `thread-migration.md` sentence about a separate V2 desktop profile.
+
+## Verification
+
+Candidate `29f0b90591a0bcbb77a5176a9cea8755644ff871` on base `f352d5a2ebf657352b319003c0822f3ef9fd4b65`. The commit recording this section changes only this document and the decisions file.
+
+**Local checks** (clean checkout, macOS):
+
+- Pass on `4dc23f0807`: branding (product and agent-facing) and its tests, workflow references and their test, the nightly gate test, the preview-artifact test, `vp run knip:check`, `vp check`, `vpr typecheck`, the web suite, the server suite (499 files, 6,765 tests), desktop build and preload verification, `lint:mobile`, and release smoke.
+- The non-server partition failed on `4dc23f0807` with the three wire-path tests above. On `29f0b90591` it passes (12 tasks), as do the darwin-only `permissions-service` and `notification-center-manager` tests (2 files, 5 tests) and both branding checks. `29f0b90591` changes only test literals and docs outside `apps/server`.
+
+**PR CI:** run 37278249741 on `29f0b90591`, all 17 jobs green. Run 37277083146 on `4dc23f0807` failed in Test, for the same three tests.
+
+**Trusted checker**, archived from base `f352d5a2eb` and run on a clean checkout of `29f0b90591`:
+
+- `--mode ci`: exit 0, 29 PASS lines. `icon-composer-live-evidence` and `human-device-provider-evidence` are NOT RUN.
+- `--mode human-review` with exact-ref records:
+  - `CHANGED_RETAINED_OUTCOMES status=PASS`, 5 TAKE: product identity, Connect wire identity, and state isolation (all for `FORK.md`), plus mobile config identity (`app.config.ts`) and Connect early access (`Stack.tsx`).
+  - `INTEGRATION_RECORD status=PASS`.
+  - It prints `HUMAN_REVIEW_ACCEPTANCE status=FAIL detail=Missing mandatory manual evidence for icon-composer-live-evidence.` The only open items are the two live checks under the standing waiver (Gannon Hall, 2026-09-25), recorded as NOT RUN.
+
+**Web** (`verify-katacode`): run `web-20261005-073552-aaf5e9c9` on `main`, run `web-20261005-073734-915f3db8` on the candidate. All 10 scenarios pass:
+
+1. Pairing and the empty landing match `main` pixel for pixel (0 of 1.26M pixels differ).
+2. Settings → Connections matches `main` apart from the port, with Kata Code Connect copy.
+3. Add Environment submits on Enter inside Kata's form and requests `/.well-known/kata/environment`; an unreachable host shows "Could not add backend".
+4. Settings General and Providers render.
+5. Usage switches from Cost to Tokens and shows token counts.
+6. The command palette opens and filters to "Open settings".
+7. Adding a local folder project opens its draft composer and lists it in the sidebar.
+8. The Pull Requests page renders with its sort, filter, and refresh controls.
+9. Settings search for "connect" lists the Connections entries.
+10. None of the 15 captured page snapshots contain T3 product copy.
+
+No message was sent to a provider, to avoid a billed call. The multi-route list needs a saved remote environment, so the route rows themselves were not exercised in the browser; their behavior is covered by the client-runtime and web suites. Screenshots and a 45-second walkthrough are on PR #348; usage figures and the home-folder browser are excluded.
