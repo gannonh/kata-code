@@ -111,7 +111,11 @@ it("counts a pull request watch the sweep reads as activity", () => {
 
   assert.isTrue(
     noActivityExcept([
-      { settledOverride: null, settledAt: null, pullRequests: [pullRequestLink({ watched: true })] },
+      {
+        settledOverride: null,
+        settledAt: null,
+        pullRequests: [pullRequestLink({ watched: true })],
+      },
     ]),
   );
   assert.isTrue(
@@ -125,7 +129,11 @@ it("counts a pull request watch the sweep reads as activity", () => {
   );
   assert.isFalse(
     noActivityExcept([
-      { settledOverride: null, settledAt: null, pullRequests: [pullRequestLink({ watched: false })] },
+      {
+        settledOverride: null,
+        settledAt: null,
+        pullRequests: [pullRequestLink({ watched: false })],
+      },
     ]),
   );
   assert.isFalse(

@@ -1,10 +1,12 @@
 import type {
+  OrchestrationV2AppThread,
   OrchestrationV2Notification,
   PullRequestCheck,
   PullRequestComment,
   PullRequestDetail,
   ThreadPullRequestWatch,
 } from "@kata-sh/code-contracts";
+import { visibleThreadPullRequests } from "@kata-sh/code-shared/threadPullRequests";
 
 /**
  * Wakes in a row that bring only comments. Check, conflict, or push news resets the count, so
@@ -27,6 +29,26 @@ export interface PullRequestWatchReport {
   readonly next: ThreadPullRequestWatch;
   /** This report spends the last wake before the limit, so watching stops after it. */
   readonly exhausted: boolean;
+}
+
+export type PullRequestWatchThread = Pick<
+  OrchestrationV2AppThread,
+  "settledOverride" | "settledAt" | "pullRequests"
+>;
+
+/** A settled thread's watches wait, unread, until the thread is active again. */
+export function isPullRequestWatchPaused(
+  thread: Pick<PullRequestWatchThread, "settledOverride" | "settledAt">,
+): boolean {
+  return thread.settledOverride === "settled" || thread.settledAt !== null;
+}
+
+/** The thread has a watch that the minute sweep reads from the host. */
+export function hasPolledPullRequestWatch(thread: PullRequestWatchThread): boolean {
+  return (
+    !isPullRequestWatchPaused(thread) &&
+    visibleThreadPullRequests(thread.pullRequests ?? []).some((link) => link.watch !== undefined)
+  );
 }
 
 // "action-required" is a finished check that needs someone, so the agent hears about it.

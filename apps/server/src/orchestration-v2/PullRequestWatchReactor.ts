@@ -28,7 +28,11 @@ import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
-import { evaluatePullRequestWatch, pullRequestWatchMessage } from "./pullRequestWatch.ts";
+import {
+  evaluatePullRequestWatch,
+  isPullRequestWatchPaused,
+  pullRequestWatchMessage,
+} from "./pullRequestWatch.ts";
 
 /** Passes in a row that could not read a pull request before its watch ends (one a minute). */
 const READ_FAILURE_LIMIT = 15;
@@ -196,7 +200,7 @@ export const make = Effect.gen(function* () {
     // A merged pull request cannot reopen, so its watch ends without a host read, even on a
     // settled thread. A closed one can, so the host decides below.
     if (link.snapshot?.state === "merged") return yield* record(target, null);
-    if (thread.settledOverride === "settled" || thread.settledAt !== null) return;
+    if (isPullRequestWatchPaused(thread)) return;
 
     const reference = { projectId: thread.projectId, ...pullRequest };
     const read = yield* Effect.exit(
