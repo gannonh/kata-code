@@ -14,12 +14,12 @@ status=0
 if [ "$status" -eq 0 ]; then
   exit 0
 fi
-failures="$(grep -F 'status=FAIL' "$report" || true)"
+failures="$(LC_ALL=C grep -a -e 'status=FAIL' -e '^CHECK .* status=NOT RUN detail=command ' "$report" || true)"
 if [ -z "$failures" ]; then
   echo "Preservation checker exited $status without a status=FAIL line."
   exit 1
 fi
-unwaived="$(printf '%s\n' "$failures" | grep -vxF -f <(printf '%s' "${WAIVED_FAILURES:-}"))" || [ "$?" -eq 1 ]
+unwaived="$(printf '%s\n' "$failures" | LC_ALL=C grep -avxF -f <(printf '%s' "${WAIVED_FAILURES:-}"))" || [ "$?" -eq 1 ]
 if [ -z "$unwaived" ]; then
   echo "Only waived trusted-assertion failures remain; see docs/upstream/kat-3411-intake.md."
   exit 0
