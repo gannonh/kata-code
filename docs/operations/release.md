@@ -319,6 +319,12 @@ never publishes mid-upload:
    to everyone without write access.
 2. **Publish release** runs `scripts/publish-github-release.ts`. It lists the draft's assets and
    refuses to publish unless:
+   - for a nightly or stable, the build produced the feed of every supported platform
+     (`<feed>-mac.yml`, `<feed>-linux.yml`, `<feed>-linux-arm64.yml`, where `<feed>` is `nightly`
+     or `latest`), and the mac feed names both the Apple Silicon and the Intel update zip. A
+     desktop job that builds its installers but writes no feed would otherwise leave that
+     platform's clients without an update. The required set is `REQUIRED_UPDATER_FEEDS` in the
+     script;
    - every updater manifest (`latest*.yml`, `nightly*.yml`) and every file a manifest names, by
      `files[].url` or `path`, is a file this build produced and an asset in the `uploaded` state
      with that file's byte size, so a leftover asset from an earlier attempt cannot stand in for a
@@ -352,8 +358,8 @@ Re-running **Create draft release** for a tag that is already published replaces
 assets in place, which is how a broken published release is repaired; updaters can see the files
 while they are swapped.
 
-Preview releases carry no updater manifests, so for them the check only rejects an asset that is
-still uploading.
+Preview releases carry no updater manifests, so for them the check requires no feed and only
+rejects an asset that is still uploading.
 
 ## Mobile TestFlight
 
@@ -642,7 +648,8 @@ Checklist:
 ## 5) Troubleshooting
 
 - **Publish GitHub Release** fails with `Release <id> stays a draft`:
-  - The message lists each missing, still-uploading, or mis-sized file. Nothing was published, so
+  - The message lists each missing feed or macOS update zip, and each missing, still-uploading,
+    or mis-sized file. Nothing was published, so
     updaters still see the previous release. Re-run the failed jobs; if a file is missing from the
     build itself, fix the build and cut a new release.
 - macOS build unsigned when expected signed:
