@@ -168,24 +168,23 @@ it("holds the Sprite task past the idle grace until the pull request watch ends"
   const unwatched = [
     { settledOverride: null, settledAt: null, pullRequests: [pullRequestLink({ watched: false })] },
   ];
-  const watchEndsAt = 1_000 + SPRITE_IDLE_GRACE_MS * 3;
+  const watchEndsAtMinute = 30;
 
   let state = idle;
-  const actions: Array<string> = [];
-  for (let now = 1_000; now <= watchEndsAt + SPRITE_IDLE_GRACE_MS; now += SPRITE_TASK_REFRESH_MS) {
+  const actionByMinute: Array<string> = [];
+  for (let minute = 0; minute < 45; minute++) {
     const decision = nextSpriteLeaseState({
       current: state,
-      demand: noActivityExcept(now < watchEndsAt ? watched : unwatched),
-      now,
+      demand: noActivityExcept(minute < watchEndsAtMinute ? watched : unwatched),
+      now: minute * 60_000,
     });
     state = decision.next;
-    if (decision.action !== "none") actions.push(`${decision.action}@${now - 1_000}`);
+    actionByMinute.push(decision.action);
   }
 
-  assert.equal(actions.length, 40);
-  assert.equal(actions[0], "refresh@0");
-  assert.equal(actions.at(-2), "refresh@2280000");
-  assert.equal(actions.at(-1), "release@2340000");
+  assert.deepEqual(actionByMinute.slice(0, 39), Array(39).fill("refresh"));
+  assert.equal(actionByMinute[39], "release");
+  assert.deepEqual(actionByMinute.slice(40), Array(5).fill("none"));
 });
 
 it.effect("reads open provider sessions from the V2 projection", () =>

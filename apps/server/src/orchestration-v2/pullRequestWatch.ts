@@ -4,6 +4,7 @@ import type {
   PullRequestCheck,
   PullRequestComment,
   PullRequestDetail,
+  ThreadPullRequestLink,
   ThreadPullRequestWatch,
 } from "@kata-sh/code-contracts";
 import { visibleThreadPullRequests } from "@kata-sh/code-shared/threadPullRequests";
@@ -31,22 +32,26 @@ export interface PullRequestWatchReport {
   readonly exhausted: boolean;
 }
 
-export type PullRequestWatchThread = Pick<
-  OrchestrationV2AppThread,
-  "settledOverride" | "settledAt" | "pullRequests"
->;
-
-export function isPullRequestWatchPaused(
-  thread: Pick<PullRequestWatchThread, "settledOverride" | "settledAt">,
-): boolean {
-  return thread.settledOverride === "settled" || thread.settledAt !== null;
+export interface PullRequestWatchTarget<Thread> {
+  readonly thread: Thread;
+  readonly link: ThreadPullRequestLink;
+  readonly watch: ThreadPullRequestWatch;
 }
 
-export function hasPolledPullRequestWatch(thread: PullRequestWatchThread): boolean {
-  return (
-    !isPullRequestWatchPaused(thread) &&
-    visibleThreadPullRequests(thread.pullRequests ?? []).some((link) => link.watch !== undefined)
+export function pullRequestWatchTargets<
+  Thread extends Pick<OrchestrationV2AppThread, "pullRequests">,
+>(threads: ReadonlyArray<Thread>): Array<PullRequestWatchTarget<Thread>> {
+  return threads.flatMap((thread) =>
+    visibleThreadPullRequests(thread.pullRequests ?? []).flatMap((link) =>
+      link.watch === undefined ? [] : [{ thread, link, watch: link.watch }],
+    ),
   );
+}
+
+export function isPullRequestWatchPaused(
+  thread: Pick<OrchestrationV2AppThread, "settledOverride" | "settledAt">,
+): boolean {
+  return thread.settledOverride === "settled" || thread.settledAt !== null;
 }
 
 // "action-required" is a finished check that needs someone, so the agent hears about it.

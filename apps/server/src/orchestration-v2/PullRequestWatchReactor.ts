@@ -13,7 +13,6 @@ import {
 import {
   normalizeThreadPullRequestKey,
   threadPullRequestKeyOf,
-  visibleThreadPullRequests,
 } from "@kata-sh/code-shared/threadPullRequests";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -32,6 +31,8 @@ import {
   evaluatePullRequestWatch,
   isPullRequestWatchPaused,
   pullRequestWatchMessage,
+  pullRequestWatchTargets,
+  type PullRequestWatchTarget,
 } from "./pullRequestWatch.ts";
 
 /** Passes in a row that could not read a pull request before its watch ends (one a minute). */
@@ -44,11 +45,7 @@ const logFailure =
       ? Effect.interrupt
       : Effect.logWarning(message, { ...fields, cause });
 
-interface WatchTarget {
-  readonly thread: ProjectionStore.ProjectionThreadPullRequests;
-  readonly link: ThreadPullRequestLink;
-  readonly watch: ThreadPullRequestWatch;
-}
+type WatchTarget = PullRequestWatchTarget<ProjectionStore.ProjectionThreadPullRequests>;
 
 const failureKey = ({ thread, link, watch }: WatchTarget) =>
   `${thread.id} ${threadPullRequestKeyOf(link)} ${watch.startedAt}`;
@@ -250,11 +247,7 @@ export const make = Effect.gen(function* () {
 
   const sweep = Effect.gen(function* () {
     const threads = yield* projections.getThreadsWithPullRequests();
-    const targets = threads.flatMap((thread) =>
-      visibleThreadPullRequests(thread.pullRequests ?? []).flatMap((link) =>
-        link.watch === undefined ? [] : [{ thread, link, watch: link.watch }],
-      ),
-    );
+    const targets = pullRequestWatchTargets(threads);
     const keys = new Set(targets.map(failureKey));
     for (const key of readFailures.keys()) if (!keys.has(key)) readFailures.delete(key);
     for (const key of threadTails.keys()) if (!keys.has(key)) threadTails.delete(key);

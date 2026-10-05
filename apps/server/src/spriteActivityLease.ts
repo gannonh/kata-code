@@ -13,8 +13,8 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import {
-  hasPolledPullRequestWatch,
-  type PullRequestWatchThread,
+  isPullRequestWatchPaused,
+  pullRequestWatchTargets,
 } from "./orchestration-v2/pullRequestWatch.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
@@ -48,7 +48,12 @@ export function hasSpriteActivity(input: {
   readonly connectedClientCount: number;
   readonly providerSessions: ReadonlyArray<Pick<OrchestrationV2ProviderSession, "status">>;
   readonly terminals: ReadonlyArray<Pick<TerminalSummary, "hasRunningSubprocess">>;
-  readonly pullRequestThreads: ReadonlyArray<PullRequestWatchThread>;
+  readonly pullRequestThreads: ReadonlyArray<
+    Pick<
+      ProjectionStore.ProjectionThreadPullRequests,
+      "settledOverride" | "settledAt" | "pullRequests"
+    >
+  >;
 }): boolean {
   return (
     input.connectedClientCount > 0 ||
@@ -56,7 +61,9 @@ export function hasSpriteActivity(input: {
       ACTIVE_PROVIDER_SESSION_STATUSES.has(session.status),
     ) ||
     input.terminals.some((terminal) => terminal.hasRunningSubprocess) ||
-    input.pullRequestThreads.some(hasPolledPullRequestWatch)
+    pullRequestWatchTargets(input.pullRequestThreads).some(
+      ({ thread }) => !isPullRequestWatchPaused(thread),
+    )
   );
 }
 
@@ -191,12 +198,9 @@ const make = Effect.gen(function* () {
 
   const readPullRequestThreads = projections.getThreadsWithPullRequests().pipe(
     Effect.catch((cause) =>
-      Effect.logWarning(
-        "Failed to read pull request watches for Sprite activity; counting none, since the watch sweep reads the same list",
-        {
-          cause,
-        },
-      ).pipe(Effect.as([])),
+      Effect.logWarning("Failed to read pull request watches for Sprite activity", {
+        cause,
+      }).pipe(Effect.as([])),
     ),
   );
 
