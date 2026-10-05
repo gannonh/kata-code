@@ -7,9 +7,9 @@
  * that is live while its binaries are still uploading makes every client on the
  * channel fail until the upload finishes, and for good if it never does. The
  * release workflow therefore uploads into a draft, which updaters cannot see,
- * and runs this script last. It leaves the draft alone unless every updater
- * manifest and every file a manifest names is an uploaded asset of the size the
- * build produced.
+ * and runs this script last. It leaves the draft alone unless the build produced
+ * the feed of every supported platform, and every updater manifest and every
+ * file a manifest names is an uploaded asset of the size the build produced.
  */
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/unstable/cli";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 
+import { isDesktopPreviewVersion, resolveDesktopUpdateChannel } from "./build-desktop-artifact.ts";
 import { compareNightlyVersions, parseNightlyTag } from "./resolve-previous-release-tag.ts";
 import { parseUpdateManifest, type UpdateManifest } from "./lib/update-manifest.ts";
 
@@ -72,6 +73,51 @@ export class ReleaseManifestUnreadableError extends Schema.TaggedError<ReleaseMa
   override get message(): string {
     return `${this.manifest} is not a readable updater manifest: ${this.detail}`;
   }
+}
+
+/**
+ * The feeds a nightly or stable release must carry, one per desktop platform in
+ * docs/operations/supported-platforms.md, named `<nightly|latest><suffix>.yml`.
+ * Turning a parked platform back on adds its feed here; Windows's suffix is "".
+ * The mac feed is merged from the two macOS builds, so it must also name the
+ * update zip each architecture installs.
+ */
+const REQUIRED_UPDATER_FEEDS = [
+  {
+    suffix: "-mac",
+    platform: "macOS",
+    archUpdateFiles: [
+      { arch: "Apple Silicon (arm64)", name: "Kata-Code-macOS-Apple-Silicon-arm64.zip" },
+      { arch: "Intel (x64)", name: "Kata-Code-macOS-Intel.zip" },
+    ],
+  },
+  { suffix: "-linux", platform: "Linux x64", archUpdateFiles: [] },
+  { suffix: "-linux-arm64", platform: "Linux arm64", archUpdateFiles: [] },
+] as const;
+
+/**
+ * Every required feed the build did not produce for the channel `tag` belongs
+ * to, and every macOS architecture the mac feed leaves without an update zip.
+ * Preview releases carry no feeds.
+ */
+export function findMissingUpdaterFeedProblems(
+  tag: string,
+  manifests: ReadonlyArray<{ readonly name: string; readonly manifest: UpdateManifest }>,
+): ReadonlyArray<string> {
+  const version = tag.replace(/^v/, "");
+  if (isDesktopPreviewVersion(version)) return [];
+  const channel = resolveDesktopUpdateChannel(version);
+  const manifestsByName = new Map(manifests.map(({ name, manifest }) => [name, manifest]));
+  return REQUIRED_UPDATER_FEEDS.flatMap(({ suffix, platform, archUpdateFiles }) => {
+    const feed = `${channel}${suffix}.yml`;
+    const manifest = manifestsByName.get(feed);
+    if (manifest === undefined) {
+      return [`${feed}, the ${platform} updater feed, was not produced by this build`];
+    }
+    return archUpdateFiles
+      .filter(({ name }) => !manifest.files.some((file) => file.url === name))
+      .map(({ arch, name }) => `${feed} does not name ${name}, the ${arch} update zip`);
+  });
 }
 
 /** The updater feeds electron-updater reads, as opposed to other YAML in the build output. */
@@ -238,7 +284,10 @@ export const publishGitHubRelease = Effect.fn("publishGitHubRelease")(function* 
 
   const assets = yield* getAll(`${releasePath}/assets`, GitHubReleaseAsset);
   const { localSizes, manifests } = yield* readDistFiles(options.distDir);
-  const problems = findIncompleteReleaseProblems({ manifests, localSizes, assets });
+  const problems = [
+    ...findMissingUpdaterFeedProblems(release.tag_name, manifests),
+    ...findIncompleteReleaseProblems({ manifests, localSizes, assets }),
+  ];
   if (problems.length > 0) {
     return yield* new DraftReleaseIncompleteError({ releaseId: options.releaseId, problems });
   }
