@@ -9,6 +9,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { parseUpdateManifest } from "./lib/update-manifest.ts";
 import {
   findIncompleteReleaseProblems,
+  findMissingUpdaterFeedProblems,
   isUpdaterManifestName,
   newerPublishedNightlyTag,
   publishGitHubRelease,
@@ -34,6 +35,45 @@ files:
 path: Kata-Code-Linux-x64.AppImage
 sha512: YR7XP+kv1T0wB0Zn4ZtBbY0auUXyXV+NUL3seD7WscFAqUIij8g30qPapGvWj81JtrmjDACp7Nkywt2Jc3cmLg==
 releaseDate: '2026-10-02T15:39:21.904Z'
+`;
+
+const MERGED_NIGHTLY_MAC_MANIFEST = `version: '0.0.44-nightly.20261005.1694'
+files:
+  - url: Kata-Code-macOS-Apple-Silicon-arm64.zip
+    sha512: EAmXkJ2vrdg7Cm04rte/7GjBH490ZqdTyS2eYhV7a2kWtrwBLDYbqqqzETw5X7Rs50MVijEmyLCXzDnpQ++rrQ==
+    size: 166699535
+  - url: Kata-Code-macOS-Apple-Silicon.dmg
+    sha512: vFPOdkcKw3tJBEXqbQkwGXVYC/Rtmkxm+VkUGel0gV/bSGFoA7AnNxt2c6of1vg8z8HufmrP0jMe+4UMQt4Aew==
+    size: 173103577
+  - url: Kata-Code-macOS-Intel.zip
+    sha512: tu66PIImaczGTV6m4C/V1z3zkRMRjCaQWPV+bCIrBLGX/SE/l58u5Tsv2cjzzL/jzsuCev/6b7EaTyh0SAhQUw==
+    size: 173250431
+  - url: Kata-Code-macOS-Intel.dmg
+    sha512: 8uFXsYQh9Xe/RnlCpw+hfWAV5GPAPCAMFYDOOZFsOil14XfcyPpFJk7Hj48H0VOAAuexhuRInJiAITWINgMhLg==
+    size: 179712320
+releaseDate: '2026-10-05T14:45:01.662Z'
+`;
+
+const INTEL_ONLY_NIGHTLY_MAC_MANIFEST = `version: '0.0.44-nightly.20261005.1694'
+files:
+  - url: Kata-Code-macOS-Intel.zip
+    sha512: tu66PIImaczGTV6m4C/V1z3zkRMRjCaQWPV+bCIrBLGX/SE/l58u5Tsv2cjzzL/jzsuCev/6b7EaTyh0SAhQUw==
+    size: 173250431
+  - url: Kata-Code-macOS-Intel.dmg
+    sha512: 8uFXsYQh9Xe/RnlCpw+hfWAV5GPAPCAMFYDOOZFsOil14XfcyPpFJk7Hj48H0VOAAuexhuRInJiAITWINgMhLg==
+    size: 179712320
+releaseDate: '2026-10-05T14:45:01.662Z'
+`;
+
+const NIGHTLY_LINUX_ARM64_MANIFEST = `version: 0.0.44-nightly.20261005.1694
+files:
+  - url: Kata-Code-Linux-arm64.AppImage
+    sha512: Jh7k6dTWSEFM6NPOq1sBNRQD/HEb/nFv6GpQgXyQ8YsNel0XkMrOFLPAYyTj9brkc//Bdq69g30Fa+KZWnJY5w==
+    size: 192292877
+    blockMapSize: 201561
+path: Kata-Code-Linux-arm64.AppImage
+sha512: Jh7k6dTWSEFM6NPOq1sBNRQD/HEb/nFv6GpQgXyQ8YsNel0XkMrOFLPAYyTj9brkc//Bdq69g30Fa+KZWnJY5w==
+releaseDate: '2026-10-05T14:35:47.429Z'
 `;
 
 const manifest = (name: string, text: string) => ({
@@ -119,6 +159,83 @@ describe("newerPublishedNightlyTag", () => {
       ]),
       undefined,
     );
+  });
+});
+
+describe("findMissingUpdaterFeedProblems", () => {
+  const nightlyFeeds = [
+    manifest("nightly-mac.yml", MERGED_NIGHTLY_MAC_MANIFEST),
+    manifest("nightly-linux.yml", NIGHTLY_LINUX_MANIFEST),
+    manifest("nightly-linux-arm64.yml", NIGHTLY_LINUX_ARM64_MANIFEST),
+  ];
+
+  it("accepts a nightly carrying every platform's feed and both macOS update zips", () => {
+    assert.deepStrictEqual(
+      findMissingUpdaterFeedProblems("v0.0.44-nightly.20261005.1694", nightlyFeeds),
+      [],
+    );
+  });
+
+  it("names each nightly feed the build did not produce", () => {
+    assert.deepStrictEqual(
+      findMissingUpdaterFeedProblems("v0.0.44-nightly.20261005.1694", [nightlyFeeds[0]!]),
+      [
+        "nightly-linux.yml, the Linux x64 updater feed, was not produced by this build",
+        "nightly-linux-arm64.yml, the Linux arm64 updater feed, was not produced by this build",
+      ],
+    );
+  });
+
+  it("names the macOS feed when only the unmerged per-arch manifest exists", () => {
+    assert.deepStrictEqual(
+      findMissingUpdaterFeedProblems("v0.0.44-nightly.20261005.1694", [
+        manifest("nightly-mac-x64.yml", INTEL_ONLY_NIGHTLY_MAC_MANIFEST),
+        nightlyFeeds[1]!,
+        nightlyFeeds[2]!,
+      ]),
+      ["nightly-mac.yml, the macOS updater feed, was not produced by this build"],
+    );
+  });
+
+  it("requires the latest feeds, not the nightly ones, on a stable release", () => {
+    assert.deepStrictEqual(findMissingUpdaterFeedProblems("v0.0.45", nightlyFeeds), [
+      "latest-mac.yml, the macOS updater feed, was not produced by this build",
+      "latest-linux.yml, the Linux x64 updater feed, was not produced by this build",
+      "latest-linux-arm64.yml, the Linux arm64 updater feed, was not produced by this build",
+    ]);
+    assert.deepStrictEqual(
+      findMissingUpdaterFeedProblems("v0.0.45-rc.1", [
+        manifest("latest-mac.yml", MERGED_NIGHTLY_MAC_MANIFEST),
+        manifest("latest-linux.yml", NIGHTLY_LINUX_MANIFEST),
+        manifest("latest-linux-arm64.yml", NIGHTLY_LINUX_ARM64_MANIFEST),
+      ]),
+      [],
+    );
+  });
+
+  it("names the macOS architecture whose update zip the mac feed lacks", () => {
+    assert.deepStrictEqual(
+      findMissingUpdaterFeedProblems("v0.0.44-nightly.20261002.1602", [
+        manifest("nightly-mac.yml", NIGHTLY_MAC_MANIFEST),
+        nightlyFeeds[1]!,
+        nightlyFeeds[2]!,
+      ]),
+      ["nightly-mac.yml does not name Kata-Code-macOS-Intel.zip, the Intel (x64) update zip"],
+    );
+    assert.deepStrictEqual(
+      findMissingUpdaterFeedProblems("v0.0.44-nightly.20261005.1694", [
+        manifest("nightly-mac.yml", INTEL_ONLY_NIGHTLY_MAC_MANIFEST),
+        nightlyFeeds[1]!,
+        nightlyFeeds[2]!,
+      ]),
+      [
+        "nightly-mac.yml does not name Kata-Code-macOS-Apple-Silicon-arm64.zip, the Apple Silicon (arm64) update zip",
+      ],
+    );
+  });
+
+  it("requires no feed on a preview release", () => {
+    assert.deepStrictEqual(findMissingUpdaterFeedProblems("v0.0.45-preview.20261005.1700", []), []);
   });
 });
 
@@ -345,23 +462,38 @@ const serveFakeGitHub = (release: FakeRelease) =>
   ).pipe(Layer.provideMerge(NodeHttpServer.layerTest));
 
 it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
-  const writeDist = Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const distDir = yield* fs.makeTempDirectoryScoped({ prefix: "publish-github-release-" });
-    yield* fs.writeFileString(path.join(distDir, "nightly-mac.yml"), NIGHTLY_MAC_MANIFEST);
-    yield* fs.writeFileString(path.join(distDir, "Kata-Code-macOS-Apple-Silicon-arm64.zip"), "zip");
-    yield* fs.writeFileString(path.join(distDir, "Kata-Code-macOS-Apple-Silicon.dmg"), "dmg!");
-    yield* fs.writeFileString(path.join(distDir, "release-body.md"), "notes");
-    yield* fs.writeFileString(path.join(distDir, "builder-debug.yml"), "not: [a manifest");
-    return distDir;
+  const releaseFiles = (feed: "nightly" | "latest"): Record<string, string> => ({
+    [`${feed}-mac.yml`]: MERGED_NIGHTLY_MAC_MANIFEST,
+    [`${feed}-linux.yml`]: NIGHTLY_LINUX_MANIFEST,
+    [`${feed}-linux-arm64.yml`]: NIGHTLY_LINUX_ARM64_MANIFEST,
+    "Kata-Code-macOS-Apple-Silicon-arm64.zip": "zip",
+    "Kata-Code-macOS-Apple-Silicon.dmg": "dmg!",
+    "Kata-Code-macOS-Intel.zip": "intel zip",
+    "Kata-Code-macOS-Intel.dmg": "intel dmg",
+    "Kata-Code-Linux-x64.AppImage": "x64 AppImage",
+    "Kata-Code-Linux-arm64.AppImage": "arm64 AppImage",
   });
-  const manifestSize = new TextEncoder().encode(NIGHTLY_MAC_MANIFEST).length;
-  const completeAssets = [
-    { name: "nightly-mac.yml", state: "uploaded", size: manifestSize },
-    { name: "Kata-Code-macOS-Apple-Silicon-arm64.zip", state: "uploaded", size: 3 },
-    { name: "Kata-Code-macOS-Apple-Silicon.dmg", state: "uploaded", size: 4 },
-  ];
+  const writeDist = (files: Record<string, string>) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const distDir = yield* fs.makeTempDirectoryScoped({ prefix: "publish-github-release-" });
+      for (const [name, content] of Object.entries({
+        ...files,
+        "release-body.md": "notes",
+        "builder-debug.yml": "not: [a manifest",
+      })) {
+        yield* fs.writeFileString(path.join(distDir, name), content);
+      }
+      return distDir;
+    });
+  const uploaded = (files: Record<string, string>) =>
+    Object.entries(files).map(([name, content]) => ({
+      name,
+      state: "uploaded",
+      size: new TextEncoder().encode(content).length,
+    }));
+  const completeAssets = uploaded(releaseFiles("nightly"));
   const draft = (overrides: Partial<FakeRelease> = {}): FakeRelease => ({
     draft: true,
     tag: "v0.0.44-nightly.20261002.1602",
@@ -380,7 +512,7 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
 
   it.effect("publishes a draft whose manifest files are all uploaded", () =>
     Effect.gen(function* () {
-      const distDir = yield* writeDist;
+      const distDir = yield* writeDist(releaseFiles("nightly"));
       const release = draft();
 
       yield* publish(distDir).pipe(Effect.provide(serveFakeGitHub(release)));
@@ -392,8 +524,9 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
 
   it.effect("sends make_latest through for a stable release", () =>
     Effect.gen(function* () {
-      const distDir = yield* writeDist;
-      const release = draft({ tag: "v0.0.45" });
+      const files = releaseFiles("latest");
+      const distDir = yield* writeDist(files);
+      const release = draft({ tag: "v0.0.45", assets: uploaded(files) });
 
       yield* publish(distDir, "true").pipe(Effect.provide(serveFakeGitHub(release)));
 
@@ -403,8 +536,12 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
 
   it.effect("leaves the release a draft when a binary the manifest names is missing", () =>
     Effect.gen(function* () {
-      const distDir = yield* writeDist;
-      const release = draft({ assets: [completeAssets[0]!, completeAssets[2]!] });
+      const distDir = yield* writeDist(releaseFiles("nightly"));
+      const release = draft({
+        assets: completeAssets.filter(
+          (asset) => asset.name !== "Kata-Code-macOS-Apple-Silicon-arm64.zip",
+        ),
+      });
 
       const error = yield* publish(distDir).pipe(
         Effect.provide(serveFakeGitHub(release)),
@@ -424,13 +561,13 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
 
   it.effect("leaves the release a draft while an upload is still open", () =>
     Effect.gen(function* () {
-      const distDir = yield* writeDist;
+      const distDir = yield* writeDist(releaseFiles("nightly"));
       const release = draft({
-        assets: [
-          completeAssets[0]!,
-          completeAssets[1]!,
-          { ...completeAssets[2]!, state: "open", size: 1 },
-        ],
+        assets: completeAssets.map((asset) =>
+          asset.name === "Kata-Code-macOS-Apple-Silicon.dmg"
+            ? { ...asset, state: "open", size: 1 }
+            : asset,
+        ),
       });
 
       const error = yield* publish(distDir).pipe(
@@ -449,9 +586,73 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
     }),
   );
 
+  it.effect("leaves a nightly a draft when a Linux job built its AppImage but no feed", () =>
+    Effect.gen(function* () {
+      const { "nightly-linux-arm64.yml": _feed, ...files } = releaseFiles("nightly");
+      const distDir = yield* writeDist(files);
+      const release = draft({ assets: uploaded(files) });
+
+      const error = yield* publish(distDir).pipe(
+        Effect.provide(serveFakeGitHub(release)),
+        Effect.flip,
+      );
+
+      if (error._tag !== "DraftReleaseIncompleteError") {
+        assert.fail(`Expected DraftReleaseIncompleteError, got ${error._tag}`);
+      }
+      assert.equal(
+        error.message,
+        "Release 42 stays a draft:\n  - nightly-linux-arm64.yml, the Linux arm64 updater feed, was not produced by this build",
+      );
+      assert.deepStrictEqual(release.patches, []);
+      assert.equal(release.draft, true);
+    }),
+  );
+
+  it.effect("leaves a stable release a draft when its mac feed lacks the Intel update zip", () =>
+    Effect.gen(function* () {
+      const files = { ...releaseFiles("latest"), "latest-mac.yml": NIGHTLY_MAC_MANIFEST };
+      const distDir = yield* writeDist(files);
+      const release = draft({
+        tag: "v0.0.45",
+        assets: uploaded(files),
+      });
+
+      const error = yield* publish(distDir, "true").pipe(
+        Effect.provide(serveFakeGitHub(release)),
+        Effect.flip,
+      );
+
+      if (error._tag !== "DraftReleaseIncompleteError") {
+        assert.fail(`Expected DraftReleaseIncompleteError, got ${error._tag}`);
+      }
+      assert.deepStrictEqual(error.problems, [
+        "latest-mac.yml does not name Kata-Code-macOS-Intel.zip, the Intel (x64) update zip",
+      ]);
+      assert.deepStrictEqual(release.patches, []);
+      assert.equal(release.draft, true);
+    }),
+  );
+
+  it.effect("publishes a preview release, which carries no feeds", () =>
+    Effect.gen(function* () {
+      const files = {
+        "Kata-Code-macOS-Apple-Silicon.dmg": "dmg!",
+        "Kata-Code-Linux-x64.AppImage": "x64 AppImage",
+        SHA256SUMS: "sums",
+      };
+      const distDir = yield* writeDist(files);
+      const release = draft({ tag: "v0.0.45-preview.20261005.1700", assets: uploaded(files) });
+
+      yield* publish(distDir).pipe(Effect.provide(serveFakeGitHub(release)));
+
+      assert.deepStrictEqual(release.patches, [{ draft: false, make_latest: "false" }]);
+    }),
+  );
+
   it.effect("refuses to publish a nightly older than one that is already published", () =>
     Effect.gen(function* () {
-      const distDir = yield* writeDist;
+      const distDir = yield* writeDist(releaseFiles("nightly"));
       const release = draft({
         others: [
           { draft: false, tag_name: "v0.0.44-nightly.20261002.1603" },
@@ -478,7 +679,7 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
 
   it.effect("finds the newer nightly beyond the first page of releases", () =>
     Effect.gen(function* () {
-      const distDir = yield* writeDist;
+      const distDir = yield* writeDist(releaseFiles("nightly"));
       const stable = Array.from({ length: 100 }, (_, index) => ({
         draft: false,
         tag_name: `v0.0.${index}`,
@@ -499,7 +700,7 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
 
   it.effect("publishes a nightly when only older nightlies and newer drafts exist", () =>
     Effect.gen(function* () {
-      const distDir = yield* writeDist;
+      const distDir = yield* writeDist(releaseFiles("nightly"));
       const release = draft({
         others: [
           { draft: true, tag_name: "v0.0.44-nightly.20261002.1700" },
@@ -515,9 +716,11 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
 
   it.effect("publishes a stable draft even when a newer nightly is published", () =>
     Effect.gen(function* () {
-      const distDir = yield* writeDist;
+      const files = releaseFiles("latest");
+      const distDir = yield* writeDist(files);
       const release = draft({
         tag: "v0.0.45",
+        assets: uploaded(files),
         others: [{ draft: false, tag_name: "v0.0.45-nightly.20261003.1" }],
       });
 
@@ -529,7 +732,7 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
 
   it.effect("does nothing to a release that is already published", () =>
     Effect.gen(function* () {
-      const distDir = yield* writeDist;
+      const distDir = yield* writeDist(releaseFiles("nightly"));
       const release = draft({ draft: false, assets: [] });
 
       yield* publish(distDir, "true").pipe(Effect.provide(serveFakeGitHub(release)));

@@ -7,9 +7,9 @@
  * that is live while its binaries are still uploading makes every client on the
  * channel fail until the upload finishes, and for good if it never does. The
  * release workflow therefore uploads into a draft, which updaters cannot see,
- * and runs this script last. It leaves the draft alone unless every updater
- * manifest and every file a manifest names is an uploaded asset of the size the
- * build produced.
+ * and runs this script last. It leaves the draft alone unless the build produced
+ * the feed of every supported platform, and every updater manifest and every
+ * file a manifest names is an uploaded asset of the size the build produced.
  */
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -22,6 +22,7 @@ import * as Schema from "effect/Schema";
 import { Command, Flag } from "effect/unstable/cli";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 
+import { isDesktopPreviewVersion, resolveDesktopUpdateChannel } from "./build-desktop-artifact.ts";
 import { compareNightlyVersions, parseNightlyTag } from "./resolve-previous-release-tag.ts";
 import { parseUpdateManifest, type UpdateManifest } from "./lib/update-manifest.ts";
 
@@ -74,6 +75,43 @@ export class ReleaseManifestUnreadableError extends Schema.TaggedError<ReleaseMa
   }
 }
 
+/**
+ * One feed per desktop platform in docs/operations/supported-platforms.md.
+ * Re-enabling a parked platform adds its feed here.
+ */
+const REQUIRED_UPDATER_FEEDS = [
+  {
+    suffix: "-mac",
+    platform: "macOS",
+    archUpdateFiles: [
+      { arch: "Apple Silicon (arm64)", name: "Kata-Code-macOS-Apple-Silicon-arm64.zip" },
+      { arch: "Intel (x64)", name: "Kata-Code-macOS-Intel.zip" },
+    ],
+  },
+  { suffix: "-linux", platform: "Linux x64", archUpdateFiles: [] },
+  { suffix: "-linux-arm64", platform: "Linux arm64", archUpdateFiles: [] },
+] as const;
+
+export function findMissingUpdaterFeedProblems(
+  tag: string,
+  manifests: ReadonlyArray<{ readonly name: string; readonly manifest: UpdateManifest }>,
+): ReadonlyArray<string> {
+  const version = tag.replace(/^v/, "");
+  if (isDesktopPreviewVersion(version)) return [];
+  const channel = resolveDesktopUpdateChannel(version);
+  const manifestsByName = new Map(manifests.map(({ name, manifest }) => [name, manifest]));
+  return REQUIRED_UPDATER_FEEDS.flatMap(({ suffix, platform, archUpdateFiles }) => {
+    const feed = `${channel}${suffix}.yml`;
+    const manifest = manifestsByName.get(feed);
+    if (manifest === undefined) {
+      return [`${feed}, the ${platform} updater feed, was not produced by this build`];
+    }
+    return archUpdateFiles
+      .filter(({ name }) => !manifest.files.some((file) => file.url === name))
+      .map(({ arch, name }) => `${feed} does not name ${name}, the ${arch} update zip`);
+  });
+}
+
 /** The updater feeds electron-updater reads, as opposed to other YAML in the build output. */
 export const isUpdaterManifestName = (name: string): boolean =>
   /^(?:latest|nightly).*\.yml$/.test(name);
@@ -107,7 +145,7 @@ export interface ReleaseCompletenessInput {
   readonly assets: ReadonlyArray<GitHubReleaseAsset>;
 }
 
-/** Everything that makes a draft unsafe to publish. Empty means it is complete. */
+/** Every asset problem that makes a draft unsafe to publish. Empty means its assets are complete. */
 export function findIncompleteReleaseProblems(
   input: ReleaseCompletenessInput,
 ): ReadonlyArray<string> {
@@ -238,7 +276,10 @@ export const publishGitHubRelease = Effect.fn("publishGitHubRelease")(function* 
 
   const assets = yield* getAll(`${releasePath}/assets`, GitHubReleaseAsset);
   const { localSizes, manifests } = yield* readDistFiles(options.distDir);
-  const problems = findIncompleteReleaseProblems({ manifests, localSizes, assets });
+  const problems = [
+    ...findMissingUpdaterFeedProblems(release.tag_name, manifests),
+    ...findIncompleteReleaseProblems({ manifests, localSizes, assets }),
+  ];
   if (problems.length > 0) {
     return yield* new DraftReleaseIncompleteError({ releaseId: options.releaseId, problems });
   }

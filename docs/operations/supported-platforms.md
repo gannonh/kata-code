@@ -45,7 +45,9 @@ What was parked and where it lives:
    the two jobs, their `needs` and `if` entries in `publish_cli` and `release`,
    the manifest merge step, and the `release-assets/*.exe` line in the asset
    list. Delete `.github/disabled/release-windows.yml` and remove it from
-   `.github/disabled/README.md`.
+   `.github/disabled/README.md`. Add the Windows feed (suffix `""`, so
+   `latest.yml` and `nightly.yml`) to `REQUIRED_UPDATER_FEEDS` in
+   `scripts/publish-github-release.ts`.
 2. Add `"win32-arm64"` and `"win32-x64"` back to `CLI_ARCHIVE_PLATFORM_KEYS` in
    `packages/shared/src/cliRelease.ts`, and restore the Windows cases in
    `cliRelease.test.ts` and `scripts/build-npm-platform-packages.test.ts`.
