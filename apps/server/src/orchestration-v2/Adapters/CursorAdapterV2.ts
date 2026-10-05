@@ -2119,6 +2119,59 @@ export function makeCursorAdapterV2(
           }
         };
 
+        const announcedSignIns = new Set<string>();
+
+        /**
+         * Tells the thread which installed plugins need a Cursor sign-in. Each
+         * plugin is announced once per session; the servers are already
+         * discovered for the agent, so this reads the cache.
+         */
+        const announcePluginSignIns = Effect.fnUntraced(function* (context: ActiveCursorTurn) {
+          const plugins = yield* pluginMcpServers(context.input.runtimePolicy);
+          const pluginNames = new Set(
+            Object.values(plugins ?? {}).flatMap((server) =>
+              server.signInRequired === true && !announcedSignIns.has(server.pluginName)
+                ? [server.pluginName]
+                : [],
+            ),
+          );
+          for (const pluginName of pluginNames) {
+            announcedSignIns.add(pluginName);
+            const nativeItemId = `plugin-sign-in:${context.providerTurnId}:${pluginName}`;
+            const notice = `The Cursor plugin "${pluginName}" needs you to sign in, so its tools are unavailable. Sign in to it through Cursor.`;
+            const now = yield* DateTime.now;
+            yield* emitProviderEvent({
+              type: "turn_item.updated",
+              driver: CursorAgentSdk.CURSOR_PROVIDER,
+              turnItem: {
+                id: idAllocator.derive.turnItemFromProviderItem({
+                  driver: CursorAgentSdk.CURSOR_PROVIDER,
+                  nativeItemId,
+                }),
+                threadId: context.input.threadId,
+                runId: context.input.runId,
+                nodeId: context.input.rootNodeId,
+                providerThreadId: context.input.providerThread.id,
+                providerTurnId: context.providerTurnId,
+                nativeItemRef: {
+                  driver: CursorAgentSdk.CURSOR_PROVIDER,
+                  nativeId: nativeItemId,
+                  strength: "weak",
+                },
+                parentItemId: null,
+                ordinal: yield* resolveItemOrdinal(context, nativeItemId),
+                type: "system_notice",
+                status: "completed",
+                title: notice,
+                message: notice,
+                startedAt: now,
+                completedAt: now,
+                updatedAt: now,
+              },
+            });
+          }
+        });
+
         const openAgent = Effect.fnUntraced(function* (openInput: {
           readonly operation: "create" | "resume";
           readonly threadId: ThreadId;
@@ -2347,6 +2400,7 @@ export function makeCursorAdapterV2(
                 updatedAt: startedAt,
               },
             });
+            yield* announcePluginSignIns(context);
             for (const update of pendingUpdates) {
               yield* handleInteractionUpdate(context, update);
             }

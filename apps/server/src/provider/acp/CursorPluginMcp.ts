@@ -52,8 +52,12 @@ export type CursorPluginMcpFetch = typeof globalThis.fetch;
 export type CursorPluginLoginFolder = "thread" | "project" | "other";
 
 export interface CursorPluginMcpServer {
+  /** The plugin's `plugin.json` name, which the user knows it by. */
+  readonly pluginName: string;
   readonly config: McpServerConfig;
   readonly loginFolder?: CursorPluginLoginFolder;
+  /** The server challenged for an OAuth login and no stored login got through. */
+  readonly signInRequired?: true;
 }
 
 export interface CursorPluginMcpInput {
@@ -75,7 +79,10 @@ type HttpServerConfig = Extract<McpServerConfig, { readonly url: string }>;
 
 interface PluginServer {
   readonly identifier: string;
+  readonly pluginName: string;
   readonly config: McpServerConfig;
+  /** Whether Cursor's OAuth login is the credential this HTTP server takes. */
+  readonly takesLogin: boolean;
   /** Logins to try for an HTTP server that takes Cursor's OAuth token, best first. */
   readonly logins: ReadonlyArray<StoredLogin>;
 }
@@ -178,21 +185,31 @@ function loginStores(
  * refreshed from its store before the agent opens, and the next folder's login
  * is tried when that fails. A refresh is written back to its store so Cursor
  * keeps a valid refresh token if the server rotates it. When no login works,
- * the first is forwarded unchanged; the server reports the missing login.
+ * the first is forwarded unchanged and the server is marked `signInRequired`,
+ * as is a server that challenges a request with no login at all.
  */
 const withUsableLogin = Effect.fn("withUsableCursorPluginLogin")(function* (
   server: PluginServer,
   fetchFn: CursorPluginMcpFetch,
 ): Effect.fn.Return<readonly [string, CursorPluginMcpServer]> {
-  const config = server.config;
+  const { config, pluginName } = server;
+  if (!server.takesLogin || !("url" in config)) return [server.identifier, { pluginName, config }];
   const first = server.logins[0];
-  if (first === undefined || !("url" in config)) return [server.identifier, { config }];
+  if (first === undefined) {
+    const challenged = yield* Effect.promise(() => oauthChallenge(config, undefined, fetchFn));
+    return [
+      server.identifier,
+      challenged === undefined
+        ? { pluginName, config }
+        : { pluginName, config, signInRequired: true },
+    ];
+  }
   for (const login of server.logins) {
     const resourceMetadata = yield* Effect.promise(() =>
       oauthChallenge(config, login.accessToken, fetchFn),
     );
     if (resourceMetadata === undefined) {
-      return [server.identifier, withLogin(config, login.folder, login.accessToken)];
+      return [server.identifier, withLogin(pluginName, config, login.folder, login.accessToken)];
     }
     const refresh = yield* Effect.promise(() =>
       refreshCursorPluginAccessToken({
@@ -209,7 +226,10 @@ const withUsableLogin = Effect.fn("withUsableCursorPluginLogin")(function* (
         oauthChallenge(config, refresh.accessToken, fetchFn),
       );
       if (stillRejected === undefined) {
-        return [server.identifier, withLogin(config, login.folder, refresh.accessToken)];
+        return [
+          server.identifier,
+          withLogin(pluginName, config, login.folder, refresh.accessToken),
+        ];
       }
       yield* Effect.logWarning("Cursor plugin server rejected a refreshed OAuth token.", {
         identifier: server.identifier,
@@ -223,15 +243,20 @@ const withUsableLogin = Effect.fn("withUsableCursorPluginLogin")(function* (
       reason: refresh.reason,
     });
   }
-  return [server.identifier, withLogin(config, first.folder, first.accessToken)];
+  return [
+    server.identifier,
+    { ...withLogin(pluginName, config, first.folder, first.accessToken), signInRequired: true },
+  ];
 });
 
 function withLogin(
+  pluginName: string,
   config: HttpServerConfig,
   loginFolder: CursorPluginLoginFolder,
   accessToken: string,
 ): CursorPluginMcpServer {
   return {
+    pluginName,
     config: { ...config, headers: { ...config.headers, Authorization: `Bearer ${accessToken}` } },
     loginFolder,
   };
@@ -264,7 +289,7 @@ function readPluginServers(
     for (const [serverKey, rawConfig] of Object.entries(mcpServers)) {
       const identifier = `plugin-${pluginName}-${serverKey}`;
       if (taken.has(identifier) || !isRecord(rawConfig)) continue;
-      const server = toServer(identifier, rawConfig, pluginRoot, loginsFor, env);
+      const server = toServer(identifier, pluginName, rawConfig, pluginRoot, loginsFor, env);
       if (server === undefined) continue;
       taken.add(identifier);
       servers.push(server);
@@ -275,6 +300,7 @@ function readPluginServers(
 
 function toServer(
   identifier: string,
+  pluginName: string,
   rawConfig: Record<string, unknown>,
   pluginRoot: string,
   loginsFor: (identifier: string) => ReadonlyArray<StoredLogin>,
@@ -303,15 +329,20 @@ function toServer(
     const ownCredential = Object.entries(headers).some(
       ([name]) => name.toLowerCase() === "authorization",
     );
+    const takesLogin = !ownCredential && carriesBearerTokens(url);
     return {
       identifier,
+      pluginName,
       config: { type: httpType, url, headers },
-      logins: ownCredential || !carriesBearerTokens(url) ? [] : loginsFor(identifier),
+      takesLogin,
+      logins: takesLogin ? loginsFor(identifier) : [],
     };
   }
   if (command !== undefined) {
     return {
       identifier,
+      pluginName,
+      takesLogin: false,
       config: {
         command: command.startsWith(".") ? NodePath.resolve(pluginRoot, command) : command,
         args: (Array.isArray(rawConfig.args) ? rawConfig.args : []).flatMap((value) => {
@@ -349,15 +380,16 @@ function isUsableAuthorization(value: string): boolean {
 /**
  * The `resource_metadata` URI (RFC 9728) when the server rejects the token
  * with an MCP OAuth challenge. Other outcomes, including network failures,
- * leave the token as stored.
+ * leave the token as stored. Without a token, the same challenge means the
+ * server needs a login.
  */
 async function oauthChallenge(
   server: HttpServerConfig,
-  accessToken: string,
+  accessToken: string | undefined,
   fetchFn: CursorPluginMcpFetch,
 ): Promise<string | undefined> {
   const headers = new Headers(server.headers);
-  headers.set("Authorization", `Bearer ${accessToken}`);
+  if (accessToken !== undefined) headers.set("Authorization", `Bearer ${accessToken}`);
   if (!headers.has("accept")) {
     headers.set(
       "Accept",
