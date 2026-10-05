@@ -94,12 +94,14 @@ const waivedFailures = stepScalarOf(jobBlock("lint"), preservationStep, "WAIVED_
   "\n",
 );
 
+const outputOf = (...lines: ReadonlyArray<string>): string =>
+  lines.map((line) => `${line}\n`).join("");
+
 const runWaiver = (
   exitCode: number,
   stdoutLines: ReadonlyArray<string>,
   stderrLines: ReadonlyArray<string> = [],
 ): { readonly status: number | null; readonly stdout: string } => {
-  const asText = (lines: ReadonlyArray<string>) => lines.map((line) => `${line}\n`).join("");
   const run = NodeChildProcess.spawnSync(
     "bash",
     [
@@ -112,9 +114,9 @@ const runWaiver = (
       encoding: "utf8",
       env: {
         ...process.env,
-        WAIVED_FAILURES: asText(waivedFailures),
-        FAKE_STDOUT: asText(stdoutLines),
-        FAKE_STDERR: asText(stderrLines),
+        WAIVED_FAILURES: outputOf(...waivedFailures),
+        FAKE_STDOUT: outputOf(...stdoutLines),
+        FAKE_STDERR: outputOf(...stderrLines),
         FAKE_EXIT: String(exitCode),
       },
     },
@@ -137,8 +139,6 @@ const ciReport = (checkLines: ReadonlyArray<string>): ReadonlyArray<string> => [
   "CHECK id=icon-composer-live-evidence status=NOT RUN detail=requires macOS Icon Composer evidence",
   ...reportFooter,
 ];
-const outputOf = (...lines: ReadonlyArray<string>): string =>
-  lines.map((line) => `${line}\n`).join("");
 
 describe("CI workflow", () => {
   it("makes the Check gate need every other job", () => {

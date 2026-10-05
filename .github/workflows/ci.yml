@@ -78,13 +78,6 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           UPSTREAM_SHA: 250e052f44dd313b658abebc707242a7b25be340
           UPSTREAM_BASE_SHA: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
-          # Each check declares the same paths as both its frozen set and its
-          # test command, so when upstream deletes or renames a production symbol,
-          # byte-identity and a green command become mutually exclusive. Each entry
-          # below names one such file. The behaviour each guarded is still asserted,
-          # in the frozen file or its companion suite. Any failure line that is not
-          # listed here still fails the job, so this cannot absorb a new one.
-          # Rationale and the per-file evidence: docs/upstream/kat-3411-intake.md.
           WAIVED_FAILURES: |
             CHECK id=desktop-protocol-bundle-identity status=FAIL detail=trusted assertion changed apps/desktop/src/app/DesktopAppIdentity.test.ts
             CHECK id=desktop-url-handler-backend-routes status=FAIL detail=trusted assertion changed apps/desktop/src/backend/DesktopBackendManager.test.ts

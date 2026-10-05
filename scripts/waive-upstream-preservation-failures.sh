@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Runs the upstream preservation checker given as arguments and passes when it
-# passes or when it printed at least one status=FAIL line and every one of them
-# is an exact line in WAIVED_FAILURES.
 set -euo pipefail
 
 report="$(mktemp)"
