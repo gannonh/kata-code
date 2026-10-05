@@ -2073,7 +2073,7 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
           }),
         );
 
-        it.effect("discards a scan that was in flight when another instance dropped the cwd", () =>
+        it.effect("discards a scan held open across a drop and keeps the cwd dropped", () =>
           Effect.gen(function* () {
             const slowId = ProviderInstanceId.make("slow");
             const slowMachine = makeMachineProvider(slowId, ProviderDriverKind.make("cursor"));
@@ -2112,7 +2112,6 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
               yield* Fiber.join(staleScan);
               assert.deepStrictEqual(yield* workspaceCwdsOf(slowId), []);
 
-              // The drop still filters the instance's own copy of the stale entry.
               yield* Ref.set(cached, [
                 {
                   cwd,
