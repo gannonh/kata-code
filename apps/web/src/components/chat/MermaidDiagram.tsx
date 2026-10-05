@@ -137,10 +137,7 @@ function mermaidRenderPromise(source: string, theme: "light" | "dark") {
 
 let expandedImageUrl: string | null = null;
 
-/**
- * Converts a rendered diagram into a standalone image with fixed size and background.
- * Only one diagram is expanded at a time, so the previous URL is released.
- */
+/** Converts a rendered diagram into a standalone image with fixed size and background. */
 function mermaidImageUrl(svg: string): string {
   const svgDocument = new DOMParser().parseFromString(svg, "image/svg+xml");
   const element = svgDocument.documentElement;

@@ -6,10 +6,8 @@ export function resolveProtocolRelativeMediaUrl(src: string): string {
   return `${protocol}${src}`;
 }
 
-// The desktop connect-src does not allow blob:, so fetch cannot read these URLs back.
 const localMediaBlobs = new Map<string, Blob>();
 
-/** Creates an object URL that save and copy actions read from memory. */
 export function createLocalMediaUrl(blob: Blob): string {
   const url = URL.createObjectURL(blob);
   localMediaBlobs.set(url, blob);
