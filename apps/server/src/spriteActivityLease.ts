@@ -11,6 +11,11 @@ import * as Ref from "effect/Ref";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
+import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
+import {
+  isPullRequestWatchPaused,
+  pullRequestWatchTargets,
+} from "./orchestration-v2/pullRequestWatch.ts";
 import * as ProcessRunner from "./processRunner.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 
@@ -43,13 +48,22 @@ export function hasSpriteActivity(input: {
   readonly connectedClientCount: number;
   readonly providerSessions: ReadonlyArray<Pick<OrchestrationV2ProviderSession, "status">>;
   readonly terminals: ReadonlyArray<Pick<TerminalSummary, "hasRunningSubprocess">>;
+  readonly pullRequestThreads: ReadonlyArray<
+    Pick<
+      ProjectionStore.ProjectionThreadPullRequests,
+      "settledOverride" | "settledAt" | "pullRequests"
+    >
+  >;
 }): boolean {
   return (
     input.connectedClientCount > 0 ||
     input.providerSessions.some((session) =>
       ACTIVE_PROVIDER_SESSION_STATUSES.has(session.status),
     ) ||
-    input.terminals.some((terminal) => terminal.hasRunningSubprocess)
+    input.terminals.some((terminal) => terminal.hasRunningSubprocess) ||
+    pullRequestWatchTargets(input.pullRequestThreads).some(
+      ({ thread }) => !isPullRequestWatchPaused(thread),
+    )
   );
 }
 
@@ -163,6 +177,7 @@ const make = Effect.gen(function* () {
   const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
   const sql = yield* SqlClient.SqlClient;
   const terminals = yield* TerminalManager.TerminalManager;
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
   const runner = yield* ProcessRunner.ProcessRunner;
   const terminalState = yield* Ref.make(new Map<string, TerminalSummary>());
   const leaseState = yield* Ref.make<SpriteLeaseState>({
@@ -181,6 +196,14 @@ const make = Effect.gen(function* () {
     acceptNotFound: true,
   });
 
+  const readPullRequestThreads = projections.getThreadsWithPullRequests().pipe(
+    Effect.catch((cause) =>
+      Effect.logWarning("Failed to read pull request watches for Sprite activity", {
+        cause,
+      }).pipe(Effect.as([])),
+    ),
+  );
+
   const tick = Effect.gen(function* () {
     const [connectedClientCount, sessions, terminalSessions, current, now] = yield* Effect.all([
       backgroundPolicy.connectedClientCount,
@@ -198,10 +221,12 @@ const make = Effect.gen(function* () {
       Ref.get(leaseState),
       Clock.currentTimeMillis,
     ]);
+    const pullRequestThreads = yield* readPullRequestThreads;
     const demand = hasSpriteActivity({
       connectedClientCount,
       providerSessions: sessions,
       terminals: [...terminalSessions.values()],
+      pullRequestThreads,
     });
     const decision = nextSpriteLeaseState({ current, demand, now });
 
@@ -236,4 +261,6 @@ const make = Effect.gen(function* () {
   );
 });
 
-export const layer = Layer.effectDiscard(make).pipe(Layer.provide(ProcessRunner.layer));
+export const layer = Layer.effectDiscard(make).pipe(
+  Layer.provide([ProcessRunner.layer, ProjectionStore.layer]),
+);
