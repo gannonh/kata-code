@@ -1058,6 +1058,7 @@ export { sortActiveThreadsByOrderKey as sortThreadsForSidebar } from "@kata-sh/c
 export {
   isThreadWorking as isSidebarThreadWorking,
   sortInboxThreadsByReturn,
+  sortWorkingThreadsBySend,
 } from "@kata-sh/code-client-runtime/state/thread-inbox";
 
 // Pinned-reorder key math and the keyed sort live in client-runtime

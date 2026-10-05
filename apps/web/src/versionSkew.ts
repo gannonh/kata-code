@@ -1,6 +1,7 @@
 import type {
   EnvironmentId,
   ServerConfig,
+  ServerInstallation,
   ServerSelfUpdateCapability,
 } from "@kata-sh/code-contracts";
 import type { ServerUpdateState } from "@kata-sh/code-client-runtime/state/server";
@@ -127,8 +128,17 @@ export function supportsBitbucketCredentials(
 }
 
 /** The command to hand users whose server cannot update itself. */
-export function manualServerUpdateCommand(targetVersion: string): string {
-  return `npx @kata-sh/code-cli@${targetVersion}`;
+export function manualServerUpdateCommand(
+  targetVersion: string,
+  installation?: ServerInstallation,
+): string {
+  if (installation?.kind === "npm-global") {
+    const prefix = `'${installation.prefix.replaceAll("'", "'\\''")}'`;
+    return `npm install --global --prefix ${prefix} @kata-sh/code-cli@${targetVersion}`;
+  }
+  const runner =
+    installation?.kind === "pnpm-dlx" ? "pnpm dlx" : installation?.kind === "bunx" ? "bunx" : "npx";
+  return `${runner} @kata-sh/code-cli@${targetVersion}`;
 }
 
 export function serverUpdateGuidance(capability: ServerSelfUpdateCapability): string {

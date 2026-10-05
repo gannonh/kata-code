@@ -53,7 +53,7 @@ import {
   resolveProviderStatusCachePath,
   writeProviderStatusCache,
 } from "../providerStatusCache.ts";
-import type { ProviderInstance } from "../ProviderDriver.ts";
+import type { ProviderInstance, ProviderWorkspaceSnapshot } from "../ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 
@@ -133,12 +133,16 @@ function retainDroppedWorkspaces(
 export function upsertProviderWorkspaceSnapshot(
   provider: ServerProvider,
   cwd: string,
-  scopedSnapshot: ServerProvider,
+  scopedSnapshot: ProviderWorkspaceSnapshot,
 ): ServerProvider {
   const workspaceSnapshot = {
     cwd,
     checkedAt: scopedSnapshot.checkedAt,
-    slashCommands: scopedSnapshot.slashCommands,
+    slashCommands: scopedSnapshot.slashCommandsPending
+      ? (provider.workspaceSnapshots?.find((snapshot) => snapshot.cwd === cwd)?.slashCommands ??
+        scopedSnapshot.slashCommands)
+      : scopedSnapshot.slashCommands,
+    ...(scopedSnapshot.slashCommandsPending ? { slashCommandsPending: true } : {}),
     skills: scopedSnapshot.skills,
   } satisfies NonNullable<ServerProvider["workspaceSnapshots"]>[number];
   return {
@@ -995,7 +999,11 @@ export const ProviderRegistryLive = Layer.effect(
       const workspaceSnapshotOf = (candidate: ServerProvider | undefined) =>
         candidate?.workspaceSnapshots?.find((s) => s.cwd === input.cwd);
       const scannedFrom = workspaceSnapshotOf(provider);
-      if (!provider || !provider.enabled || (!input.fresh && scannedFrom)) {
+      if (
+        !provider ||
+        !provider.enabled ||
+        (!input.fresh && scannedFrom && !scannedFrom.slashCommandsPending)
+      ) {
         return providers;
       }
       const instance = yield* instanceRegistry.getInstance(input.instanceId);
@@ -1016,8 +1024,7 @@ export const ProviderRegistryLive = Layer.effect(
       }
       const generation = (generations.get(input.cwd) ?? 0) + (input.fresh ? 1 : 0);
       generations.set(input.cwd, generation);
-      // Fresh scans also re-read the machine snapshot: Claude's plugin
-      // commands come from it, not from the cwd scan.
+      // Fresh scans also re-read the machine snapshot after invalidating caches.
       const refreshMachineSnapshot = input.fresh
         ? (instance.invalidateCaches ?? Effect.void).pipe(
             Effect.andThen(refreshInstance(input.instanceId)),
@@ -1026,7 +1033,7 @@ export const ProviderRegistryLive = Layer.effect(
       return yield* refreshMachineSnapshot.pipe(
         Effect.andThen(instance.snapshotForCwd(input.cwd)),
         Effect.flatMap((scopedSnapshot) =>
-          scopedSnapshot.status === "error"
+          scopedSnapshot.status === "error" && scopedSnapshot.slashCommandsPending === undefined
             ? readProviders
             : instanceRegistry.getInstance(input.instanceId).pipe(
                 Effect.flatMap((currentInstance) => {

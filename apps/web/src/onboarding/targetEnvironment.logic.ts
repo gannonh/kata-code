@@ -1,16 +1,19 @@
-import type { ConnectionTarget } from "@kata-sh/code-client-runtime/connection";
+import {
+  type ConnectionCatalogEntry,
+  hasRelayRoute,
+} from "@kata-sh/code-client-runtime/connection";
 import type { EnvironmentId } from "@kata-sh/code-contracts";
 
 interface OnboardingEnvironment {
   readonly environmentId: EnvironmentId;
   readonly connection: { readonly phase: string };
-  readonly entry: { readonly target: ConnectionTarget };
+  readonly entry: Pick<ConnectionCatalogEntry, "target" | "alternateRoutes">;
 }
 
 export function isOnboardingRelayEnvironment(
   environment: Pick<OnboardingEnvironment, "entry">,
 ): boolean {
-  return environment.entry.target._tag === "RelayConnectionTarget";
+  return hasRelayRoute(environment.entry);
 }
 
 /** Keep a directly paired machine pinned while its initial connection completes. */
