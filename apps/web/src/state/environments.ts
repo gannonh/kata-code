@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   connectionCatalogDisplayUrl,
+  hasRelayRoute,
   type EnvironmentPresentation as BaseEnvironmentPresentation,
 } from "@kata-sh/code-client-runtime/connection";
 import { Discovery } from "@kata-sh/code-client-runtime/relay";
@@ -34,7 +35,7 @@ function projectEnvironmentPresentation(
     environmentId,
     label: presentation.entry.target.label,
     displayUrl: connectionCatalogDisplayUrl(presentation.entry),
-    relayManaged: presentation.entry.target._tag === "RelayConnectionTarget",
+    relayManaged: hasRelayRoute(presentation.entry),
   };
 }
 

@@ -30,7 +30,13 @@ line to add. Set `KATACODE_CHANNEL=nightly` to install the nightly train, or
 | Move to the newest release                       | `katacode update`                                               |
 | Remove it again                                  | `katacode uninstall`                                            |
 
-Run `katacode --help` for the full reference.
+Run `katacode help` or `katacode --help` for the full reference. To start in a new working
+directory, use an explicit path such as `katacode ./my-project`. A bare directory name
+is accepted only if it already exists.
+
+If `katacode` or `katacode start` reports an already running server, connect to that server
+instead. Stop it before starting a replacement, or use a different `--base-dir`
+for an independent server.
 
 To try Kata Code once without installing it, run `npx @kata-sh/code-cli@latest` instead (needs
 Node.js for `npx`).

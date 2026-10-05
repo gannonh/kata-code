@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { useIsFocused, useNavigation } from "@react-navigation/native";
+import { StackActions, useIsFocused, useNavigation } from "@react-navigation/native";
 import { scopeThreadRef } from "@kata-sh/code-client-runtime/environment";
 import { summarizeSubagentStatuses } from "@kata-sh/code-client-runtime/state/subagent-display";
 import { isActiveSubagentStatus } from "@kata-sh/code-client-runtime/state/subagentRuntime";
@@ -158,11 +158,15 @@ export function ThreadSubagentGroup(props: {
                 }
                 disabled={threadId === null}
                 onPress={() => {
+                  // Push, not navigate: navigate reuses this Thread route, so back
+                  // would skip the parent thread.
                   if (threadId !== null)
-                    navigation.navigate("Thread", {
-                      environmentId: String(props.environmentId),
-                      threadId: String(threadId),
-                    });
+                    navigation.dispatch(
+                      StackActions.push("Thread", {
+                        environmentId: String(props.environmentId),
+                        threadId: String(threadId),
+                      }),
+                    );
                 }}
                 className="rounded-lg px-3 py-3 active:bg-subtle"
               >

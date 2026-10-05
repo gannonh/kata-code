@@ -28,6 +28,27 @@ const MISMATCH_HINT =
   "Version mismatch. Try syncing the client and server to the same Kata Code version.";
 
 describe("versionSkew", () => {
+  it("updates only the proven npm prefix and safely quotes its path", () => {
+    expect(manualServerUpdateCommand("0.0.45", { kind: "npm-global", prefix: "/opt/node" })).toBe(
+      "npm install --global --prefix '/opt/node' @kata-sh/code-cli@0.0.45",
+    );
+    expect(
+      manualServerUpdateCommand("0.0.45", { kind: "npm-global", prefix: "/opt/maria's node" }),
+    ).toBe("npm install --global --prefix '/opt/maria'\\''s node' @kata-sh/code-cli@0.0.45");
+  });
+
+  it("keeps runner and unknown commands as relaunches", () => {
+    expect(manualServerUpdateCommand("0.0.45")).toBe("npx @kata-sh/code-cli@0.0.45");
+    expect(manualServerUpdateCommand("0.0.45", { kind: "npx" })).toBe(
+      "npx @kata-sh/code-cli@0.0.45",
+    );
+    expect(manualServerUpdateCommand("0.0.45", { kind: "pnpm-dlx" })).toBe(
+      "pnpm dlx @kata-sh/code-cli@0.0.45",
+    );
+    expect(manualServerUpdateCommand("0.0.45", { kind: "bunx" })).toBe(
+      "bunx @kata-sh/code-cli@0.0.45",
+    );
+  });
   beforeEach(() => {
     branding.APP_VERSION = "0.0.34";
   });
