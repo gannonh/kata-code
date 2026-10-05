@@ -4,13 +4,14 @@ On your first V2 launch, Kata Code copies the V1 database, `state.sqlite`, into 
 in the same data directory and migrates the copy. Your threads appear automatically, with full
 transcripts imported as needed. You do not need to run an import command.
 
-V1 continues using its original database while V2 uses the copy. The database import can run while
-V1 is open. Opening V2 again resumes your V2 history. The copy happens only once: later conversations
-and changes in either version do not sync to the other. Settings, attachments, and workspace files
-remain shared.
+V1 continues using its original database while V2 uses the copy. Opening V2 again resumes your V2
+history. The copy happens only once: later conversations and changes in either version do not sync
+to the other. Settings, attachments, and workspace files remain shared.
 
-The V2 desktop app keeps the same browser profile as V1, so browser cookies, caches, and sign-ins
-to websites opened inside the app carry over.
+The V2 desktop app uses the same app data directory as V1, so your in-app browser profiles keep their
+cookies, caches, and website sign-ins. Because both versions share that directory, only one desktop
+version can run at a time. If you open one while the other is running, the running app comes to the
+front.
 
 The migrated thread keeps its title, project, provider and model selection, permission and
 interaction modes, branch or worktree, archive state, settlement state, snooze and pin state, and
