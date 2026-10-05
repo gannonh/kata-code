@@ -96,7 +96,7 @@ After pairing, the app strips the token from the URL and redirects to `/`. `Firs
 Finish the wizard without importing:
 
 1. **Connect.** The local computer row shows **Connected**. Click **Continue**. Do not open **Add a computer**.
-2. **Agents.** Heading **Your agents**. Click **Continue**. Do not require an agent to be Ready.
+2. **Agents.** Heading **Connect your agents**. Click **Continue**. Do not require an agent to be Ready.
 3. **Projects.** Heading **Your projects** or **Choose your projects**. Click **Do not import projects**.
 
 Then wait until the setup dialog is gone and the URL is `/`. A correct launch then shows:
@@ -112,7 +112,7 @@ Stable handles in this app:
 | What | Handle |
 | --- | --- |
 | Pairing form | heading `Pair with this environment`, textbox `Pairing token`, buttons `Continue` and `Reload app` |
-| Welcome wizard | dialog `Set up Kata Code`, progress `Setup progress`, steps `Connect` / `Agents` / `Projects`, headings `Connect your computers` / `Your agents` / `Your projects` or `Choose your projects`, skip-import button `Do not import projects` |
+| Welcome wizard | dialog `Set up Kata Code`, progress `Setup progress`, steps `Connect` / `Agents` / `Projects`, headings `Connect your computers` / `Connect your agents` / `Your projects` or `Choose your projects`, skip-import button `Do not import projects` |
 | Empty landing | text `What should we work on?` (no heading role), button `Add project` |
 | Sidebar settings | button `Settings` |
 | Sidebar usage | button `Usage` |
