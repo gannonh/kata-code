@@ -7,7 +7,7 @@
  * reads only the agent folder's logins. Each entry is keyed by the plugin
  * identifier Cursor uses, `plugin-<plugin.json name>-<server key>`. The SDK
  * loads inline servers first and keeps the first client of each name, so a
- * forwarded server replaces the loader's copy instead of adding a second.
+ * forwarded server is the one the run registers under that name.
  *
  * Cursor keeps a plugin's OAuth login per folder, in
  * `<CURSOR_DATA_DIR or ~/.cursor>/projects/<slug>/mcp-auth.json` under that
