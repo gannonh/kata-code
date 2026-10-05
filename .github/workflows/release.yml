@@ -919,11 +919,11 @@ jobs:
             --make-latest "${{ needs.preflight.outputs.make_latest }}"
 
   # Vercel builds the hosted web app while the desktop jobs run, once quality,
-  # test, and test_server have passed. `--skip-domain` keeps the channel and
-  # router domains on the previous deployment until deploy_web aliases them
-  # after the GitHub Release exists, so a failed release leaves the previous
-  # alias in place. It does still move the project's own katacode-web.vercel.app
-  # production hostname at build time; see docs/operations/release.md.
+  # test, and test_server have passed. The katacode-web project has no
+  # registered domains, so `--skip-domain` moves no hostname. The channel and
+  # router domains are aliases that only deploy_web's `alias set` moves, after
+  # the GitHub Release exists, so a failed release leaves the previous alias in
+  # place; see docs/operations/release.md.
   build_web:
     name: Build hosted web app
     needs: [preflight, relay_public_config, quality, test, test_server]
