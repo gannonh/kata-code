@@ -649,9 +649,12 @@ Checklist:
 
 - **Publish GitHub Release** fails with `Release <id> stays a draft`:
   - The message lists each missing feed or macOS update zip, and each missing, still-uploading,
-    or mis-sized file. Nothing was published, so
-    updaters still see the previous release. Re-run the failed jobs; if a file is missing from the
-    build itself, fix the build and cut a new release.
+    or mis-sized file. Nothing was published, so updaters still see the previous release. Re-run
+    the failed jobs; if a file is missing from the build itself, fix the build and cut a new
+    release.
+  - A missing feed or macOS update zip comes from a desktop job that succeeded without writing
+    its feed, so re-running only the failed jobs repeats the failure. Re-run all jobs, or fix
+    that platform's build.
 - macOS build unsigned when expected signed:
   - Check all Apple secrets plus `APPLE_TEAM_ID` are populated and non-empty.
   - Confirm the provisioning profile belongs to `APPLE_TEAM_ID.com.katacode.app` and includes

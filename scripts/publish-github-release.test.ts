@@ -615,11 +615,7 @@ it.layer(NodeServices.layer)("publishGitHubRelease", (it) => {
       const distDir = yield* writeDist(files);
       const release = draft({
         tag: "v0.0.45",
-        assets: uploaded(files).filter(
-          (asset) =>
-            asset.name !== "Kata-Code-macOS-Intel.zip" &&
-            asset.name !== "Kata-Code-macOS-Intel.dmg",
-        ),
+        assets: uploaded(files),
       });
 
       const error = yield* publish(distDir, "true").pipe(

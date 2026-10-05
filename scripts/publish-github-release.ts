@@ -145,7 +145,7 @@ export interface ReleaseCompletenessInput {
   readonly assets: ReadonlyArray<GitHubReleaseAsset>;
 }
 
-/** Everything that makes a draft unsafe to publish. Empty means it is complete. */
+/** Every asset problem that makes a draft unsafe to publish. Empty means its assets are complete. */
 export function findIncompleteReleaseProblems(
   input: ReleaseCompletenessInput,
 ): ReadonlyArray<string> {
