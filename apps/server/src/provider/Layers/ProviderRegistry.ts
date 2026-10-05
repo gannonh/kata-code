@@ -473,6 +473,13 @@ export const ProviderRegistryLive = Layer.effect(
     // generation it started under is still current. Plain mutable state so the
     // check runs inside the same synchronous update as the write.
     const workspaceScanGenerations = new WeakMap<ProviderInstance, Map<string, number>>();
+    const supersedeInFlightScans = (instances: ReadonlyArray<ProviderInstance>, cwd: string) => {
+      for (const instance of instances) {
+        const generations = workspaceScanGenerations.get(instance);
+        const generation = generations?.get(cwd);
+        if (generations && generation !== undefined) generations.set(cwd, generation + 1);
+      }
+    };
     const maintenanceActionStatesRef = yield* Ref.make<
       ReadonlyMap<ProviderInstanceId, { readonly update?: ServerProviderUpdateState | undefined }>
     >(new Map());
@@ -978,21 +985,23 @@ export const ProviderRegistryLive = Layer.effect(
         // Every other live instance records the drop, even one whose entry the
         // registry does not hold yet, so a publication still queued from it is
         // filtered too.
-        const instances = yield* instanceRegistry.listInstances;
-        yield* updateState((state) => ({
-          providers: state.providers.map((candidate) =>
-            candidate.instanceId === input.instanceId
-              ? candidate
-              : dropProviderWorkspaceSnapshot(candidate, input.cwd),
-          ),
-          dropped: instances.reduce(
-            (dropped, other) =>
-              other.instanceId === input.instanceId
-                ? dropped
-                : setWorkspaceDropped(dropped, other.instanceId, input.cwd, true),
-            state.dropped,
-          ),
-        }));
+        const others = (yield* instanceRegistry.listInstances).filter(
+          (other) => other.instanceId !== input.instanceId,
+        );
+        yield* updateState((state) => {
+          supersedeInFlightScans(others, input.cwd);
+          return {
+            providers: state.providers.map((candidate) =>
+              candidate.instanceId === input.instanceId
+                ? candidate
+                : dropProviderWorkspaceSnapshot(candidate, input.cwd),
+            ),
+            dropped: others.reduce(
+              (dropped, other) => setWorkspaceDropped(dropped, other.instanceId, input.cwd, true),
+              state.dropped,
+            ),
+          };
+        });
       }
       const providers = yield* readProviders;
       const provider = providers.find((candidate) => candidate.instanceId === input.instanceId);

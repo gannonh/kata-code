@@ -2073,6 +2073,72 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
           }),
         );
 
+        it.effect(
+          "discards a scan held open across a drop and keeps the cwd dropped until a rescan",
+          () =>
+            Effect.gen(function* () {
+              const slowId = ProviderInstanceId.make("slow");
+              const slowMachine = makeMachineProvider(slowId, ProviderDriverKind.make("cursor"));
+              const scanStarted = yield* Deferred.make<void>();
+              const releaseScan = yield* Deferred.make<void>();
+              const cached = yield* Ref.make<NonNullable<ServerProvider["workspaceSnapshots"]>>([]);
+              const publishCache = Effect.map(Ref.get(cached), (workspaceSnapshots) => ({
+                ...slowMachine,
+                workspaceSnapshots,
+              }));
+              const scanSkills = yield* Ref.make<ServerProvider["skills"]>(staleSkills);
+              const scan = () =>
+                Deferred.succeed(scanStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseScan)),
+                  Effect.andThen(Ref.get(scanSkills)),
+                  Effect.map((skills) => ({ ...slowMachine, skills })),
+                );
+              const slowInstance = makeWorkspaceInstance(slowMachine, scan, {
+                snapshot: {
+                  ...makeWorkspaceInstance(slowMachine, scan).snapshot,
+                  getSnapshot: publishCache,
+                  refresh: publishCache,
+                },
+              });
+              const runtimeServices = yield* buildRegistryServices(
+                [slowInstance, codexInstance],
+                "t3-provider-registry-drop-in-flight-",
+              );
+
+              yield* Effect.gen(function* () {
+                const registry = yield* ProviderRegistry.ProviderRegistry;
+                const staleScan = yield* registry
+                  .refreshWorkspaceSnapshot({ instanceId: slowId, cwd })
+                  .pipe(Effect.forkChild);
+                yield* Deferred.await(scanStarted);
+                yield* registry.refreshWorkspaceSnapshot({ instanceId: codexId, cwd, fresh: true });
+                yield* Deferred.succeed(releaseScan, undefined);
+                yield* Fiber.join(staleScan);
+                assert.deepStrictEqual(yield* workspaceCwdsOf(slowId), []);
+
+                yield* Ref.set(cached, [
+                  {
+                    cwd,
+                    checkedAt: "2026-06-10T00:00:00.000Z",
+                    slashCommands: [],
+                    skills: staleSkills,
+                  },
+                ]);
+                yield* registry.refreshInstance(slowId);
+                assert.deepStrictEqual(yield* workspaceCwdsOf(slowId), []);
+
+                yield* Ref.set(scanSkills, freshSkills);
+                yield* registry.refreshWorkspaceSnapshot({ instanceId: slowId, cwd });
+                assert.deepStrictEqual(
+                  (yield* registry.getProviders)
+                    .find((provider) => provider.instanceId === slowId)
+                    ?.workspaceSnapshots?.map((snapshot) => snapshot.skills),
+                  [freshSkills],
+                );
+              }).pipe(Effect.provide(runtimeServices));
+            }),
+        );
+
         it.effect("remembers the 32 most recent drops for an instance", () =>
           Effect.gen(function* () {
             const cacheId = ProviderInstanceId.make("cache");
