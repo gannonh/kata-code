@@ -78,44 +78,30 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           UPSTREAM_SHA: 250e052f44dd313b658abebc707242a7b25be340
           UPSTREAM_BASE_SHA: 6a687ee43bf222672ab8d3f4c0bab3d8d174f79f
+          # Each line is an exact checker line a human waived after an upstream
+          # intake; a new line needs its own recorded decision. Rationale and
+          # evidence: docs/upstream/kat-3411-intake.md.
+          WAIVED_FAILURES: |
+            CHECK id=desktop-protocol-bundle-identity status=FAIL detail=trusted assertion changed apps/desktop/src/app/DesktopAppIdentity.test.ts
+            CHECK id=desktop-url-handler-backend-routes status=FAIL detail=trusted assertion changed apps/desktop/src/backend/DesktopBackendManager.test.ts
+            CHECK id=desktop-window-behavior status=FAIL detail=trusted assertion changed apps/desktop/src/app/DesktopLifecycle.test.ts
+            CHECK id=desktop-packaging-asset-identity status=FAIL detail=trusted assertion changed scripts/build-desktop-artifact.test.ts
+            CHECK id=mobile-agent-awareness-teardown status=FAIL detail=trusted assertion changed apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts
+            CHECK id=mobile-theme-native-identity status=FAIL detail=trusted assertion changed apps/mobile/src/lib/mobileTheme.test.ts
         run: |
           set -euo pipefail
           trusted_root="$(mktemp -d)"
-          report="$(mktemp)"
-          trap 'rm -rf "$trusted_root" "$report"' EXIT
+          trap 'rm -rf "$trusted_root"' EXIT
           if git cat-file -e "$BASE_SHA:scripts/check-upstream-preservation.ts" 2>/dev/null; then
             git archive --format=tar "$BASE_SHA" scripts/check-upstream-preservation.ts scripts/lib/ \
               | tar -xf - -C "$trusted_root"
             ln -s "$PWD/scripts/node_modules" "$trusted_root/scripts/node_modules"
-            if node "$trusted_root/scripts/check-upstream-preservation.ts" \
+            bash scripts/waive-upstream-preservation-failures.sh node "$trusted_root/scripts/check-upstream-preservation.ts" \
               --mode ci \
               --candidate "$CANDIDATE_SHA" \
               --base "$BASE_SHA" \
               --upstream "$UPSTREAM_SHA" \
-              --upstream-base "$UPSTREAM_BASE_SHA" | tee "$report"; then
-              exit 0
-            fi
-            # Each check declares the same paths as both its frozen set and its
-            # test command, so when upstream deletes or renames a production symbol,
-            # byte-identity and a green command become mutually exclusive. Each entry
-            # below names one such file. The behaviour each guarded is still asserted,
-            # in the frozen file or its companion suite. Any failure line that is not
-            # listed here still fails the job, so this cannot absorb a new one.
-            # Rationale and the per-file evidence: docs/upstream/kat-3411-intake.md.
-            unwaived="$(grep '^CHECK .* status=FAIL' "$report" | grep -vxF \
-              -e 'CHECK id=desktop-protocol-bundle-identity status=FAIL detail=trusted assertion changed apps/desktop/src/app/DesktopAppIdentity.test.ts' \
-              -e 'CHECK id=desktop-url-handler-backend-routes status=FAIL detail=trusted assertion changed apps/desktop/src/backend/DesktopBackendManager.test.ts' \
-              -e 'CHECK id=desktop-window-behavior status=FAIL detail=trusted assertion changed apps/desktop/src/app/DesktopLifecycle.test.ts' \
-              -e 'CHECK id=desktop-packaging-asset-identity status=FAIL detail=trusted assertion changed scripts/build-desktop-artifact.test.ts' \
-              -e 'CHECK id=mobile-agent-awareness-teardown status=FAIL detail=trusted assertion changed apps/mobile/src/features/agent-awareness/remoteRegistration.test.ts' \
-              -e 'CHECK id=mobile-theme-native-identity status=FAIL detail=trusted assertion changed apps/mobile/src/lib/mobileTheme.test.ts' || true)"
-            if [ -z "$unwaived" ]; then
-              echo "Only waived trusted-assertion failures remain; see docs/upstream/kat-3411-intake.md."
-              exit 0
-            fi
-            echo "Unwaived preservation failures:"
-            printf '%s\n' "$unwaived"
-            exit 1
+              --upstream-base "$UPSTREAM_BASE_SHA"
           else
             echo "Preservation checker bootstrap: base predates scripts/check-upstream-preservation.ts; candidate checker is used once."
             vp run check:upstream-preservation -- \
