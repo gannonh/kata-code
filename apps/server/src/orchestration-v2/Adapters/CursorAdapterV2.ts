@@ -47,7 +47,10 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
 import { mcpToolPresentation } from "../../provider/McpToolPresentation.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import { discoverCursorPluginMcpServers } from "../../provider/acp/CursorPluginMcp.ts";
+import {
+  type CursorPluginMcpServer,
+  discoverCursorPluginMcpServers,
+} from "../../provider/acp/CursorPluginMcp.ts";
 import { CursorTransportFailure } from "../../provider/acp/CursorTransportFailure.ts";
 import { cursorSdkModelSelection } from "../../provider/cursorSdkModel.ts";
 import {
@@ -328,8 +331,6 @@ export function makeCursorAgentOptions(input: {
   readonly pluginMcpServers?: Record<string, McpServerConfig>;
 }): AgentOptions {
   const policy = cursorRuntimeAgentPolicy(input.runtimePolicy);
-  // Agent-level only: send-level servers would replace the project, user,
-  // and plugin MCP servers for the run.
   const mcpServers = withPluginMcpServers(cursorMcpServers(input.threadId), input.pluginMcpServers);
   return {
     model: cursorSdkModelSelection(input.modelSelection),
@@ -904,7 +905,7 @@ export function makeCursorAdapterV2(
         const planIds = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact["id"]>());
         const pluginMcpServersCache = yield* Ref.make<{
           readonly key: string;
-          readonly servers: Record<string, McpServerConfig>;
+          readonly servers: Record<string, CursorPluginMcpServer>;
         } | null>(null);
 
         /**
@@ -928,11 +929,8 @@ export function makeCursorAdapterV2(
             Effect.provideService(FileSystem.FileSystem, fileSystem),
             Effect.provideService(Path.Path, path),
           );
-          const servers = Object.fromEntries(
-            Object.entries(discovered).map(([name, server]) => [name, server.config]),
-          );
-          yield* Ref.set(pluginMcpServersCache, { key, servers });
-          return servers;
+          yield* Ref.set(pluginMcpServersCache, { key, servers: discovered });
+          return discovered;
         });
 
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) =>
@@ -2134,16 +2132,24 @@ export function makeCursorAdapterV2(
             modelSelection: openInput.modelSelection,
             runtimePolicy: openInput.runtimePolicy,
             threadId: openInput.threadId,
-            ...(plugins === undefined ? {} : { pluginMcpServers: plugins }),
+            ...(plugins === undefined
+              ? {}
+              : {
+                  pluginMcpServers: Object.fromEntries(
+                    Object.entries(plugins).map(([name, server]) => [name, server.config]),
+                  ),
+                }),
           });
           const existing = yield* Ref.get(liveAgent);
+          const running = yield* Ref.get(activeTurn);
           // The SDK reads agent-level MCP servers only when it opens an agent,
-          // so a rotated T3 credential needs the agent reopened.
+          // so a rotated T3 credential needs the agent reopened, but never
+          // while a turn runs: closing would tear down the session that owns it.
           if (
             existing !== null &&
             openInput.operation === "resume" &&
             existing.nativeThreadId === openInput.agentId &&
-            Equal.equals(existing.openedMcpServers, options.mcpServers)
+            (running !== null || Equal.equals(existing.openedMcpServers, options.mcpServers))
           ) {
             return existing;
           }
@@ -2478,14 +2484,21 @@ export function makeCursorAdapterV2(
               ),
           ),
           resumeThread: Effect.fn("CursorAdapterV2.resumeThread")(
-            function* (threadInput: { readonly providerThread: OrchestrationV2ProviderThread }) {
+            function* (
+              threadInput: Parameters<
+                ProviderAdapter.ProviderAdapterV2SessionRuntime["resumeThread"]
+              >[0],
+            ) {
               const agentId = nativeThreadId(threadInput.providerThread);
+              // The turn's own inputs win over the session's, so the agent
+              // resumed here is the one startTurn builds and does not reopen.
               yield* openAgent({
                 operation: "resume",
                 agentId,
-                threadId: threadInput.providerThread.appThreadId ?? input.threadId,
-                modelSelection: input.modelSelection,
-                runtimePolicy: input.runtimePolicy,
+                threadId:
+                  threadInput.threadId ?? threadInput.providerThread.appThreadId ?? input.threadId,
+                modelSelection: threadInput.modelSelection ?? input.modelSelection,
+                runtimePolicy: threadInput.runtimePolicy ?? input.runtimePolicy,
               });
               const now = yield* DateTime.now;
               return {

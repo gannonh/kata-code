@@ -14,6 +14,7 @@ import {
   ThreadId,
 } from "@kata-sh/code-contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -1195,28 +1196,37 @@ const makeCursorPluginFixture = Effect.fn("makeCursorPluginFixture")(function* (
   };
 });
 
-const runCursorTurns = Effect.fn("runCursorTurns")(function* (input: {
+const DEFAULT_T3_AUTHORIZATION = "Bearer t3-mcp-token";
+
+/**
+ * A Cursor adapter session over a fake runner that records every agent open
+ * and close. `runGate` holds each run in flight until it completes.
+ */
+const makeCursorTurnHarness = Effect.fn("makeCursorTurnHarness")(function* (input: {
   readonly cwd: string;
   readonly projectRoot: string;
   readonly env: NodeJS.ProcessEnv;
   readonly fetch: typeof globalThis.fetch;
-  readonly t3AuthorizationHeaders?: ReadonlyArray<string>;
+  readonly t3AuthorizationHeader: string;
+  readonly runGate?: Deferred.Deferred<void>;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const instanceId = ProviderInstanceId.make("cursor");
   const threadId = ThreadId.make("cursor-plugin-oauth-thread");
   const modelSelection = { instanceId, model: "composer-2.5" };
-  const runtimePolicy = ProviderAdapterV2RuntimePolicy.make({
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    cwd: input.cwd,
-    projectRoot: input.projectRoot,
-  });
+  const policyFor = (cwd: string) =>
+    ProviderAdapterV2RuntimePolicy.make({
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      cwd,
+      projectRoot: input.projectRoot,
+    });
+  const runtimePolicy = policyFor(input.cwd);
   const opened: Array<AgentOptions> = [];
   const opens: Array<{ readonly operation: string; readonly agentId: string | undefined }> = [];
   const closed: Array<number> = [];
-  const sent: Array<Record<string, McpServerConfig> | undefined> = [];
+  let runCount = 0;
   const adapter = makeCursorAdapterV2({
     instanceId,
     settings: yield* decodeCursorSettings({}),
@@ -1243,20 +1253,24 @@ const runCursorTurns = Effect.fn("runCursorTurns")(function* (input: {
             close: Effect.sync(() => {
               closed.push(index);
             }),
-            send: (sendInput) =>
+            send: () =>
               Effect.sync(() => {
-                sent.push(sendInput.options?.mcpServers);
-                const runId = `native-cursor-plugin-oauth-run-${sent.length}`;
+                runCount += 1;
+                const runId = `native-cursor-plugin-oauth-run-${runCount}`;
+                const result = {
+                  id: runId,
+                  requestId: "native-request",
+                  status: "finished" as const,
+                  model: { id: "composer-2.5" },
+                  durationMs: 1,
+                };
                 return {
                   agentId: "native-cursor-plugin-oauth",
                   runId,
-                  wait: Effect.succeed({
-                    id: runId,
-                    requestId: "native-request",
-                    status: "finished" as const,
-                    model: { id: "composer-2.5" },
-                    durationMs: 1,
-                  }),
+                  wait:
+                    input.runGate === undefined
+                      ? Effect.succeed(result)
+                      : Deferred.await(input.runGate).pipe(Effect.as(result)),
                   cancel: Effect.void,
                 };
               }),
@@ -1274,8 +1288,7 @@ const runCursorTurns = Effect.fn("runCursorTurns")(function* (input: {
       authorizationHeader,
       browserToolsAvailable: false,
     });
-  const [firstHeader = "Bearer t3-mcp-token", ...laterHeaders] = input.t3AuthorizationHeaders ?? [];
-  setT3McpSession(firstHeader);
+  setT3McpSession(input.t3AuthorizationHeader);
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId)),
   );
@@ -1287,14 +1300,12 @@ const runCursorTurns = Effect.fn("runCursorTurns")(function* (input: {
   });
   const providerThread = yield* runtime.ensureThread({ threadId, modelSelection, runtimePolicy });
   const now = yield* DateTime.now;
-  for (const [index, header] of [firstHeader, ...laterHeaders].entries()) {
-    setT3McpSession(header);
-    const ordinal = index + 1;
-    yield* runtime.startTurn({
+  const startTurn = (turnPolicy: typeof runtimePolicy, ordinal: number) =>
+    runtime.startTurn({
       threadId,
       providerThread,
       modelSelection,
-      runtimePolicy,
+      runtimePolicy: turnPolicy,
       runId: RunId.make(`cursor-plugin-oauth-run-${ordinal}`),
       runOrdinal: ordinal,
       providerTurnOrdinal: ordinal,
@@ -1311,7 +1322,7 @@ const runCursorTurns = Effect.fn("runCursorTurns")(function* (input: {
         runtimeMode: "full-access",
         interactionMode: "default",
         branch: null,
-        worktreePath: input.cwd === input.projectRoot ? null : input.cwd,
+        worktreePath: turnPolicy.cwd === input.projectRoot ? null : turnPolicy.cwd,
         activeProviderThreadId: providerThread.id,
         lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
         forkedFrom: null,
@@ -1331,12 +1342,51 @@ const runCursorTurns = Effect.fn("runCursorTurns")(function* (input: {
         attachments: [],
       },
     });
-    yield* runtime.events.pipe(
-      Stream.takeUntil((event) => event.type === "turn.terminal"),
-      Stream.runDrain,
-    );
+  const awaitTurnTerminal = runtime.events.pipe(
+    Stream.takeUntil((event) => event.type === "turn.terminal"),
+    Stream.runDrain,
+  );
+  return {
+    threadId,
+    modelSelection,
+    runtime,
+    providerThread,
+    policyFor,
+    runtimePolicy,
+    setT3McpSession,
+    startTurn,
+    awaitTurnTerminal,
+    opened,
+    opens,
+    closed,
+  };
+});
+
+const runCursorTurns = Effect.fn("runCursorTurns")(function* (input: {
+  readonly cwd: string;
+  readonly projectRoot: string;
+  readonly env: NodeJS.ProcessEnv;
+  readonly fetch: typeof globalThis.fetch;
+  readonly t3AuthorizationHeaders?: ReadonlyArray<string>;
+}) {
+  const headers = input.t3AuthorizationHeaders ?? [DEFAULT_T3_AUTHORIZATION];
+  const harness = yield* makeCursorTurnHarness({
+    cwd: input.cwd,
+    projectRoot: input.projectRoot,
+    env: input.env,
+    fetch: input.fetch,
+    t3AuthorizationHeader: headers[0] ?? DEFAULT_T3_AUTHORIZATION,
+  });
+  for (const [index, header] of headers.entries()) {
+    if (index > 0) harness.setT3McpSession(header);
+    yield* harness.startTurn(harness.runtimePolicy, index + 1);
+    yield* harness.awaitTurnTerminal;
   }
-  return { opened: opened.map((options) => options.mcpServers), opens, closed: [...closed], sent };
+  return {
+    opened: harness.opened.map((options) => options.mcpServers),
+    opens: harness.opens,
+    closed: [...harness.closed],
+  };
 });
 
 const T3_MCP_SERVER = {
@@ -1370,7 +1420,6 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         "t3-code": T3_MCP_SERVER,
       };
       assert.deepEqual(worktree.opened, [forwarded]);
-      assert.deepEqual(worktree.sent, [undefined]);
       // One probe per folder pair, not one per turn or per agent open.
       assert.deepEqual(linear.probedTokens, ["Bearer project-linear-token"]);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
@@ -1396,7 +1445,6 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
             "t3-code": T3_MCP_SERVER,
           },
         ]);
-        assert.deepEqual(project.sent, [undefined]);
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 
@@ -1416,7 +1464,6 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
       assert.deepEqual(worktree.opened, [
         { "plugin-linear-linear": linearServer("worktree-linear-token"), "t3-code": T3_MCP_SERVER },
       ]);
-      assert.deepEqual(worktree.sent, [undefined]);
       assert.deepEqual(linear.probedTokens, ["Bearer worktree-linear-token"]);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
@@ -1457,7 +1504,6 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         });
         const path = yield* Path.Path;
         const toolsRoot = path.join(fixture.env.HOME, "plugins", "tools");
-        assert.deepEqual(project.sent, [undefined]);
         assert.deepEqual(project.opened, [
           {
             "plugin-linear-linear": linearServer("project-linear-token"),
@@ -1498,7 +1544,6 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
       assert.deepEqual(worktree.opened, [
         { "plugin-linear-linear": linearServer("fresh-linear-token"), "t3-code": T3_MCP_SERVER },
       ]);
-      assert.deepEqual(worktree.sent, [undefined]);
       assert.equal(linear.tokenRequests[0]?.get("refresh_token"), "project-refresh-token");
       const stored = yield* decodeStoredLinearLogin(
         yield* fileSystem.readFileString(fixture.projectAuthFile),
@@ -1538,7 +1583,6 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         "t3-code": T3_MCP_SERVER,
       };
       assert.deepEqual(worktree.opened, [forwarded]);
-      assert.deepEqual(worktree.sent, [undefined]);
       assert.deepEqual(linear.probedTokens, ["Bearer newer-linear-token"]);
       assert.deepEqual(linear.tokenRequests, []);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
@@ -1585,7 +1629,6 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
       assert.deepEqual(worktree.opened, [
         { "plugin-linear-linear": linearServer("project-linear-token"), "t3-code": T3_MCP_SERVER },
       ]);
-      assert.deepEqual(worktree.sent, [undefined]);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 
@@ -1607,7 +1650,6 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         { "plugin-linear-linear": linearServer("project-linear-token"), "t3-code": T3_MCP_SERVER },
       ]);
       assert.deepEqual(turns.closed, []);
-      assert.deepEqual(turns.sent, [undefined, undefined]);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 
@@ -1640,7 +1682,93 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         },
       ]);
       assert.deepEqual(turns.closed, [0]);
-      assert.deepEqual(turns.sent, [undefined, undefined]);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("resumeThread opens the agent with the turn's policy after a credential rotation", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture([
+        { folder: "project", accessToken: "project-linear-token" },
+      ]);
+      const linear = linearOAuthServer("project-linear-token");
+      const harness = yield* makeCursorTurnHarness({
+        cwd: fixture.project,
+        projectRoot: fixture.project,
+        env: fixture.env,
+        fetch: linear.fetchFn,
+        t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 1);
+      yield* harness.awaitTurnTerminal;
+
+      harness.setT3McpSession("Bearer rotated-t3-mcp-token");
+      const turnPolicy = harness.policyFor(fixture.worktree);
+      yield* harness.runtime.resumeThread({
+        providerThread: harness.providerThread,
+        threadId: harness.threadId,
+        modelSelection: harness.modelSelection,
+        runtimePolicy: turnPolicy,
+      });
+      yield* harness.startTurn(turnPolicy, 2);
+      yield* harness.awaitTurnTerminal;
+
+      assert.deepEqual(harness.opens, [
+        { operation: "create", agentId: undefined },
+        { operation: "resume", agentId: "native-cursor-plugin-oauth" },
+      ]);
+      assert.deepEqual(harness.closed, [0]);
+      assert.equal(harness.opened[0]?.local?.cwd, fixture.project);
+      assert.equal(harness.opened[1]?.local?.cwd, fixture.worktree);
+      assert.deepEqual(harness.opened[1]?.mcpServers?.["t3-code"], {
+        type: "http",
+        url: "http://127.0.0.1:43123/mcp",
+        headers: { Authorization: "Bearer rotated-t3-mcp-token" },
+      });
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("does not reopen the agent while a turn runs, then reopens for the next turn", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture([
+        { folder: "project", accessToken: "project-linear-token" },
+      ]);
+      const linear = linearOAuthServer("project-linear-token");
+      const runGate = yield* Deferred.make<void>();
+      const harness = yield* makeCursorTurnHarness({
+        cwd: fixture.worktree,
+        projectRoot: fixture.project,
+        env: fixture.env,
+        fetch: linear.fetchFn,
+        t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+        runGate,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 1);
+
+      harness.setT3McpSession("Bearer rotated-t3-mcp-token");
+      yield* harness.runtime.resumeThread({
+        providerThread: harness.providerThread,
+        threadId: harness.threadId,
+        modelSelection: harness.modelSelection,
+        runtimePolicy: harness.runtimePolicy,
+      });
+      assert.deepEqual(harness.opens, [{ operation: "create", agentId: undefined }]);
+      assert.deepEqual(harness.closed, []);
+
+      yield* Deferred.succeed(runGate, undefined);
+      yield* harness.awaitTurnTerminal;
+      yield* harness.startTurn(harness.runtimePolicy, 2);
+      yield* harness.awaitTurnTerminal;
+
+      assert.deepEqual(harness.opens, [
+        { operation: "create", agentId: undefined },
+        { operation: "resume", agentId: "native-cursor-plugin-oauth" },
+      ]);
+      assert.deepEqual(harness.closed, [0]);
+      assert.deepEqual(harness.opened[1]?.mcpServers?.["t3-code"], {
+        type: "http",
+        url: "http://127.0.0.1:43123/mcp",
+        headers: { Authorization: "Bearer rotated-t3-mcp-token" },
+      });
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 });

@@ -47,7 +47,8 @@ export interface CursorAgentSdkOpenInput {
 
 export interface CursorAgentSdkSendInput<Error> {
   readonly message: string | SDKUserMessage;
-  readonly options?: Omit<SendOptions, "onDelta">;
+  // Send-level MCP servers make the SDK replace the project, user, and plugin servers for the run.
+  readonly options?: Omit<SendOptions, "onDelta" | "mcpServers">;
   readonly onDelta?: (update: InteractionUpdate) => Effect.Effect<void, Error>;
 }
 
