@@ -9,8 +9,8 @@ V1 is open. Opening V2 again resumes your V2 history. The copy happens only once
 and changes in either version do not sync to the other. Settings, attachments, and workspace files
 remain shared.
 
-The V2 desktop app uses a separate browser profile, so browser cookies and caches do not carry
-over from V1. You may need to sign in again to websites opened inside the app.
+The V2 desktop app keeps the same browser profile as V1, so browser cookies, caches, and sign-ins
+to websites opened inside the app carry over.
 
 The migrated thread keeps its title, project, provider and model selection, permission and
 interaction modes, branch or worktree, archive state, settlement state, snooze and pin state, and
