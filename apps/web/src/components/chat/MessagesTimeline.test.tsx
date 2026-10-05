@@ -1907,6 +1907,8 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain('aria-label="Open Claude research thread"');
     expect(markup).toContain("Claude research thread");
     expect(markup).toContain("Open chat");
+    expect(markup).toContain('viewBox="0 0 44 46"');
+    expect(markup).not.toContain("15.5309");
     expect(markup).not.toContain("Work Log");
   });
 
@@ -2361,6 +2363,8 @@ describe("MessagesTimeline", () => {
 
     // The Kata mark replaces the generic tool icon for T3 MCP calls.
     expect(markup).toContain('viewBox="0 0 44 46"');
+    expect(markup).toContain('rx="3.5"');
+    expect(markup).not.toContain("15.5309");
     expect(markup).toContain("Read a Kata Code thread");
     expect(markup).not.toContain("mcp__t3-code__t3_thread_read");
   });
