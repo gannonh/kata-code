@@ -33,6 +33,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -46,7 +47,10 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
 import { mcpToolPresentation } from "../../provider/McpToolPresentation.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import { discoverCursorPluginMcpServers } from "../../provider/acp/CursorPluginMcp.ts";
+import {
+  type CursorPluginMcpServer,
+  discoverCursorPluginMcpServers,
+} from "../../provider/acp/CursorPluginMcp.ts";
 import { CursorTransportFailure } from "../../provider/acp/CursorTransportFailure.ts";
 import { cursorSdkModelSelection } from "../../provider/cursorSdkModel.ts";
 import {
@@ -304,21 +308,6 @@ const CURSOR_AGENT_SETTING_SOURCES = [
   "plugins",
 ] as const satisfies ReadonlyArray<SettingSource>;
 
-/** Installed Cursor plugin MCP servers, split by the SDK path that needs them. */
-export interface CursorPluginMcpServers {
-  /**
-   * For agent options, where the SDK's plugin loader also runs but reads only
-   * the thread folder's logins: the servers carrying another folder's.
-   */
-  readonly agent: Record<string, McpServerConfig>;
-  /**
-   * For send options. The SDK builds a run that has send-level servers from
-   * those alone, without project, user, or plugin MCP config, so every
-   * installed plugin server goes along.
-   */
-  readonly send: Record<string, McpServerConfig>;
-}
-
 /**
  * Plugin servers first, then T3's own. Plugin servers keep Cursor's
  * `plugin-` identifiers, so the SDK, which keeps the first client of each
@@ -334,32 +323,15 @@ function withPluginMcpServers(
   return { ...pluginMcpServers, ...t3McpServers };
 }
 
-/**
- * Send-level MCP servers. Sent only with T3's server, because any send-level
- * server turns off the SDK's own project, user, and plugin MCP loading.
- */
-function cursorSendMcpServers(
-  threadId: ThreadId,
-  pluginMcpServers: CursorPluginMcpServers | undefined,
-): Record<string, McpServerConfig> | undefined {
-  const t3McpServers = cursorMcpServers(threadId);
-  return t3McpServers === undefined
-    ? undefined
-    : withPluginMcpServers(t3McpServers, pluginMcpServers?.send);
-}
-
 export function makeCursorAgentOptions(input: {
   readonly apiKey?: string;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   readonly threadId: ThreadId;
-  readonly pluginMcpServers?: CursorPluginMcpServers;
+  readonly pluginMcpServers?: Record<string, McpServerConfig>;
 }): AgentOptions {
   const policy = cursorRuntimeAgentPolicy(input.runtimePolicy);
-  const mcpServers = withPluginMcpServers(
-    cursorMcpServers(input.threadId),
-    input.pluginMcpServers?.agent,
-  );
+  const mcpServers = withPluginMcpServers(cursorMcpServers(input.threadId), input.pluginMcpServers);
   return {
     model: cursorSdkModelSelection(input.modelSelection),
     name: `Kata Code ${input.threadId}`,
@@ -889,6 +861,7 @@ interface ActiveCursorTurn {
 interface CursorLiveAgent {
   readonly nativeThreadId: string;
   readonly session: CursorAgentSdk.CursorAgentSdkSession;
+  readonly openedMcpServers: AgentOptions["mcpServers"];
 }
 
 export interface CursorAdapterV2Options {
@@ -932,7 +905,7 @@ export function makeCursorAdapterV2(
         const planIds = yield* Ref.make(new Map<string, OrchestrationV2PlanArtifact["id"]>());
         const pluginMcpServersCache = yield* Ref.make<{
           readonly key: string;
-          readonly servers: CursorPluginMcpServers;
+          readonly servers: Record<string, CursorPluginMcpServer>;
         } | null>(null);
 
         /**
@@ -947,29 +920,17 @@ export function makeCursorAdapterV2(
           const key = `${cwd}\0${projectRoot ?? ""}`;
           const cached = yield* Ref.get(pluginMcpServersCache);
           if (cached?.key === key) return cached.servers;
-          const discovered = Object.entries(
-            yield* discoverCursorPluginMcpServers({
-              cwd,
-              ...(projectRoot === undefined ? {} : { projectRoot }),
-              env: adapterOptions.environment,
-              fetch: adapterOptions.fetch ?? globalThis.fetch,
-            }).pipe(
-              Effect.provideService(FileSystem.FileSystem, fileSystem),
-              Effect.provideService(Path.Path, path),
-            ),
+          const discovered = yield* discoverCursorPluginMcpServers({
+            cwd,
+            ...(projectRoot === undefined ? {} : { projectRoot }),
+            env: adapterOptions.environment,
+            fetch: adapterOptions.fetch ?? globalThis.fetch,
+          }).pipe(
+            Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
           );
-          const servers: CursorPluginMcpServers = {
-            agent: Object.fromEntries(
-              discovered.flatMap(([name, server]) =>
-                server.loginFolder === undefined || server.loginFolder === "thread"
-                  ? []
-                  : [[name, server.config]],
-              ),
-            ),
-            send: Object.fromEntries(discovered.map(([name, server]) => [name, server.config])),
-          };
-          yield* Ref.set(pluginMcpServersCache, { key, servers });
-          return servers;
+          yield* Ref.set(pluginMcpServersCache, { key, servers: discovered });
+          return discovered;
         });
 
         const emitProviderEvent = (event: ProviderAdapter.ProviderAdapterV2Event) =>
@@ -2165,11 +2126,30 @@ export function makeCursorAdapterV2(
           readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
           readonly agentId?: string;
         }) {
+          const plugins = yield* pluginMcpServers(openInput.runtimePolicy);
+          const options = makeCursorAgentOptions({
+            ...(apiKey === undefined ? {} : { apiKey }),
+            modelSelection: openInput.modelSelection,
+            runtimePolicy: openInput.runtimePolicy,
+            threadId: openInput.threadId,
+            ...(plugins === undefined
+              ? {}
+              : {
+                  pluginMcpServers: Object.fromEntries(
+                    Object.entries(plugins).map(([name, server]) => [name, server.config]),
+                  ),
+                }),
+          });
           const existing = yield* Ref.get(liveAgent);
+          const running = yield* Ref.get(activeTurn);
+          // The SDK reads agent-level MCP servers only when it opens an agent,
+          // so a rotated T3 credential needs the agent reopened, but never
+          // while a turn runs: closing would tear down the session that owns it.
           if (
             existing !== null &&
             openInput.operation === "resume" &&
-            existing.nativeThreadId === openInput.agentId
+            existing.nativeThreadId === openInput.agentId &&
+            (running !== null || Equal.equals(existing.openedMcpServers, options.mcpServers))
           ) {
             return existing;
           }
@@ -2177,23 +2157,17 @@ export function makeCursorAdapterV2(
             yield* existing.session.close.pipe(Effect.ignore);
             yield* Ref.set(liveAgent, null);
           }
-          const plugins = yield* pluginMcpServers(openInput.runtimePolicy);
           const sdkSession = yield* runner.open({
             operation: openInput.operation,
             ...(openInput.agentId === undefined ? {} : { agentId: openInput.agentId }),
-            options: makeCursorAgentOptions({
-              ...(apiKey === undefined ? {} : { apiKey }),
-              modelSelection: openInput.modelSelection,
-              runtimePolicy: openInput.runtimePolicy,
-              threadId: openInput.threadId,
-              ...(plugins === undefined ? {} : { pluginMcpServers: plugins }),
-            }),
+            options,
             threadId: openInput.threadId,
             providerSessionId: input.providerSessionId,
           });
           const next = {
             nativeThreadId: sdkSession.agentId,
             session: sdkSession,
+            openedMcpServers: options.mcpServers,
           } satisfies CursorLiveAgent;
           yield* Ref.set(liveAgent, next);
           return next;
@@ -2309,10 +2283,6 @@ export function makeCursorAdapterV2(
               runtimePolicy: turnInput.runtimePolicy,
             });
             const message = yield* resolveUserMessage(turnInput);
-            const mcpServers = cursorSendMcpServers(
-              turnInput.threadId,
-              yield* pluginMcpServers(turnInput.runtimePolicy),
-            );
             const pendingUpdates: Array<InteractionUpdate> = [];
             let context: ActiveCursorTurn | null = null;
             const sdkRun = yield* agent.session.send({
@@ -2320,7 +2290,6 @@ export function makeCursorAdapterV2(
               options: {
                 model: cursorSdkModelSelection(turnInput.modelSelection),
                 mode: turnInput.runtimePolicy.interactionMode === "plan" ? "plan" : "agent",
-                ...(mcpServers === undefined ? {} : { mcpServers }),
               },
               onDelta: (update) => {
                 if (context === null) {
@@ -2515,14 +2484,21 @@ export function makeCursorAdapterV2(
               ),
           ),
           resumeThread: Effect.fn("CursorAdapterV2.resumeThread")(
-            function* (threadInput: { readonly providerThread: OrchestrationV2ProviderThread }) {
+            function* (
+              threadInput: Parameters<
+                ProviderAdapter.ProviderAdapterV2SessionRuntime["resumeThread"]
+              >[0],
+            ) {
               const agentId = nativeThreadId(threadInput.providerThread);
+              // The turn's own inputs win over the session's, so the agent
+              // resumed here is the one startTurn builds and does not reopen.
               yield* openAgent({
                 operation: "resume",
                 agentId,
-                threadId: threadInput.providerThread.appThreadId ?? input.threadId,
-                modelSelection: input.modelSelection,
-                runtimePolicy: input.runtimePolicy,
+                threadId:
+                  threadInput.threadId ?? threadInput.providerThread.appThreadId ?? input.threadId,
+                modelSelection: threadInput.modelSelection ?? input.modelSelection,
+                runtimePolicy: threadInput.runtimePolicy ?? input.runtimePolicy,
               });
               const now = yield* DateTime.now;
               return {
