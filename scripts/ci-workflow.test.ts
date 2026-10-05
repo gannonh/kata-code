@@ -250,8 +250,26 @@ describe("CI upstream preservation waiver", () => {
 
   it("runs the trusted base checker through the waiver script", () => {
     expect(stepScalarOf(jobBlock("lint"), preservationStep, "run")).toContain(
-      'bash scripts/waive-upstream-preservation-failures.sh node "$trusted_root/scripts/check-upstream-preservation.ts"',
+      [
+        '  bash scripts/waive-upstream-preservation-failures.sh node "$trusted_root/scripts/check-upstream-preservation.ts" \\',
+        "    --mode ci \\",
+        '    --candidate "$CANDIDATE_SHA" \\',
+        '    --base "$BASE_SHA" \\',
+        '    --upstream "$UPSTREAM_SHA" \\',
+        '    --upstream-base "$UPSTREAM_BASE_SHA"',
+        "else",
+      ].join("\n"),
     );
+    expect(jobBlock("lint")).not.toContain("continue-on-error");
+  });
+
+  it("fails when no checker command is given", () => {
+    const run = NodeChildProcess.spawnSync(
+      "bash",
+      [NodePath.join(repositoryRoot, "scripts/waive-upstream-preservation-failures.sh")],
+      { encoding: "utf8" },
+    );
+    expect({ status: run.status, stdout: run.stdout }).toEqual({ status: 2, stdout: "" });
   });
 
   it("passes when the checker passes", () => {
@@ -295,6 +313,18 @@ describe("CI upstream preservation waiver", () => {
     expect(runWaiver(2, [])).toEqual({
       status: 1,
       stdout: outputOf("Preservation checker exited 2 without a status=FAIL line."),
+    });
+  });
+
+  it("fails when the checker crashes before printing its report", () => {
+    const crash = [
+      "node:internal/modules/esm/resolve:275",
+      "    throw new ERR_MODULE_NOT_FOUND(",
+      "Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/tmp/trusted/scripts/lib/upstream-preservation/index.ts' imported from /tmp/trusted/scripts/check-upstream-preservation.ts",
+    ];
+    expect(runWaiver(1, [], crash)).toEqual({
+      status: 1,
+      stdout: outputOf(...crash, "Preservation checker exited 1 without a status=FAIL line."),
     });
   });
 
