@@ -920,12 +920,12 @@ jobs:
 
   # Vercel builds the hosted web app while the desktop jobs run, once quality,
   # test, and test_server have passed. `--skip-domain` keeps the project's
-  # domains off the staged build; katacode-web has no registered domains. The
-  # channel and router domains are aliases, and in this workflow only
-  # deploy_web's `alias set` moves them, after the GitHub Release exists, so a
-  # failed release leaves the previous alias in place. Vercel still points the
-  # generated production URL, katacode-web-astro-labs.vercel.app, at the staged
-  # build, behind Vercel Authentication; see docs/operations/release.md.
+  # domains off the staged build, and katacode-web has none registered. The
+  # channel and router domains are aliases. In this workflow only deploy_web's
+  # `alias set` moves them, after the GitHub Release exists. A failed release
+  # leaves the previous alias in place. Vercel still points the generated
+  # production URL, katacode-web-astro-labs.vercel.app, at the staged build,
+  # behind Vercel Authentication. See docs/operations/release.md.
   build_web:
     name: Build hosted web app
     needs: [preflight, relay_public_config, quality, test, test_server]

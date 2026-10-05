@@ -271,10 +271,11 @@ build. The `katacode-web` project has no registered domains. The channel and rou
 aliases, and in the release workflow only `deploy_web`'s `vercel alias set` moves them. Vercel
 still points the project's generated production URL, `katacode-web-astro-labs.vercel.app`, at
 each production deployment, so that URL serves the staged build as soon as `build_web` deploys
-it, before the GitHub Release exists. That URL and each deployment's own URL redirect to Vercel
-sign-in because the project's Vercel Authentication setting (`all_except_custom_domains`) covers
-them. If that protection is turned off, anyone who knows either URL can load a client that was
-never released and whose matching server package may not be on npm yet.
+it. That is usually before the GitHub Release exists, but the job graph does not order the two.
+That URL and each deployment's own URL redirect to Vercel sign-in because the project's Vercel
+Authentication setting (`all_except_custom_domains`) covers them. If that protection is turned
+off or narrowed, anyone who knows either URL can load a client that was never released and whose
+matching server package may not be on npm yet.
 
 One-time Vercel dashboard setup:
 
