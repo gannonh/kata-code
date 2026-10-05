@@ -1,5 +1,10 @@
-import type { OrchestrationV2ProviderSession } from "@kata-sh/code-contracts";
+import type {
+  OrchestrationV2ProviderSession,
+  ThreadPullRequestLink,
+  ThreadPullRequestWatch,
+} from "@kata-sh/code-contracts";
 import { assert, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
@@ -39,6 +44,45 @@ function runnerResult(stdout: string, code = 0 as ChildProcessSpawner.ExitCode) 
   };
 }
 
+const watch: ThreadPullRequestWatch = {
+  startedAt: "2026-10-05T10:00:00.000Z",
+  headSha: "abc123",
+  failedChecks: [],
+  passed: false,
+  remarksThrough: "2026-10-05T10:00:00.000Z",
+  remarkIds: [],
+  conflicting: false,
+  wakes: 0,
+};
+
+function pullRequestLink(input: {
+  readonly watched: boolean;
+  readonly source?: ThreadPullRequestLink["source"];
+}): ThreadPullRequestLink {
+  return {
+    host: "github.com",
+    repository: "gannonh/kata-code",
+    number: 42,
+    url: "https://github.com/gannonh/kata-code/pull/42",
+    source: input.source ?? "agent",
+    linkedAt: "2026-10-05T10:00:00.000Z",
+    snapshot: null,
+    stack: null,
+    ...(input.watched ? { watch } : {}),
+  };
+}
+
+function noActivityExcept(
+  pullRequestThreads: Parameters<typeof hasSpriteActivity>[0]["pullRequestThreads"],
+) {
+  return hasSpriteActivity({
+    connectedClientCount: 0,
+    providerSessions: [{ status: "ready" }],
+    terminals: [{ hasRunningSubprocess: false }],
+    pullRequestThreads,
+  });
+}
+
 it("detects client, provider, and terminal activity", () => {
   const activity = (input: {
     connectedClientCount?: number;
@@ -49,6 +93,7 @@ it("detects client, provider, and terminal activity", () => {
       connectedClientCount: input.connectedClientCount ?? 0,
       providerSessions: [{ status: input.providerStatus ?? "ready" }],
       terminals: [{ hasRunningSubprocess: input.hasRunningSubprocess ?? false }],
+      pullRequestThreads: [],
     });
 
   assert.isTrue(activity({ connectedClientCount: 1 }));
@@ -59,6 +104,81 @@ it("detects client, provider, and terminal activity", () => {
   assert.isFalse(activity({}));
   assert.isFalse(activity({ providerStatus: "error" }));
   assert.isFalse(activity({ providerStatus: "stopped" }));
+});
+
+it("counts a pull request watch the sweep reads as activity", () => {
+  const settledAt = DateTime.makeUnsafe("2026-10-05T11:00:00.000Z");
+
+  assert.isTrue(
+    noActivityExcept([
+      { settledOverride: null, settledAt: null, pullRequests: [pullRequestLink({ watched: true })] },
+    ]),
+  );
+  assert.isTrue(
+    noActivityExcept([
+      {
+        settledOverride: "active",
+        settledAt: null,
+        pullRequests: [pullRequestLink({ watched: false }), pullRequestLink({ watched: true })],
+      },
+    ]),
+  );
+  assert.isFalse(
+    noActivityExcept([
+      { settledOverride: null, settledAt: null, pullRequests: [pullRequestLink({ watched: false })] },
+    ]),
+  );
+  assert.isFalse(
+    noActivityExcept([
+      {
+        settledOverride: null,
+        settledAt: null,
+        pullRequests: [pullRequestLink({ watched: true, source: "stack-dismissed" })],
+      },
+    ]),
+  );
+  assert.isFalse(
+    noActivityExcept([
+      {
+        settledOverride: "settled",
+        settledAt: null,
+        pullRequests: [pullRequestLink({ watched: true })],
+      },
+    ]),
+  );
+  assert.isFalse(
+    noActivityExcept([
+      { settledOverride: null, settledAt, pullRequests: [pullRequestLink({ watched: true })] },
+    ]),
+  );
+});
+
+it("holds the Sprite task past the idle grace until the pull request watch ends", () => {
+  const watched = [
+    { settledOverride: null, settledAt: null, pullRequests: [pullRequestLink({ watched: true })] },
+  ];
+  const unwatched = [
+    { settledOverride: null, settledAt: null, pullRequests: [pullRequestLink({ watched: false })] },
+  ];
+  const watchEndsAt = 1_000 + SPRITE_IDLE_GRACE_MS * 3;
+
+  let state = idle;
+  const actions: Array<string> = [];
+  for (let now = 1_000; now <= watchEndsAt + SPRITE_IDLE_GRACE_MS; now += SPRITE_TASK_REFRESH_MS) {
+    const decision = nextSpriteLeaseState({
+      current: state,
+      demand: noActivityExcept(now < watchEndsAt ? watched : unwatched),
+      now,
+    });
+    state = decision.next;
+    if (decision.action !== "none") actions.push(`${decision.action}@${now - 1_000}`);
+  }
+
+  // The watch runs 30 minutes with no other activity; the 10 minute grace starts at its last poll.
+  assert.equal(actions.length, 40);
+  assert.equal(actions[0], "refresh@0");
+  assert.equal(actions.at(-2), "refresh@2280000");
+  assert.equal(actions.at(-1), "release@2340000");
 });
 
 it.effect("reads open provider sessions from the V2 projection", () =>
@@ -78,7 +198,12 @@ it.effect("reads open provider sessions from the V2 projection", () =>
     const sessions = yield* readOpenProviderSessions;
     assert.deepEqual(sessions.map((session) => session.status).toSorted(), ["ready", "running"]);
     assert.isTrue(
-      hasSpriteActivity({ connectedClientCount: 0, providerSessions: sessions, terminals: [] }),
+      hasSpriteActivity({
+        connectedClientCount: 0,
+        providerSessions: sessions,
+        terminals: [],
+        pullRequestThreads: [],
+      }),
     );
   }).pipe(Effect.provide(SqlitePersistenceMemory)),
 );
