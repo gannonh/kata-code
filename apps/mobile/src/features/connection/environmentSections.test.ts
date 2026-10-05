@@ -158,7 +158,7 @@ describe("mobile environment settings sections", () => {
     expect(sections.availableCloudEnvironments).toEqual([]);
   });
 
-  it("offers T3 Connect for a machine saved only over the LAN, as an added route", () => {
+  it("offers Kata Code Connect for a machine saved only over the LAN, as an added route", () => {
     const local = connectedEnvironment({
       environmentId: "environment-desk",
       isRelayManaged: false,
