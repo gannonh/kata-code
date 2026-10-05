@@ -189,12 +189,14 @@ const make = Effect.gen(function* () {
     acceptNotFound: true,
   });
 
-  // The watch sweep reads this same list, so when it is unreadable no watch can fire.
   const readPullRequestThreads = projections.getThreadsWithPullRequests().pipe(
     Effect.catch((cause) =>
-      Effect.logWarning("Failed to read pull request watches for Sprite activity", {
-        cause,
-      }).pipe(Effect.as([])),
+      Effect.logWarning(
+        "Failed to read pull request watches for Sprite activity; counting none, since the watch sweep reads the same list",
+        {
+          cause,
+        },
+      ).pipe(Effect.as([])),
     ),
   );
 

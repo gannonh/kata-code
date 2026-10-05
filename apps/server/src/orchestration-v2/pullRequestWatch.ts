@@ -36,14 +36,12 @@ export type PullRequestWatchThread = Pick<
   "settledOverride" | "settledAt" | "pullRequests"
 >;
 
-/** A settled thread's watches wait, unread, until the thread is active again. */
 export function isPullRequestWatchPaused(
   thread: Pick<PullRequestWatchThread, "settledOverride" | "settledAt">,
 ): boolean {
   return thread.settledOverride === "settled" || thread.settledAt !== null;
 }
 
-/** The thread has a watch that the minute sweep reads from the host. */
 export function hasPolledPullRequestWatch(thread: PullRequestWatchThread): boolean {
   return (
     !isPullRequestWatchPaused(thread) &&

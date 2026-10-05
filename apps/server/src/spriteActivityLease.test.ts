@@ -182,7 +182,6 @@ it("holds the Sprite task past the idle grace until the pull request watch ends"
     if (decision.action !== "none") actions.push(`${decision.action}@${now - 1_000}`);
   }
 
-  // The watch runs 30 minutes with no other activity; the 10 minute grace starts at its last poll.
   assert.equal(actions.length, 40);
   assert.equal(actions[0], "refresh@0");
   assert.equal(actions.at(-2), "refresh@2280000");
