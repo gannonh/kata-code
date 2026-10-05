@@ -137,6 +137,7 @@ const ciReport = (checkLines: ReadonlyArray<string>): ReadonlyArray<string> => [
   "CHECK id=product-identity-release-ownership status=PASS",
   ...checkLines,
   "CHECK id=icon-composer-live-evidence status=NOT RUN detail=requires macOS Icon Composer evidence",
+  "CHECK id=human-device-provider-evidence status=NOT RUN detail=requires device/provider evidence",
   ...reportFooter,
 ];
 
@@ -277,7 +278,7 @@ describe("CI upstream preservation waiver", () => {
     expect(runWaiver(0, report)).toEqual({ status: 0, stdout: outputOf(...report) });
   });
 
-  it("passes when only waived failures remain", () => {
+  it("passes when only waived failures and manual checks that were not run remain", () => {
     const report = ciReport(waivedFailures);
     expect(runWaiver(1, report)).toEqual({
       status: 0,
@@ -305,7 +306,7 @@ describe("CI upstream preservation waiver", () => {
   });
 
   it("fails when the checker exits non-zero without any status=FAIL line", () => {
-    const report = ciReport(["CHECK id=state-isolation status=NOT RUN"]);
+    const report = ciReport([]);
     expect(runWaiver(1, report)).toEqual({
       status: 1,
       stdout: outputOf(...report, "Preservation checker exited 1 without a status=FAIL line."),
@@ -333,11 +334,41 @@ describe("CI upstream preservation waiver", () => {
     ["INVENTORY", missingOwnerPath],
     ["other", "INTEGRATION_RECORD status=FAIL detail=Integration record is missing."],
     ["near-miss", `${waivedFailures[0]} (renamed)`],
+    [
+      "automated NOT RUN",
+      "CHECK id=connect-wire-identity status=NOT RUN detail=command node scripts/check-connect-wire-identity.ts",
+    ],
   ])("fails an unlisted %s failure line next to waived ones", (_kind, failure) => {
     const report = ciReport([...waivedFailures, failure]);
     expect(runWaiver(1, report)).toEqual({
       status: 1,
       stdout: outputOf(...report, "Unwaived preservation failures:", failure),
+    });
+  });
+
+  it("fails an unlisted failure line that is not valid UTF-8", () => {
+    const run = NodeChildProcess.spawnSync(
+      "bash",
+      [
+        NodePath.join(repositoryRoot, "scripts/waive-upstream-preservation-failures.sh"),
+        "bash",
+        "-c",
+        `printf "%s" "$FAKE_STDOUT"; printf 'INVENTORY status=FAIL detail=Inventory owner path does not exist: scripts/\\377.ts\\n'; exit 1`,
+      ],
+      {
+        encoding: "latin1",
+        env: {
+          ...process.env,
+          WAIVED_FAILURES: outputOf(...waivedFailures),
+          FAKE_STDOUT: outputOf(...waivedFailures),
+        },
+      },
+    );
+    const failure =
+      "INVENTORY status=FAIL detail=Inventory owner path does not exist: scripts/\u00ff.ts";
+    expect({ status: run.status, stdout: run.stdout }).toEqual({
+      status: 1,
+      stdout: outputOf(...waivedFailures, failure, "Unwaived preservation failures:", failure),
     });
   });
 
