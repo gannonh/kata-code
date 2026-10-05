@@ -6,23 +6,8 @@ export function resolveProtocolRelativeMediaUrl(src: string): string {
   return `${protocol}${src}`;
 }
 
-const localMediaBlobs = new Map<string, Blob>();
-
-export function createLocalMediaUrl(blob: Blob): string {
-  const url = URL.createObjectURL(blob);
-  localMediaBlobs.set(url, blob);
-  return url;
-}
-
-export function revokeLocalMediaUrl(url: string): void {
-  localMediaBlobs.delete(url);
-  URL.revokeObjectURL(url);
-}
-
 /** Reads media only for an explicit save/copy action; remote hosts must allow browser CORS. */
 async function readMediaBlob(src: string): Promise<Blob> {
-  const localBlob = localMediaBlobs.get(src);
-  if (localBlob) return localBlob;
   let response: Response;
   try {
     response = await fetch(src);
@@ -40,25 +25,31 @@ async function readMediaBlob(src: string): Promise<Blob> {
   return blob;
 }
 
+// Kata desktop's connect-src excludes blob:, so in-memory media is never fetched.
+// Anchors download it and images decode it from its own URL instead.
+function isInMemoryMediaUrl(src: string): boolean {
+  return src.startsWith("blob:");
+}
+
 /** Downloads the original bytes with their original filename, without changing playback URLs. */
 export async function downloadMedia(src: string, name: string): Promise<void> {
-  const url = URL.createObjectURL(await readMediaBlob(src));
+  const url = isInMemoryMediaUrl(src) ? src : URL.createObjectURL(await readMediaBlob(src));
   try {
     const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = name;
     anchor.click();
   } finally {
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    if (url !== src) setTimeout(() => URL.revokeObjectURL(url), 30_000);
   }
 }
 
 /** Converts browser-decodable images, including SVG, into the clipboard's portable PNG format. */
 export async function readMediaPng(src: string): Promise<Blob> {
-  const blob = await readMediaBlob(src);
-  if (blob.type.split(";", 1)[0] === "image/png") return blob;
+  const blob = isInMemoryMediaUrl(src) ? null : await readMediaBlob(src);
+  if (blob?.type.split(";", 1)[0] === "image/png") return blob;
 
-  const url = URL.createObjectURL(blob);
+  const url = blob ? URL.createObjectURL(blob) : src;
   const image = new Image();
   image.src = url;
   try {
@@ -92,6 +83,6 @@ export async function readMediaPng(src: string): Promise<Blob> {
       );
     });
   } finally {
-    URL.revokeObjectURL(url);
+    if (blob) URL.revokeObjectURL(url);
   }
 }
