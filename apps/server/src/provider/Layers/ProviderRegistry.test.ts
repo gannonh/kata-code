@@ -2073,6 +2073,60 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
           }),
         );
 
+        it.effect("discards a scan that was in flight when another instance dropped the cwd", () =>
+          Effect.gen(function* () {
+            const slowId = ProviderInstanceId.make("slow");
+            const slowMachine = makeMachineProvider(slowId, ProviderDriverKind.make("cursor"));
+            const scanStarted = yield* Deferred.make<void>();
+            const releaseScan = yield* Deferred.make<void>();
+            const cached = yield* Ref.make<NonNullable<ServerProvider["workspaceSnapshots"]>>([]);
+            const publishCache = Effect.map(Ref.get(cached), (workspaceSnapshots) => ({
+              ...slowMachine,
+              workspaceSnapshots,
+            }));
+            const scanBeforeRestart = () =>
+              Deferred.succeed(scanStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseScan)),
+                Effect.as({ ...slowMachine, skills: staleSkills }),
+              );
+            const slowInstance = makeWorkspaceInstance(slowMachine, scanBeforeRestart, {
+              snapshot: {
+                ...makeWorkspaceInstance(slowMachine, scanBeforeRestart).snapshot,
+                getSnapshot: publishCache,
+                refresh: publishCache,
+              },
+            });
+            const runtimeServices = yield* buildRegistryServices(
+              [slowInstance, codexInstance],
+              "t3-provider-registry-drop-in-flight-",
+            );
+
+            yield* Effect.gen(function* () {
+              const registry = yield* ProviderRegistry.ProviderRegistry;
+              const staleScan = yield* registry
+                .refreshWorkspaceSnapshot({ instanceId: slowId, cwd })
+                .pipe(Effect.forkChild);
+              yield* Deferred.await(scanStarted);
+              yield* registry.refreshWorkspaceSnapshot({ instanceId: codexId, cwd, fresh: true });
+              yield* Deferred.succeed(releaseScan, undefined);
+              yield* Fiber.join(staleScan);
+              assert.deepStrictEqual(yield* workspaceCwdsOf(slowId), []);
+
+              // The drop still filters the instance's own copy of the stale entry.
+              yield* Ref.set(cached, [
+                {
+                  cwd,
+                  checkedAt: "2026-06-10T00:00:00.000Z",
+                  slashCommands: [],
+                  skills: staleSkills,
+                },
+              ]);
+              yield* registry.refreshInstance(slowId);
+              assert.deepStrictEqual(yield* workspaceCwdsOf(slowId), []);
+            }).pipe(Effect.provide(runtimeServices));
+          }),
+        );
+
         it.effect("remembers the 32 most recent drops for an instance", () =>
           Effect.gen(function* () {
             const cacheId = ProviderInstanceId.make("cache");
