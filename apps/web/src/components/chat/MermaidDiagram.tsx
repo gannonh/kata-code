@@ -2,6 +2,7 @@ import DOMPurify from "dompurify";
 import type { Mermaid } from "mermaid";
 import { use, useState } from "react";
 
+import { createLocalMediaUrl, revokeLocalMediaUrl } from "../media/mediaContent";
 import { Button } from "../ui/button";
 
 type MermaidRenderResult =
@@ -138,9 +139,7 @@ let expandedImageUrl: string | null = null;
 
 /**
  * Converts a rendered diagram into a standalone image with fixed size and background.
- * A blob URL, unlike a data URL, passes the desktop connect-src policy that media
- * save and copy actions fetch through. Only one diagram is expanded at a time, so
- * the previous URL is released.
+ * Only one diagram is expanded at a time, so the previous URL is released.
  */
 function mermaidImageUrl(svg: string): string {
   const svgDocument = new DOMParser().parseFromString(svg, "image/svg+xml");
@@ -153,8 +152,8 @@ function mermaidImageUrl(svg: string): string {
   element.setAttribute("xmlns", "http://www.w3.org/2000/svg");
   element.style.maxWidth = "none";
   element.style.backgroundColor = getComputedStyle(document.body).backgroundColor;
-  if (expandedImageUrl) URL.revokeObjectURL(expandedImageUrl);
-  expandedImageUrl = URL.createObjectURL(
+  if (expandedImageUrl) revokeLocalMediaUrl(expandedImageUrl);
+  expandedImageUrl = createLocalMediaUrl(
     new Blob([new XMLSerializer().serializeToString(element)], { type: "image/svg+xml" }),
   );
   return expandedImageUrl;
