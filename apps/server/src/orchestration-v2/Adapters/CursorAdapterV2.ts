@@ -2138,7 +2138,7 @@ export function makeCursorAdapterV2(
           for (const pluginName of pluginNames) {
             announcedSignIns.add(pluginName);
             const nativeItemId = `plugin-sign-in:${context.providerTurnId}:${pluginName}`;
-            const notice = `The Cursor plugin "${pluginName}" needs you to sign in, so its tools are unavailable. Sign in to it through Cursor.`;
+            const notice = `The Cursor plugin "${pluginName}" needs you to sign in, so its tools are unavailable. Sign in to it through Cursor, then start a new thread.`;
             const now = yield* DateTime.now;
             yield* emitProviderEvent({
               type: "turn_item.updated",

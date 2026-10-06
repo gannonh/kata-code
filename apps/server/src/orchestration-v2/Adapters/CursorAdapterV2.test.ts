@@ -1398,7 +1398,7 @@ const signInNotices = (events: ReadonlyArray<ProviderAdapterV2Event>): ReadonlyA
   );
 
 const LINEAR_SIGN_IN_NOTICE =
-  'The Cursor plugin "linear" needs you to sign in, so its tools are unavailable. Sign in to it through Cursor.';
+  'The Cursor plugin "linear" needs you to sign in, so its tools are unavailable. Sign in to it through Cursor, then start a new thread.';
 
 const T3_MCP_SERVER = {
   type: "http",
@@ -1856,10 +1856,10 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 
-  it.effect("does not warn for servers that need no login", () =>
+  it.effect("does not probe or warn for servers that need no login", () =>
     Effect.gen(function* () {
       const fixture = yield* makeCursorPluginFixture(
-        [],
+        [{ folder: "project", accessToken: "project-linear-token" }],
         [
           {
             folder: "tools",
@@ -1875,18 +1875,73 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
           },
         ],
       );
-      // Linear answers without a login here, so no server challenges.
-      const open: typeof globalThis.fetch = () =>
-        Promise.resolve(new Response(null, { status: 200 }));
+      const linear = linearOAuthServer("project-linear-token");
+      const fetched: Array<string> = [];
+      // Any URL but Linear's challenges, so only the servers' own gating keeps them quiet.
+      const challengeEverythingElse: typeof globalThis.fetch = (input, init) => {
+        fetched.push(String(input));
+        return String(input) === LINEAR_MCP
+          ? linear.fetchFn(input, init)
+          : Promise.resolve(
+              new Response(null, {
+                status: 401,
+                headers: {
+                  "WWW-Authenticate": 'Bearer resource_metadata="https://x.example/meta"',
+                },
+              }),
+            );
+      };
       const harness = yield* makeCursorTurnHarness({
         cwd: fixture.project,
         projectRoot: fixture.project,
         env: { ...fixture.env, TOOLS_API_KEY: "tools-key" },
-        fetch: open,
+        fetch: challengeEverythingElse,
         t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
       });
       yield* harness.startTurn(harness.runtimePolicy, 1);
       assert.deepEqual(signInNotices(yield* harness.awaitTurnTerminal), []);
+      assert.deepEqual(fetched, [LINEAR_MCP]);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("names a plugin once when several of its servers need sign-in", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture(
+        [{ folder: "project", accessToken: "project-linear-token" }],
+        [
+          {
+            folder: "tools",
+            name: "tools",
+            mcpServers: {
+              first: { url: "https://tools.example/first" },
+              second: { url: "https://tools.example/second" },
+            },
+          },
+        ],
+      );
+      const linear = linearOAuthServer("project-linear-token");
+      const fetchFn: typeof globalThis.fetch = (input, init) =>
+        String(input) === LINEAR_MCP
+          ? linear.fetchFn(input, init)
+          : Promise.resolve(
+              new Response(null, {
+                status: 401,
+                headers: {
+                  "WWW-Authenticate": 'Bearer resource_metadata="https://x.example/meta"',
+                },
+              }),
+            );
+      const harness = yield* makeCursorTurnHarness({
+        cwd: fixture.project,
+        projectRoot: fixture.project,
+        env: fixture.env,
+        fetch: fetchFn,
+        t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 1);
+      assert.deepEqual(signInNotices(yield* harness.awaitTurnTerminal), [
+        'The Cursor plugin "tools" needs you to sign in, so its tools are unavailable. Sign in to it through Cursor, then start a new thread.',
+      ]);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 });
