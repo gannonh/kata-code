@@ -18,7 +18,9 @@ Run current formatting/lint, typecheck, unused-code checks, CI test partitions (
 
 When the range changes `apps/mobile` dependencies or patches, run the non-server test partition locally on macOS too. `apps/mobile/scripts/permissions-service.test.ts` and `apps/mobile/scripts/notification-center-manager.test.ts` compile native sources and skip on every non-darwin platform, so Kata's and upstream's Linux CI never run them. In KAT-3623 only the macOS run caught the Expo SDK 58 patches that upstream had dropped.
 
-Run branding checks and inspect new user-facing strings and asset references across shipped web, desktop, mobile, and CLI. Keep exact exceptions narrow. Run all mandatory retained-outcome checks, including files without conflicts. Do not delete or weaken inventory entries and tests to accept a changed implementation.
+Run `vp run check:branding` and `vp run test:branding` before every push. PR CI's Lint job runs both. Then inspect new user-facing strings and asset references across shipped web, desktop, mobile, and CLI. Keep exact exceptions narrow. Run all mandatory retained-outcome checks, including files without conflicts. Do not delete or weaken inventory entries and tests to accept a changed implementation.
+
+CodeRabbit skips a PR with more than 100 files. For a large range, plan the independent review without it (see [history](history.md#coderabbit-skips-integration-prs)).
 
 Read and use the available project verification skills:
 
