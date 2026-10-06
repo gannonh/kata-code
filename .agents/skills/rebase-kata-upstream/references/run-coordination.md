@@ -24,7 +24,7 @@ The skill digest manifest includes SKILL.md and its supporting resources, not on
 
 Persist new identifiers immediately after each external operation. If a write returns an uncertain response, query its result before retrying. For the small gap between issue creation and recording its ID, search Linear by the exact target SHA and recorded run identity placed in the issue description. Reuse the matching issue. Never infer that an interrupted call created nothing.
 
-Mirror the run identity, frozen target, branch/PR, and current phase on the owning Linear issue when integration mode authorizes those writes. Git history, remote PR state, and live Linear state settle disagreements with the local record. Do not overwrite a changed human-owned state from the saved phase.
+Mirror the run identity, frozen target, branch/PR, and current phase on the owning Linear issue when integration mode authorizes those writes. Git history, remote PR state, and live Linear state settle disagreements with the local record. Do not overwrite a changed human-owned state from the saved phase. A human-authorized refreeze recorded in the issue updates the recorded target, and the issue wins over the local record (see [the intake stop](git-integration.md#stop-at-intake-for-an-outcome-changing-rewrite)).
 
 On a deliberate stop, save evidence and the pending action, then release only the lock owned by this run. Retain the durable run record for the next occurrence. On success, record acceptance and learning completion before releasing the lock. A retry finding a merged PR must finish learning before considering `NO_CHANGE`. A `NO_CHANGE` exit also releases its owned lock and preserves the previous completed record; it does not invent a candidate or acceptance receipt.
 
