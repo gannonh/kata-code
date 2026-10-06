@@ -27,7 +27,7 @@ import * as ServerConfig from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as IdAllocator from "../IdAllocator.ts";
 import { cursorWorkspaceSlug } from "../../provider/acp/CursorPluginMcp.ts";
-import { ProviderAdapterV2RuntimePolicy } from "../ProviderAdapter.ts";
+import { type ProviderAdapterV2Event, ProviderAdapterV2RuntimePolicy } from "../ProviderAdapter.ts";
 import {
   cursorMcpServers,
   cursorRuntimeAgentPolicy,
@@ -1344,7 +1344,8 @@ const makeCursorTurnHarness = Effect.fn("makeCursorTurnHarness")(function* (inpu
     });
   const awaitTurnTerminal = runtime.events.pipe(
     Stream.takeUntil((event) => event.type === "turn.terminal"),
-    Stream.runDrain,
+    Stream.runCollect,
+    Effect.map((events) => Array.from(events)),
   );
   return {
     threadId,
@@ -1388,6 +1389,16 @@ const runCursorTurns = Effect.fn("runCursorTurns")(function* (input: {
     closed: [...harness.closed],
   };
 });
+
+const signInNotices = (events: ReadonlyArray<ProviderAdapterV2Event>): ReadonlyArray<string> =>
+  events.flatMap((event) =>
+    event.type === "turn_item.updated" && event.turnItem.type === "system_notice"
+      ? [event.turnItem.message]
+      : [],
+  );
+
+const LINEAR_SIGN_IN_NOTICE =
+  'The Cursor plugin "linear" needs you to sign in, so its tools are unavailable. Sign in to it through Cursor, then start a new thread.';
 
 const T3_MCP_SERVER = {
   type: "http",
@@ -1769,6 +1780,230 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
         url: "http://127.0.0.1:43123/mcp",
         headers: { Authorization: "Bearer rotated-t3-mcp-token" },
       });
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+  it.effect("warns on the thread when a plugin server needs sign-in and no login exists", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture([]);
+      const linear = linearOAuthServer("unused-linear-token");
+      const harness = yield* makeCursorTurnHarness({
+        cwd: fixture.worktree,
+        projectRoot: fixture.project,
+        env: fixture.env,
+        fetch: linear.fetchFn,
+        t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 1);
+      const first = yield* harness.awaitTurnTerminal;
+      yield* harness.startTurn(harness.runtimePolicy, 2);
+      const second = yield* harness.awaitTurnTerminal;
+
+      assert.deepEqual(signInNotices(first), [LINEAR_SIGN_IN_NOTICE]);
+      // Announced once per session, not on every turn.
+      assert.deepEqual(signInNotices(second), []);
+      assert.deepEqual(linear.probedTokens, [null]);
+      assert.deepEqual(harness.opened[0]?.mcpServers, {
+        "plugin-linear-linear": { type: "http", url: LINEAR_MCP, headers: {} },
+        "t3-code": T3_MCP_SERVER,
+      });
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("warns when every stored login is rejected and none refreshes", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture([
+        { folder: "project", accessToken: "expired-linear-token" },
+      ]);
+      const linear = linearOAuthServer("unused-linear-token");
+      const rejectRefresh: typeof globalThis.fetch = (input, init) =>
+        String(input) === "https://mcp.linear.app/token"
+          ? Promise.resolve(new Response(null, { status: 400 }))
+          : linear.fetchFn(input, init);
+      const harness = yield* makeCursorTurnHarness({
+        cwd: fixture.worktree,
+        projectRoot: fixture.project,
+        env: fixture.env,
+        fetch: rejectRefresh,
+        t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 1);
+      assert.deepEqual(signInNotices(yield* harness.awaitTurnTerminal), [LINEAR_SIGN_IN_NOTICE]);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("does not warn when a usable login exists, in the project or refreshed", () =>
+    Effect.gen(function* () {
+      const projectLogin = yield* makeCursorPluginFixture([
+        { folder: "project", accessToken: "project-linear-token" },
+      ]);
+      const refreshable = yield* makeCursorPluginFixture([
+        { folder: "project", accessToken: "expired-linear-token" },
+      ]);
+      for (const [fixture, validToken] of [
+        [projectLogin, "project-linear-token"],
+        [refreshable, "fresh-linear-token"],
+      ] as const) {
+        const harness = yield* makeCursorTurnHarness({
+          cwd: fixture.worktree,
+          projectRoot: fixture.project,
+          env: fixture.env,
+          fetch: linearOAuthServer(validToken).fetchFn,
+          t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+        });
+        yield* harness.startTurn(harness.runtimePolicy, 1);
+        assert.deepEqual(signInNotices(yield* harness.awaitTurnTerminal), []);
+      }
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("does not probe or warn for servers that need no login", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture(
+        [{ folder: "project", accessToken: "project-linear-token" }],
+        [
+          {
+            folder: "tools",
+            name: "tools",
+            mcpServers: {
+              local: { command: "./bin/server" },
+              keyed: {
+                url: "https://tools.example/mcp",
+                headers: { Authorization: "Bearer ${TOOLS_API_KEY}" },
+              },
+              cleartext: { url: "http://tools.example/mcp" },
+            },
+          },
+        ],
+      );
+      const linear = linearOAuthServer("project-linear-token");
+      const fetched: Array<string> = [];
+      // Any URL but Linear's challenges, so only the servers' own gating keeps them quiet.
+      const challengeEverythingElse: typeof globalThis.fetch = (input, init) => {
+        fetched.push(String(input));
+        return String(input) === LINEAR_MCP
+          ? linear.fetchFn(input, init)
+          : Promise.resolve(
+              new Response(null, {
+                status: 401,
+                headers: {
+                  "WWW-Authenticate": 'Bearer resource_metadata="https://x.example/meta"',
+                },
+              }),
+            );
+      };
+      const harness = yield* makeCursorTurnHarness({
+        cwd: fixture.project,
+        projectRoot: fixture.project,
+        env: { ...fixture.env, TOOLS_API_KEY: "tools-key" },
+        fetch: challengeEverythingElse,
+        t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 1);
+      assert.deepEqual(signInNotices(yield* harness.awaitTurnTerminal), []);
+      assert.deepEqual(fetched, [LINEAR_MCP]);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect.each([
+    { name: "200", response: () => new Response(null, { status: 200 }) },
+    { name: "500", response: () => new Response("boom", { status: 500 }) },
+    {
+      name: "401 without resource_metadata",
+      response: () =>
+        new Response(null, { status: 401, headers: { "WWW-Authenticate": "Bearer" } }),
+    },
+    { name: "403 without resource_metadata", response: () => new Response(null, { status: 403 }) },
+    {
+      name: "200 with a non-JSON body",
+      response: () => new Response("<html>hello</html>", { status: 200 }),
+    },
+  ] as const)(
+    "does not warn when a server with no stored login answers the probe with $name",
+    ({ response }) =>
+      Effect.gen(function* () {
+        const fixture = yield* makeCursorPluginFixture([]);
+        const harness = yield* makeCursorTurnHarness({
+          cwd: fixture.worktree,
+          projectRoot: fixture.project,
+          env: fixture.env,
+          fetch: () => Promise.resolve(response()),
+          t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+        });
+        yield* harness.startTurn(harness.runtimePolicy, 1);
+        assert.deepEqual(signInNotices(yield* harness.awaitTurnTerminal), []);
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("announces the sign-in once across an agent reopen after T3's credential rotates", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture([]);
+      const harness = yield* makeCursorTurnHarness({
+        cwd: fixture.worktree,
+        projectRoot: fixture.project,
+        env: fixture.env,
+        fetch: linearOAuthServer("unused-linear-token").fetchFn,
+        t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 1);
+      const first = yield* harness.awaitTurnTerminal;
+
+      harness.setT3McpSession("Bearer rotated-t3-mcp-token");
+      yield* harness.runtime.resumeThread({
+        providerThread: harness.providerThread,
+        threadId: harness.threadId,
+        modelSelection: harness.modelSelection,
+        runtimePolicy: harness.runtimePolicy,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 2);
+      const second = yield* harness.awaitTurnTerminal;
+
+      assert.deepEqual(harness.opens, [
+        { operation: "create", agentId: undefined },
+        { operation: "resume", agentId: "native-cursor-plugin-oauth" },
+      ]);
+      assert.deepEqual(signInNotices(first), [LINEAR_SIGN_IN_NOTICE]);
+      assert.deepEqual(signInNotices(second), []);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("names a plugin once when several of its servers need sign-in", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture(
+        [{ folder: "project", accessToken: "project-linear-token" }],
+        [
+          {
+            folder: "tools",
+            name: "tools",
+            mcpServers: {
+              first: { url: "https://tools.example/first" },
+              second: { url: "https://tools.example/second" },
+            },
+          },
+        ],
+      );
+      const linear = linearOAuthServer("project-linear-token");
+      const fetchFn: typeof globalThis.fetch = (input, init) =>
+        String(input) === LINEAR_MCP
+          ? linear.fetchFn(input, init)
+          : Promise.resolve(
+              new Response(null, {
+                status: 401,
+                headers: {
+                  "WWW-Authenticate": 'Bearer resource_metadata="https://x.example/meta"',
+                },
+              }),
+            );
+      const harness = yield* makeCursorTurnHarness({
+        cwd: fixture.project,
+        projectRoot: fixture.project,
+        env: fixture.env,
+        fetch: fetchFn,
+        t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 1);
+      assert.deepEqual(signInNotices(yield* harness.awaitTurnTerminal), [
+        'The Cursor plugin "tools" needs you to sign in, so its tools are unavailable. Sign in to it through Cursor, then start a new thread.',
+      ]);
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 });
