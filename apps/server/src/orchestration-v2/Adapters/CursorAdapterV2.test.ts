@@ -1904,6 +1904,68 @@ describe("CursorAdapterV2 plugin MCP servers", () => {
     }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
   );
 
+  it.effect.each([
+    { name: "200", response: () => new Response(null, { status: 200 }) },
+    { name: "500", response: () => new Response("boom", { status: 500 }) },
+    {
+      name: "401 without resource_metadata",
+      response: () =>
+        new Response(null, { status: 401, headers: { "WWW-Authenticate": "Bearer" } }),
+    },
+    { name: "403 without resource_metadata", response: () => new Response(null, { status: 403 }) },
+    {
+      name: "200 with a non-JSON body",
+      response: () => new Response("<html>hello</html>", { status: 200 }),
+    },
+  ] as const)(
+    "does not warn when a server with no stored login answers the probe with $name",
+    ({ response }) =>
+      Effect.gen(function* () {
+        const fixture = yield* makeCursorPluginFixture([]);
+        const harness = yield* makeCursorTurnHarness({
+          cwd: fixture.worktree,
+          projectRoot: fixture.project,
+          env: fixture.env,
+          fetch: () => Promise.resolve(response()),
+          t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+        });
+        yield* harness.startTurn(harness.runtimePolicy, 1);
+        assert.deepEqual(signInNotices(yield* harness.awaitTurnTerminal), []);
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
+  it.effect("announces the sign-in once across an agent reopen after T3's credential rotates", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeCursorPluginFixture([]);
+      const harness = yield* makeCursorTurnHarness({
+        cwd: fixture.worktree,
+        projectRoot: fixture.project,
+        env: fixture.env,
+        fetch: linearOAuthServer("unused-linear-token").fetchFn,
+        t3AuthorizationHeader: DEFAULT_T3_AUTHORIZATION,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 1);
+      const first = yield* harness.awaitTurnTerminal;
+
+      harness.setT3McpSession("Bearer rotated-t3-mcp-token");
+      yield* harness.runtime.resumeThread({
+        providerThread: harness.providerThread,
+        threadId: harness.threadId,
+        modelSelection: harness.modelSelection,
+        runtimePolicy: harness.runtimePolicy,
+      });
+      yield* harness.startTurn(harness.runtimePolicy, 2);
+      const second = yield* harness.awaitTurnTerminal;
+
+      assert.deepEqual(harness.opens, [
+        { operation: "create", agentId: undefined },
+        { operation: "resume", agentId: "native-cursor-plugin-oauth" },
+      ]);
+      assert.deepEqual(signInNotices(first), [LINEAR_SIGN_IN_NOTICE]);
+      assert.deepEqual(signInNotices(second), []);
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(NodeServices.layer, IdAllocator.layer))),
+  );
+
   it.effect("names a plugin once when several of its servers need sign-in", () =>
     Effect.gen(function* () {
       const fixture = yield* makeCursorPluginFixture(
