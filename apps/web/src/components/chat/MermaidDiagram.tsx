@@ -138,9 +138,9 @@ let expandedImageUrl: string | null = null;
 
 /**
  * Converts a rendered diagram into a standalone image with fixed size and background.
- * A blob URL, unlike a data URL, passes the desktop connect-src policy that media
- * save and copy actions fetch through. Only one diagram is expanded at a time, so
- * the previous URL is released.
+ * A blob URL, unlike a data URL, lets media save and copy actions read it without
+ * a fetch, which the desktop connect-src policy blocks. Only one diagram is
+ * expanded at a time, so the previous URL is released.
  */
 function mermaidImageUrl(svg: string): string {
   const svgDocument = new DOMParser().parseFromString(svg, "image/svg+xml");
