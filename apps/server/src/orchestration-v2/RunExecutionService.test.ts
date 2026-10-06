@@ -32,6 +32,7 @@ import * as Exit from "effect/Exit";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Logger from "effect/Logger";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -3336,6 +3337,33 @@ it.effect("refreshes pull requests after a provider stream exits with an error",
     assert.include(error?.failure.message ?? "", "provider event stream closed unexpectedly");
   }),
 );
+
+it.effect("logs the rendered cause when provider event ingestion fails", () => {
+  const logged: unknown[] = [];
+  const logger = Logger.make(({ message }) => {
+    logged.push(message);
+  });
+  return Effect.gen(function* () {
+    yield* captureRootRunTermination({
+      key: "ingestion-failure-log",
+      shouldFinalizeRun: () => Effect.succeed(true),
+      events: () =>
+        Stream.fail(
+          new ProviderAdapterEventStreamError({
+            driver,
+            providerSessionId: ProviderSessionId.make("session:exited"),
+            cause: "provider process exited",
+          }),
+        ),
+    });
+    const [text, fields] = logged.flat() as [string, { readonly cause: unknown }];
+    assert.strictEqual(text, "orchestration V2 provider event ingestion failed");
+    // The log formatter prints a Cause object as `[Object]`, so the field must
+    // already be rendered text.
+    assert.strictEqual(typeof fields.cause, "string");
+    assert.include(fields.cause as string, "provider process exited");
+  }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+});
 
 it.effect("refreshes pull requests only once when startup failure closes its event stream", () =>
   Effect.gen(function* () {

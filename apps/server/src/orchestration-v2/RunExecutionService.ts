@@ -1273,7 +1273,7 @@ export const layer: Layer.Layer<
                 Effect.flatMap((finalized) =>
                   Effect.logWarning("orchestration V2 provider event ingestion failed", {
                     runId: input.run.id,
-                    cause,
+                    cause: Cause.pretty(cause),
                   }).pipe(
                     Effect.andThen(
                       finalized
