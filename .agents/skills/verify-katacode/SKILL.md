@@ -76,7 +76,7 @@ Use the new `Pairing URL:` exactly once. Tokens from `pair` have standard client
 
 ## Drive
 
-Install the browser CLI if needed (`npm i -g agent-browser && agent-browser install`), then load its current command list with `agent-browser skills get core` so you match the installed version.
+Install the browser CLI if needed (`npm i -g agent-browser && agent-browser install`), then load its current command list with `agent-browser skills get core` so you match the installed version. Before the first `open`, run `agent-browser --version` and require 0.37.1 or later if you will record video. Recording was tested on 0.37.1 and 0.38.1; 0.37.0 was not tested. Otherwise run `agent-browser upgrade` (listed in `--help`, not exercised in KAT-3652) and check the version again. Do it before you pair: when the CLI version changes, the next command restarts the browser and the paired tab is gone. Also require the Recording checks in `agent-browser doctor` to pass (ffmpeg with libvpx and libx264). If `--version` errors, the active node may have no agent-browser install, as happens under mise. Run `npm i -g agent-browser`, or put the node version that has it first on PATH (`mise ls node` lists them), and check again. If the version still stays below 0.37.1, plan on the screenshot fallback under Evidence.
 
 Use one named session for the run. Do not pass `--session-name` (that persists cookies under `~/.agent-browser`).
 
@@ -96,7 +96,7 @@ After pairing, the app strips the token from the URL and redirects to `/`. `Firs
 Finish the wizard without importing:
 
 1. **Connect.** The local computer row shows **Connected**. Click **Continue**. Do not open **Add a computer**.
-2. **Agents.** Heading **Your agents**. Click **Continue**. Do not require an agent to be Ready.
+2. **Agents.** Heading **Connect your agents**. Click **Continue**. Do not require an agent to be Ready.
 3. **Projects.** Heading **Your projects** or **Choose your projects**. Click **Do not import projects**.
 
 Then wait until the setup dialog is gone and the URL is `/`. A correct launch then shows:
@@ -112,8 +112,10 @@ Stable handles in this app:
 | What | Handle |
 | --- | --- |
 | Pairing form | heading `Pair with this environment`, textbox `Pairing token`, buttons `Continue` and `Reload app` |
-| Welcome wizard | dialog `Set up Kata Code`, progress `Setup progress`, steps `Connect` / `Agents` / `Projects`, headings `Connect your computers` / `Your agents` / `Your projects` or `Choose your projects`, skip-import button `Do not import projects` |
+| Welcome wizard | dialog `Set up Kata Code`, progress `Setup progress`, steps `Connect` / `Agents` / `Projects`, headings `Connect your computers` / `Connect your agents` / `Your projects` or `Choose your projects`, skip-import button `Do not import projects` |
 | Empty landing | text `What should we work on?` (no heading role), button `Add project` |
+| Add project | dialog `Command palette`, group `Sources` listing `New project` (preselected), `Local folder`, `Git URL`, then provider repositories |
+| Draft composer | textbox `Message` |
 | Sidebar settings | button `Settings` |
 | Sidebar usage | button `Usage` |
 | Command palette | `data-testid="command-palette"` with `data-palette-mode="command"`, name `Command palette`, shortcut `mod+k` (⌘K on macOS, Ctrl+K elsewhere). The same testid serves File picker (`files`) and Search project contents (`content`) |
@@ -122,7 +124,7 @@ Stable handles in this app:
 
 Do not call internal atoms, test-only endpoints, or `t3-sqlite-state.ts exec` to claim a user path works. SQLite inspection is a side-effect check after a real UI action, and only against the disposable home.
 
-Provider CLIs (Codex, Claude, Cursor, Grok, OpenCode) live on the server machine. An empty isolated home will not have an authenticated provider. You can still prove pairing, navigation, settings, usage chrome, and adding a project. You cannot honestly prove "send a message and get a reply" without a provider. Record that skip.
+Provider CLIs (Codex, Claude, Cursor, Grok, OpenCode) live on the server machine. The server detects them from its user's environment, so they can show Ready even in an isolated home. You can prove pairing, navigation, settings, usage chrome, and adding a project without a provider. Do not send a message unless your brief allows a live provider call, because each reply costs money. Record that skip.
 
 ## Evidence
 
@@ -135,9 +137,9 @@ Minimum for a pass:
 - an accessibility snapshot of the resulting screen (`agent-browser --session katacode-verify snapshot`) saved under `snapshots/`
 - `evidence.json` naming the feature id, entry point used, `WEB_ORIGIN` (no token), and the observable end state
 
-To record video, run `agent-browser --session katacode-verify record start <path.webm>` before you open the pairing URL, then pair inside the recording. `record start` opens a fresh browser context, and in KAT-3532 that context had lost the pairing state from before the recording. Run `agent-browser --session katacode-verify record stop` right after the captured action and before you upload the file. Stop finalizes the WebM, and an active recording is not a complete file.
+To record video, use agent-browser 0.37.1 or later (see Drive). `record start` then attaches to the active tab. It opens no new tab and does not navigate, so the pairing, the viewport, and an unsent composer draft all survive. It writes 30 fps and holds the latest frame between repaints, so idle time is kept and the video length is close to wall-clock time. In KAT-3652, a flow of 10 idle seconds, a page navigation, and 3 more seconds recorded as 13.4 s on 0.37.1 and 13.1 s on 0.38.1, and both kept the frames from before the navigation. Pair first, then run `agent-browser --session katacode-verify record start <path.webm>` on the paired tab, so the token never enters the video. Run `agent-browser --session katacode-verify record stop --json` right after the captured action and before you upload the file. Stop finalizes the WebM, and an active recording is not a complete file. Require `capturedFrames` above 1 in its output; 1 means Chrome sent a single frame and the video is a still.
 
-`agent-browser record` emits a frame only when the page repaints, so idle time collapses. In KAT-3562 it wrote 84 frames at a nominal 10 fps (8.4 s) for about 50 s of activity, and it missed the steps before a navigation. The Kata Code preview recorder (`preview_recording_start`) also failed in that unattended run, because the preview pane had no visible client. When either happens, pair first, then capture one `agent-browser screenshot` per second while you drive the flow. Start the loop only after pairing succeeds, and never capture the pairing form or any token entry, because every frame goes into the uploaded video. Then assemble the frames with `ffmpeg -framerate 1 -i frames/%03d.png -c:v libx264 -pix_fmt yuv420p -r 25 out.mp4`. Say in the PR comment that the video is a 1 fps capture. Check the frames before you upload.
+On 0.36.0, the one older release tested, `record start` opened a second tab and recorded that one. The new tab reloaded the current URL, and Kata Code opened a new draft there with an empty composer. The first tab kept the unsent draft. Use the screenshot fallback below the floor, when `agent-browser doctor` fails its Recording checks, or when `record stop --json` reports `capturedFrames` of 1 for a flow that changed the screen. Pair first, then capture one `agent-browser screenshot` per second while you drive the flow. Start the loop only after pairing succeeds, and never capture the pairing form or any token entry, because every frame goes into the uploaded video. Then assemble the frames with `ffmpeg -framerate 1 -i frames/%03d.png -c:v libx264 -pix_fmt yuv420p -r 25 out.mp4`. Say in the PR comment that the video is a 1 fps capture. Check the frames before you upload.
 
 For a change with an open pull request, attach at least one representative UI screenshot or video from the run to the PR conversation before calling the change verified. First require `gh pr comment --help` to list `--attach`; this binary upload requires GitHub CLI 2.101.0 or later. When available, run `gh pr comment <number> --body "UI evidence for <feature>." --attach "$EVIDENCE_DIR/screenshots/<file>.png#<observable state>"`. Post one attachment per comment. In KAT-3532, a comment with several `--attach` files posted after the first upload, and each later upload then failed with a TLS error. Otherwise use an authenticated GitHub integration or the authenticated PR page that accepts binary uploads. If none is available, report the PR evidence upload as blocked and do not call the change verified. A local filesystem path, an inaccessible `file://` link, or a text-only claim does not count. Fetch the PR comment after uploading and require a rendered attachment URL, then record the PR URL, comment URL, and attached evidence filenames in `evidence.json`. Keep the original files under `uat-evidence/<RUN_ID>/` after upload. If the verification has no PR, keep the evidence locally and record `pullRequest: null`; do not create an empty PR only to host evidence.
 
