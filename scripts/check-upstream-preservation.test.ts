@@ -41,7 +41,8 @@ const upstreamSha = "12391bd0d38eef6655b7a9f8945d0cb5febadc2b";
 // checker against that tree. Pass that commit's FORK.md pin (baselineUpstreamSha),
 // not the live pin. The candidate must contain every inventory owner path, so it moves
 // forward when a check is added (KAT-3512 merge) or when today's dependencies stop loading its tree
-// (KAT-3686: Effect 4.0.1 removed APIs the older tree used). currentSha stays historical because
+// (KAT-3686: Effect 4.0.1 removed APIs the older tree used; tag upstream-baseline/kat-3686 keeps that
+// commit fetchable even if its PR is squash-merged). currentSha stays historical because
 // withRetainedRegressionWorktree copies today's checker over that checkout and needs a tree difference to commit.
 const baselineCandidateSha = "46d9dc51ebd9f06701f264e170ad064df5fe9cea";
 const baselineUpstreamSha = "4ae976dbae39b3e80243b864a8b61da00f642dc4";

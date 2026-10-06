@@ -32,7 +32,8 @@ KAT-3668 landed the previous pin through PR #348 as merge commit `99fa8759e334bf
 
 Four independent Opus reviews covered all 112 commits, split by area: relay, Connect, and webhooks; server and contracts; clients; and toolchain and refactors. None found a commit that changes an accepted Kata outcome and needs a human product decision first:
 
-- #16118 stops encoding monogram icons in the old form. Clients built before 2026-09-23 cannot decode the new form. Those clients already cannot speak protocol 2, which ended the mixed fleet when KAT-3635 adopted Orchestration V2, so no compatibility that still exists ends here.
+- #16118 stops encoding monogram icons in the old form. Clients built before 2026-09-23 cannot decode the new form. Those clients already cannot speak protocol 2, which ended the mixed fleet when KAT-3635 adopted Orchestration V2, so this ends no compatibility that still exists.
+- Two new features do reach protocol-2 clients built from the Kata base, including the current TestFlight build. Those clients decode thread turn items and the scheduled-task list strictly. A thread stops loading for them once an agent asks for a secret (`secret_request` turn item, #15907). The scheduled-task list fails for them once any webhook task exists (#15085). The forward-compatible decoders this range adds (#15951) protect only clients built from it onward. In the other direction, a server built from the base rejects the new `tool-output-image` asset, so tool screenshots do not render against it. These breaks need the new features to be used. They do not change a retained outcome. They are named for Human Review, and shipping a client build with the server release closes them.
 - The legacy tunnel cleanup deletes nothing unless `RELAY_LEGACY_TUNNEL_CLEANUP_MODE` is set (KAT-3692).
 - Webhook automations, the secret card, and HTML renders are new upstream features. Their open product and security questions are filed as KAT-3689, KAT-3690, and KAT-3691. Relay deploys stay manual: `deploy-relay.yml` has only `workflow_dispatch`.
 
@@ -50,7 +51,7 @@ It also found 4,882 `.repos/` paths, which resolve as the carried-forward deleti
 2. **Renamed-base merge.** For 111 files carrying Kata behavior, `git merge-file --diff3` merged the transformed previous pin and upstream into Kata's raw blob. 34 merged cleanly.
 3. **Trusted files.** The 7 trusted test files with content conflicts stay at base bytes. Git also merged upstream edits cleanly into 8 other trusted files: `VcsProcess.test.ts`, `build-desktop-artifact.test.ts`, `update-release-package-versions.test.ts`, and five desktop app tests. Those were restored to base bytes too. All 39 active trusted paths match the base byte for byte.
 4. **Lanes.** The remaining 92 files went to five lanes with disjoint ownership: Connect cloud and relay, text generation, provider and persistence, server core, and clients. Manifests, patches, the lockfile, migration numbering, and pin consumers stayed with the coordinator and were done in sequence.
-5. **Import sweep.** Stale `effect/unstable/*` specifiers moved to Effect 4.0.1's stable paths in 47 cleanly merged non-trusted files. The `effect/Encoding` row of the map held prose instead of a path; four relay files received it, and the relay lane rewrote them to `effect/encoding/Base64`, `Base64Url`, and `Hex`.
+5. **Import sweep.** Stale `effect/unstable/*` specifiers moved to Effect 4.0.1's stable paths in 47 cleanly merged non-trusted files. The `effect/Encoding` row of the map held prose instead of a path; four relay files received it, and the relay lane rewrote them to `effect/encoding/Base64`, `Base64Url`, and `Hex`. The sweep also rewrote the specifiers inside `patches/@opencode__client@2.0.23.patch` and `@opencode__protocol@2.0.23.patch`, where they are the patch's own removed lines. The frozen install then failed in every CI job of run 37443388527. `5c64b30f29` restored both patches to upstream's bytes.
 6. **Added-line identity sweep.** Cleanly merged and added files never pass through the transform. Their added lines were swept for `@t3tools/`, `T3CODE_`, Kata-renamed wire identifiers (`/.well-known/t3/`, `t3-env:`, `x-t3-relay-*`, `x-t3-hook-outcome`, `t3-relay-hook-delivery+jwt`), `t3code` defaults, and T3 product copy. The remaining hits are test fixtures (`pingdotgg/t3code` URLs), retained `T3CODE_TRUE`/`T3CODE_FALSE`, `.t3code/vcs.json` (unchanged since the base), private comments, and `apps/marketing`, which stays T3-shaped per `FORK.md`.
 
 ## TAKE
@@ -131,7 +132,7 @@ The following all name `4ae976dbae`:
 - the runbook's frozen refs and command examples
 - `currentUpstreamSha` in `scripts/check-upstream-preservation.test.ts`
 
-The original root stays `6a687ee43b`. The historical baseline worktree cannot run under Effect 4.0.1: its tree imports the removed `effect/Encoding` and calls `.compose()` methods 4.0.1 removed, at module scope. `baselineCandidateSha` therefore moves to this branch's integration commit, with that commit's own pin, `4ae976dbae`, as `baselineUpstreamSha`. **That commit is an ancestor of `main` only if the PR lands as a merge commit.**
+The original root stays `6a687ee43b`. The historical baseline worktree cannot run under Effect 4.0.1: its tree imports the removed `effect/Encoding` and calls `.compose()` methods 4.0.1 removed, at module scope. `baselineCandidateSha` therefore moves to this branch's integration commit, with that commit's own pin, `4ae976dbae`, as `baselineUpstreamSha`. That commit is an ancestor of `main` only if the PR lands as a merge commit. The annotated tag `upstream-baseline/kat-3686` points at it so that CI, which fetches tags with `fetch-depth: 0`, still finds it after a squash or rebase merge.
 
 ## Follow-ups
 
@@ -143,6 +144,41 @@ The original root stays `6a687ee43b`. The historical baseline worktree cannot ru
 - KAT-3692: legacy tunnel cleanup dry run and decision.
 - KAT-3685: KAT-3668's lesson.
 
+## Independent review
+
+Three independent Opus reviews covered the complete fork delta, split into three lenses: server and relay; clients and contracts; and identity, dependencies, workflows, and deletions. Each compared Kata's divergence from the previous pin before the merge, identity-transformed, with its divergence from the frozen tip after the merge, file by file. Cleanly merged files got the same check as conflicts.
+
+- **Server and relay:** no blocker. 857 files were checked and 54 flagged hunks were read by hand; every Kata line is present at its new location. Accepted notes:
+  - A failed Linear OAuth token save now answers with CloudLink's fixed message. The relay treats every delivery failure alike, and the `RoutineError` is still logged as the cause.
+  - The relay drops the `service.namespace` resource attribute, as upstream #16382 does; `docs/operations/observability.md` names it only for the server and desktop.
+  - Headless Chrome inherits the server environment. This is added to KAT-3691.
+- **Clients and contracts:** no blocker. 520 files were checked, and none lost Kata divergence. Its should-fix item, older Kata clients and the new `secret_request` and webhook data, is recorded under "Intake review" above.
+- **Identity, dependencies, and workflows:** found the corrupted opencode patches, which `5c64b30f29` had already fixed. It also found that the baseline commit is lost on a squash merge, now covered by the `upstream-baseline/kat-3686` tag. Whole-tree counts of `@t3tools/`, `T3CODE_`, `T3 Code`, `T3 Connect`, `/.well-known/t3/`, and `t3-env:` are unchanged from the base. The extra `t3.codes` is a relay CORS test fixture.
+- CodeRabbit skips PRs with more than 100 files, as recorded for earlier integrations.
+
 ## Verification
 
-Filled in after candidate-bound checks.
+Code under test is `5c64b30f29ee584cbd3046c2bead188160360ba4`'s tree on base `992475cf95ff829e11eb2101dcbc498bd0af00ee`. The commit recording this section changes only this document and a comment in `scripts/check-upstream-preservation.test.ts`.
+
+**Local checks** (macOS):
+
+- Pass: `vp run typecheck` (15 packages), `vp check` (0 errors), `vp run knip:check`, `check:branding` and `test:branding`, `check-workflow-references` and its test, the Connect wire scan (25 files), the nightly gate test, `vp install --frozen-lockfile`, `build:desktop` and preload verification, `lint:mobile`, and release smoke.
+- Suites: web 445 files and 5,969 tests; server 516 files and 7,032 tests; non-server partition with the macOS-only mobile native tests, all passing after the merge commit existed. Before that, two script tests that build a worktree from `HEAD` failed because `HEAD` was still the base; after the commit, `check-upstream-preservation.test.ts` and `connect.test.ts` pass, 41 of 41.
+- Running alone on this Mac, `cli/invocation.test.ts` (2), `AntigravityAdapterV2.test.ts` (2), and one `GitVcsDriverCore.test.ts` case also fail on landed `main` `99fa8759e3`, so they predate this merge. All of them pass in the full server run.
+
+**PR CI:** run 37443758048 on `5c64b30f29`, all 17 jobs green. Run 37443388527 on `ad0fc656d6` failed `vp install --frozen-lockfile` in every job because of the opencode patches.
+
+**Web** (`verify-katacode`, agent-browser 0.38.2): run `web-20261006-093214-bf02eb51` on `main` `992475cf95`, and run `web-20261006-093646-1d9a2766` on `5c64b30f29`. All 10 scenarios pass:
+
+1. Pairing, the setup wizard without import, and the empty landing match `main` pixel for pixel (0 differing pixels).
+2. Settings → Connections uses Kata Code Connect copy and has the Add Environment form.
+3. Settings → Scheduled Tasks → New task offers "On webhook" with no T3 copy. The Kata Code Connect URL note appears only after saving, and it was checked in source, not live.
+4. The Source Control branch prefix default is `katacode`.
+5. Storage → Worktree location defaults to the Kata Code home folder, and the server created `<home>/worktrees` in the disposable home.
+6. Settings General and Providers render.
+7. Usage switches from Cost to Tokens.
+8. The command palette filters to "Open settings" and opens it.
+9. Adding a local folder project opens its draft composer and lists it in the sidebar filter.
+10. The Pull Requests page renders. No captured snapshot contains T3 product copy.
+
+No message was sent to a provider, to avoid a billed call. Two screenshots and a 29.8-second walkthrough of scenarios 6–9 are on PR #361.
