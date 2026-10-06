@@ -1,5 +1,8 @@
 import type { DpopFailureReason } from "@kata-sh/code-contracts";
-import type { RelayProtectedError } from "@kata-sh/code-contracts/relay";
+import type {
+  RelayEnvironmentStatusResponse,
+  RelayProtectedError,
+} from "@kata-sh/code-contracts/relay";
 
 export const DPOP_CLOCK_HINT =
   "Hint: Check that automatic date and time is enabled on both devices, then try again.";
@@ -66,5 +69,23 @@ export function relayProtectedErrorMessage(error: RelayProtectedError): string {
       return "Linear rejected the stored authorization. Authorize the connection again.";
     case "RelayInternalError":
       return `Relay encountered an internal error (${error.reason}).`;
+  }
+}
+
+// A host with a current build gets a new tunnel on its own within minutes of
+// coming back, which clears this reason. While it is still reported, the host
+// is either still off or running a build too old to do that.
+export const RELAY_TUNNEL_RELEASED_MESSAGE =
+  "Offline for a while, so its Kata Code Connect tunnel was removed. Start Kata Code on that computer and update it to the latest version to reconnect.";
+
+/** User-facing text for an offline status, or null when the relay gave no known reason. */
+export function relayOfflineReasonMessage(
+  status: Pick<RelayEnvironmentStatusResponse, "offlineReason">,
+): string | null {
+  switch (status.offlineReason) {
+    case "tunnel_released":
+      return RELAY_TUNNEL_RELEASED_MESSAGE;
+    case undefined:
+      return null;
   }
 }

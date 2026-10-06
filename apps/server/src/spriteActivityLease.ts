@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
@@ -51,7 +51,7 @@ export function hasSpriteActivity(input: {
   readonly pullRequestThreads: ReadonlyArray<
     Pick<
       ProjectionStore.ProjectionThreadPullRequests,
-      "settledOverride" | "settledAt" | "pullRequests"
+      "settledOverride" | "settledAt" | "lineage" | "pullRequests"
     >
   >;
 }): boolean {

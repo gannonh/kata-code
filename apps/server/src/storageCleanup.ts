@@ -3,7 +3,7 @@ import {
   OrchestrationV2ProviderSessionJson,
 } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import type {
   OrchestrationV2ThreadShell,
   ProjectId,
@@ -35,6 +35,7 @@ import { threadHasQueuedTurnStart } from "./orchestration-v2/ThreadSettlementSer
 import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import { isFilesystemRoot, managedWorktreesDirectories } from "./worktreesDirectory.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "./workspace/workspaceLease.ts";
 
@@ -186,7 +187,22 @@ export const make = Effect.gen(function* () {
     now: number,
   ) {
     if (!anyWorktreePolicy(serverSettings, worktreeCleanupEnabled)) return;
-    if (!(yield* fs.exists(config.worktreesDir))) return;
+    const roots: Array<{ readonly lexical: string; readonly real: string }> = [];
+    for (const directory of managedWorktreesDirectories(
+      serverSettings,
+      config.worktreesDir,
+      path,
+    )) {
+      // An unmounted drive only skips its own worktrees.
+      const real = yield* fs.exists(directory).pipe(
+        Effect.flatMap((exists) => (exists ? fs.realPath(directory) : Effect.succeed(null))),
+        Effect.orElseSucceed(() => null),
+      );
+      if (real !== null && !isFilesystemRoot(real, path)) {
+        roots.push({ lexical: path.resolve(directory), real });
+      }
+    }
+    if (roots.length === 0) return;
     const hasDeleteRule = anyWorktreePolicy(serverSettings, (rules) => rules.worktreeOnDelete);
     const deletedRows = hasDeleteRule
       ? yield* sql<{ payload_json: string; workspaceRoot: string }>`
@@ -207,7 +223,6 @@ export const make = Effect.gen(function* () {
         resolveWorktreeCleanup(serverSettings, thread.projectId).worktreeOnDelete,
     );
     const snapshot = yield* readThreads();
-    const root = yield* fs.realPath(config.worktreesDir);
     const refreshedDefaultRefs = new Map<string, Set<string>>();
     const worktreeThreads = snapshot.threads.filter((thread) => thread.worktreePath !== null);
     const worktreeKeys = yield* Effect.forEach(worktreeThreads, (thread) =>
@@ -230,12 +245,23 @@ export const make = Effect.gen(function* () {
         : snapshot.projects.find((entry) => entry.id === thread.projectId);
       if (project === undefined || (!deleted && !storageCleanupThreadIdle(thread, now))) continue;
       yield* Effect.gen(function* () {
-        const lexicalRoot = [path.resolve(config.worktreesDir), root].find((candidate) =>
-          inside(candidate, worktreePath),
+        // Each managed root is known by its configured (lexical) path and its
+        // canonical path. A symlinked base directory (a linked drive, a symlinked
+        // home) is fine; a symlink anywhere below the root is not.
+        const rootMatches = roots.flatMap(({ lexical, real }) =>
+          [lexical, real]
+            .filter((candidate) => inside(candidate, worktreePath))
+            .map((lexicalRoot) => ({ lexicalRoot, root: real })),
         );
-        if (lexicalRoot === undefined || !(yield* fs.exists(worktreePath))) return;
+        if (rootMatches.length === 0 || !(yield* fs.exists(worktreePath))) return;
         const realWorktreePath = yield* fs.realPath(worktreePath);
-        if (realWorktreePath !== path.join(root, path.relative(lexicalRoot, worktreePath))) return;
+        if (
+          !rootMatches.some(
+            ({ lexicalRoot, root }) =>
+              realWorktreePath === path.join(root, path.relative(lexicalRoot, worktreePath)),
+          )
+        )
+          return;
         if (yield* hasTerminal(realWorktreePath)) return;
         if (yield* containsProjectRoot(realWorktreePath, [project, ...snapshot.projects])) return;
         // A linked worktree has a .git file. Never remove a main checkout.

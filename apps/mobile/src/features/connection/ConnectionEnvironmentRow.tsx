@@ -5,7 +5,7 @@ import type { AtomCommandResult } from "@kata-sh/code-client-runtime/state/runti
 import { type EnvironmentId, resolveEnvironmentMachineKind } from "@kata-sh/code-contracts";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useCallback, useState } from "react";
 import { Platform, Alert, Pressable, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";

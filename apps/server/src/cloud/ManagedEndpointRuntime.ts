@@ -12,8 +12,8 @@ import * as Result from "effect/Result";
 import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcess from "effect/process/ChildProcess";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 export type CloudManagedEndpointRuntimeStatus =
   | {
@@ -48,6 +48,8 @@ export class CloudManagedEndpointRuntime extends Context.Service<
     readonly getStatus: Effect.Effect<CloudManagedEndpointRuntimeStatus>;
     readonly recoveryRequests: Stream.Stream<RelayManagedEndpointRuntimeConfig>;
     readonly requestRecovery: (config: RelayManagedEndpointRuntimeConfig) => Effect.Effect<void>;
+    /** Emits when the connector registers a tunnel connection, i.e. the relay can reach us again. */
+    readonly tunnelConnected: Stream.Stream<void>;
     readonly withLinkStateLock: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
   }
 >()("@kata-sh/code-cli/cloud/ManagedEndpointRuntime/CloudManagedEndpointRuntime") {}
@@ -136,6 +138,7 @@ export const make = Effect.gen(function* () {
   const desiredConfigRef = yield* Ref.make<RelayManagedEndpointRuntimeConfig | null>(null);
   const statusRef = yield* Ref.make<CloudManagedEndpointRuntimeStatus>({ status: "disabled" });
   const recoveryRequests = yield* Queue.sliding<RelayManagedEndpointRuntimeConfig>(1);
+  const tunnelConnections = yield* Queue.sliding<void>(1);
   const reconcileSemaphore = yield* Semaphore.make(1);
   const restartDelayRef = yield* Ref.make(0);
   const linkStateSemaphore = yield* Semaphore.make(1);
@@ -238,7 +241,10 @@ export const make = Effect.gen(function* () {
         switch (classifyRelayClientOutput(line)) {
           case "connected":
             rejectedRegistrations = 0;
-            return Effect.logInfo("Relay client tunnel connection registered", attributes);
+            return Effect.logInfo("Relay client tunnel connection registered", attributes).pipe(
+              Effect.andThen(Queue.offer(tunnelConnections, undefined)),
+              Effect.asVoid,
+            );
           case "warning":
             if (isRejectedRelayClientTunnelOutput(line)) {
               rejectedRegistrations += 1;
@@ -451,6 +457,7 @@ export const make = Effect.gen(function* () {
     getStatus,
     recoveryRequests: Stream.fromQueue(recoveryRequests),
     requestRecovery: (config) => Queue.offer(recoveryRequests, config).pipe(Effect.asVoid),
+    tunnelConnected: Stream.fromQueue(tunnelConnections),
     withLinkStateLock: linkStateSemaphore.withPermits(1),
   });
 

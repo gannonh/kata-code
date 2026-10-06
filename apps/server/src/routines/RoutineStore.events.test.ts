@@ -12,9 +12,9 @@ import {
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { summarizeGitHubEvent } from "./GitHubRoutineEvents.ts";
 import { summarizeLinearEvent } from "./LinearRoutineEvents.ts";
 import { RESTART_CANCELLED_DETAIL } from "./RoutineRunObserver.ts";
@@ -77,8 +77,8 @@ const prOpened = (number: number, deliveryId: string) => ({
 });
 const DAY = 86_400_000;
 const storeLayer = Layer.mergeAll(
-  RoutineStoreLive.pipe(Layer.provide(SqlitePersistenceMemory)),
-  SqlitePersistenceMemory,
+  RoutineStoreLive.pipe(Layer.provide(SqlitePersistence.layerMemory)),
+  SqlitePersistence.layerMemory,
 );
 
 const linearConnectionId = RoutineConnectionId.make("connection-linear-events");

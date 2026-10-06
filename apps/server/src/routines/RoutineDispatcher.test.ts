@@ -20,12 +20,12 @@ import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
-import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
-import { makeProviderRegistryLayer } from "../provider/testUtils/providerRegistryMock.ts";
+import * as ProviderRegistryMock from "../provider/testUtils/providerRegistryMock.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
@@ -38,7 +38,7 @@ import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter
 import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
-import { makeOrchestratorV2ReplayLayerWithRegistry } from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
+import * as ProviderReplayHarness from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import { RoutineDispatcher, RoutineDispatcherLive } from "./RoutineDispatcher.ts";
 import {
   RESTART_CANCELLED_DETAIL,
@@ -93,10 +93,10 @@ interface HarnessOptions {
 
 /** Real orchestration V2 launch over one in-memory database shared with the routine store. */
 function makeHarness(options: HarnessOptions = {}) {
-  const database = SqlitePersistenceMemory;
-  const orchestrator = makeOrchestratorV2ReplayLayerWithRegistry(
+  const database = SqlitePersistence.layerMemory;
+  const orchestrator = ProviderReplayHarness.layerWithRegistry(
     { name: "routine-dispatcher" },
-    ProviderAdapterRegistry.makeLayer([adapter]),
+    ProviderAdapterRegistry.layerFromAdapters([adapter]),
     { databaseLayer: database, runEffectWorker: false },
   );
   const threadManagement = ThreadManagement.layer.pipe(Layer.provide(orchestrator));
@@ -149,7 +149,7 @@ function makeHarness(options: HarnessOptions = {}) {
     Layer.succeed(ProjectSetupScriptRunner.ProjectSetupScriptRunner, { runForThread: runSetup }),
     Layer.mock(TextGeneration.TextGeneration)({}),
     ServerSettings.layerTest(),
-    makeProviderRegistryLayer(),
+    ProviderRegistryMock.layer(),
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
       namedProjectsRoot: "/projects",
       folderForThread: () => Effect.succeed(Option.none()),
@@ -176,7 +176,9 @@ function makeHarness(options: HarnessOptions = {}) {
     Layer.provide(Layer.mergeAll(store, launch, projects, git)),
   );
   const observer = RoutineRunObserverLive.pipe(
-    Layer.provide(Layer.mergeAll(store, OrchestrationEventStoreLive.pipe(Layer.provide(database)))),
+    Layer.provide(
+      Layer.mergeAll(store, OrchestrationEventStore.layer.pipe(Layer.provide(database))),
+    ),
   );
   // The same startup reconciliation the server runs after a restart.
   const recovery = ProviderRuntimeRecovery.layer.pipe(

@@ -5,9 +5,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { Command, Flag } from "effect/unstable/cli";
-import * as CliError from "effect/unstable/cli/CliError";
-import * as ChildProcess from "effect/unstable/process/ChildProcess";
+import { Command, Flag } from "effect/cli";
+import * as CliError from "effect/cli/CliError";
+import * as ChildProcess from "effect/process/ChildProcess";
 
 const BOOTSTRAP_TASK_TTL = "5m";
 const TASK_NAME = "kata-session";

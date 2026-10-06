@@ -175,6 +175,8 @@ export default defineConfig({
       "kata-code/no-test-in-loop": "error",
       "kata-code/no-unscoped-has": "error",
       "kata-code/namespace-node-imports": "error",
+      "kata-code/prefer-catch-tags": "error",
+      "kata-code/require-suppression-reason": "error",
     },
     overrides: [
       {

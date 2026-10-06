@@ -14,7 +14,7 @@ import {
 import { resolveProjectScripts } from "@kata-sh/code-shared/projectScripts";
 import { clearProjectSettingsOverrides } from "@kata-sh/code-shared/projectSettings";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useRef, useState } from "react";
 
 import { isElectron } from "../../env";

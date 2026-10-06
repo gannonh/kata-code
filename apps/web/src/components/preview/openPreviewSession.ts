@@ -7,7 +7,7 @@ import type {
 } from "@kata-sh/code-contracts";
 import type { AtomCommandResult } from "@kata-sh/code-client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 
 import {
   browserDefaultOpenProfileId,

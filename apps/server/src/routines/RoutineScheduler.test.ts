@@ -14,7 +14,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Scope from "effect/Scope";
 
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { summarizeGitHubEvent } from "./GitHubRoutineEvents.ts";
 import { RoutineDispatcher } from "./RoutineDispatcher.ts";
 import { RoutineRunObserver } from "./RoutineRunObserver.ts";
@@ -57,7 +57,7 @@ const configuration = {
   },
 };
 
-const storeLayer = RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory));
+const storeLayer = RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistence.layerMemory));
 const dispatcherLayer = Layer.effect(
   RoutineDispatcher,
   Effect.gen(function* () {

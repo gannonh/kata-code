@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { ServerUpdateState } from "@kata-sh/code-client-runtime/state/server";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useMemo, useState } from "react";
 
 import type { EnvironmentPresentation } from "~/state/environments";

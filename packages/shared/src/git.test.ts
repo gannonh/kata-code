@@ -5,6 +5,7 @@ import {
   applyGitStatusStreamEvent,
   formatGeneratedBranchName,
   buildTemporaryWorktreeBranchName,
+  flattenTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
   normalizeGitRemoteUrl,
   parseGitHubRepositoryNameWithOwnerFromRemoteUrl,
@@ -205,6 +206,24 @@ describe("isTemporaryWorktreeBranch", () => {
     expect(
       isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/f4ae4e0e-f971-4d48-c4f2-9cf0aa54ab12`),
     ).toBe(false);
+  });
+
+  it("matches the flat fallback used when a plain katacode branch exists", () => {
+    const flat = flattenTemporaryWorktreeBranchName(`${WORKTREE_BRANCH_PREFIX}/deadbeef`);
+    expect(flat).toBe("katacode-deadbeef");
+    expect(isTemporaryWorktreeBranch(flat)).toBe(true);
+    expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}-deadbeef-extra`)).toBe(false);
+    expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}-feature`)).toBe(false);
+    expect(
+      flattenTemporaryWorktreeBranchName(
+        `${WORKTREE_BRANCH_PREFIX}/f4ae4e0e-f971-4d48-b4f2-9cf0aa54ab12`,
+      ),
+    ).toBe("katacode-f4ae4e0e");
+  });
+
+  it("does not treat upstream's t3code temporary refs as Kata temporary refs", () => {
+    expect(isTemporaryWorktreeBranch("t3code/deadbeef")).toBe(false);
+    expect(isTemporaryWorktreeBranch("t3code-deadbeef")).toBe(false);
   });
 
   it("rejects non-temporary refName names", () => {

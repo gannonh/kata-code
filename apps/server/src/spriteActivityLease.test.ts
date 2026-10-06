@@ -1,15 +1,17 @@
-import type {
-  OrchestrationV2ProviderSession,
-  ThreadPullRequestLink,
-  ThreadPullRequestWatch,
+import {
+  ThreadId,
+  type OrchestrationV2AppThreadLineage,
+  type OrchestrationV2ProviderSession,
+  type ThreadPullRequestLink,
+  type ThreadPullRequestWatch,
 } from "@kata-sh/code-contracts";
 import { assert, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
-import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import {
   hasSpriteActivity,
   nextSpriteLeaseState,
@@ -49,10 +51,17 @@ const watch: ThreadPullRequestWatch = {
   headSha: "abc123",
   failedChecks: [],
   passed: false,
+  passedChecks: [],
   remarksThrough: "2026-10-05T10:00:00.000Z",
   remarkIds: [],
   conflicting: false,
   wakes: 0,
+};
+
+const topLevel: OrchestrationV2AppThreadLineage = {
+  parentThreadId: null,
+  relationshipToParent: null,
+  rootThreadId: ThreadId.make("thread-1"),
 };
 
 function pullRequestLink(input: {
@@ -112,6 +121,7 @@ it("counts a pull request watch the sweep reads as activity", () => {
   assert.isTrue(
     noActivityExcept([
       {
+        lineage: topLevel,
         settledOverride: null,
         settledAt: null,
         pullRequests: [pullRequestLink({ watched: true })],
@@ -121,6 +131,7 @@ it("counts a pull request watch the sweep reads as activity", () => {
   assert.isTrue(
     noActivityExcept([
       {
+        lineage: topLevel,
         settledOverride: "active",
         settledAt: null,
         pullRequests: [pullRequestLink({ watched: false }), pullRequestLink({ watched: true })],
@@ -130,6 +141,7 @@ it("counts a pull request watch the sweep reads as activity", () => {
   assert.isFalse(
     noActivityExcept([
       {
+        lineage: topLevel,
         settledOverride: null,
         settledAt: null,
         pullRequests: [pullRequestLink({ watched: false })],
@@ -139,6 +151,7 @@ it("counts a pull request watch the sweep reads as activity", () => {
   assert.isFalse(
     noActivityExcept([
       {
+        lineage: topLevel,
         settledOverride: null,
         settledAt: null,
         pullRequests: [pullRequestLink({ watched: true, source: "stack-dismissed" })],
@@ -148,6 +161,7 @@ it("counts a pull request watch the sweep reads as activity", () => {
   assert.isFalse(
     noActivityExcept([
       {
+        lineage: topLevel,
         settledOverride: "settled",
         settledAt: null,
         pullRequests: [pullRequestLink({ watched: true })],
@@ -156,17 +170,47 @@ it("counts a pull request watch the sweep reads as activity", () => {
   );
   assert.isFalse(
     noActivityExcept([
-      { settledOverride: null, settledAt, pullRequests: [pullRequestLink({ watched: true })] },
+      {
+        lineage: topLevel,
+        settledOverride: null,
+        settledAt,
+        pullRequests: [pullRequestLink({ watched: true })],
+      },
+    ]),
+  );
+  // The sweep ends a subagent's watch without reading it, so it is not work to stay awake for.
+  assert.isFalse(
+    noActivityExcept([
+      {
+        lineage: {
+          parentThreadId: ThreadId.make("thread-parent"),
+          relationshipToParent: "subagent",
+          rootThreadId: ThreadId.make("thread-parent"),
+        },
+        settledOverride: null,
+        settledAt: null,
+        pullRequests: [pullRequestLink({ watched: true })],
+      },
     ]),
   );
 });
 
 it("holds the Sprite task past the idle grace until the pull request watch ends", () => {
   const watched = [
-    { settledOverride: null, settledAt: null, pullRequests: [pullRequestLink({ watched: true })] },
+    {
+      lineage: topLevel,
+      settledOverride: null,
+      settledAt: null,
+      pullRequests: [pullRequestLink({ watched: true })],
+    },
   ];
   const unwatched = [
-    { settledOverride: null, settledAt: null, pullRequests: [pullRequestLink({ watched: false })] },
+    {
+      lineage: topLevel,
+      settledOverride: null,
+      settledAt: null,
+      pullRequests: [pullRequestLink({ watched: false })],
+    },
   ];
   const watchEndsAtMinute = 30;
 
@@ -211,7 +255,7 @@ it.effect("reads open provider sessions from the V2 projection", () =>
         pullRequestThreads: [],
       }),
     );
-  }).pipe(Effect.provide(SqlitePersistenceMemory)),
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
 it.effect("handles automatic Sprite task HTTP results", () =>

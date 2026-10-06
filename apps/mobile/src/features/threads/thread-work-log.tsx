@@ -18,7 +18,7 @@ import { type AppSymbolName, SymbolView } from "../../components/AppSymbol";
 import { MaskedView } from "@expo/ui/community/masked-view";
 import type { LegendListRef } from "@legendapp/list/react-native";
 import { AnimatedLegendList } from "@legendapp/list/reanimated";
-import { useIsFocused, useNavigation } from "@react-navigation/native";
+import { StackActions, useIsFocused, useNavigation } from "@react-navigation/native";
 import {
   memo,
   useCallback,
@@ -66,6 +66,7 @@ import {
 } from "../../lib/threadActivity";
 import {
   toolCallLines,
+  turnItemOutputImages,
   turnItemOutputText,
 } from "@kata-sh/code-client-runtime/work-log/item-detail";
 import { useTurnItemDetail } from "../../state/queries";
@@ -83,6 +84,8 @@ import {
 import { resolveWorkGroupScrollAnchor } from "@kata-sh/code-client-runtime/work-log/scroll-anchor";
 import { notificationChildThreadId } from "@kata-sh/code-client-runtime/state/thread-execution";
 import type { MarkdownImageRenderer } from "../../native/SelectableMarkdownText";
+import type { FilePreviewSource } from "../../components/FilePreviewModal";
+import { ThreadMarkdownImage } from "./ThreadMarkdownImage";
 import Animated, {
   cancelAnimation,
   Easing,
@@ -463,6 +466,7 @@ interface ThreadWorkLogProps {
   readonly onToggleRow: (rowId: string, anchorKey: string) => void;
   readonly renderImage: MarkdownImageRenderer;
   readonly renderReasoning: (text: string) => ReactNode;
+  readonly onPressPreview: (source: FilePreviewSource) => void;
 }
 
 export function ThreadWorkLog(props: ThreadWorkLogProps) {
@@ -480,6 +484,7 @@ export function ThreadWorkLog(props: ThreadWorkLogProps) {
         onToggleRow={props.onToggleRow}
         renderImage={props.renderImage}
         renderReasoning={props.renderReasoning}
+        onPressPreview={props.onPressPreview}
         themeAppearance={props.themeAppearance}
       />
     ),
@@ -493,6 +498,7 @@ export function ThreadWorkLog(props: ThreadWorkLogProps) {
       props.onToggleRow,
       props.renderImage,
       props.renderReasoning,
+      props.onPressPreview,
       props.themeAppearance,
     ],
   );
@@ -952,12 +958,13 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
         ? formatItemFullDetail(row.projectedItem, fetchedItem)
         : row.getFullDetail()
       : null;
+  const outputImages = expanded && fetchedItem ? turnItemOutputImages(fetchedItem) : [];
   const fetchedOutput = !expanded
     ? null
     : shownItem.type === "file_search" || shownItem.type === "web_search"
       ? turnItemOutputText(shownItem)
       : fetchedItem
-        ? (turnItemOutputText(fetchedItem) ?? "No output.")
+        ? (turnItemOutputText(fetchedItem) ?? (outputImages.length > 0 ? null : "No output."))
         : fetchedDetail.error
           ? `Couldn't load output: ${fetchedDetail.error}`
           : row.fetchesDetail
@@ -1005,10 +1012,14 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
         accessibilityState={canExpand ? { expanded } : undefined}
         onPress={() => {
           if (notifiedSubagentThreadId !== undefined) {
-            navigation.navigate("Thread", {
-              environmentId: String(props.environmentId),
-              threadId: String(notifiedSubagentThreadId),
-            });
+            // Push, not navigate: navigate reuses this Thread route, so back
+            // would skip the parent thread and land on Home (matches #15068).
+            navigation.dispatch(
+              StackActions.push("Thread", {
+                environmentId: String(props.environmentId),
+                threadId: String(notifiedSubagentThreadId),
+              }),
+            );
             return;
           }
           if (canExpand) {
@@ -1113,6 +1124,7 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
         call ||
         fetchedOutput ||
         viewedImagePath ||
+        outputImages.length > 0 ||
         row.workEntry.questionAnswer) ? (
         <Animated.View
           entering={WORK_LOG_DETAIL_ENTER_TRANSITION}
@@ -1131,6 +1143,16 @@ const ThreadWorkLogRow = memo(function ThreadWorkLogRow(
               {props.renderImage({ href: viewedImagePath, alt: null, title: null })}
             </View>
           ) : null}
+          {outputImages.map((resource) => (
+            <View key={resource.index} className="pb-1.5">
+              <ThreadMarkdownImage
+                environmentId={props.environmentId}
+                resource={resource}
+                alt={null}
+                onPressPreview={props.onPressPreview}
+              />
+            </View>
+          ))}
           <ScrollView
             nestedScrollEnabled
             directionalLockEnabled

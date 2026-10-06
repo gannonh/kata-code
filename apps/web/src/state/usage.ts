@@ -16,7 +16,7 @@ import {
 } from "@kata-sh/code-contracts";
 import { needsCursorKeychainAccess, refreshUsage } from "@kata-sh/code-client-runtime/state/usage";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
 
 import {

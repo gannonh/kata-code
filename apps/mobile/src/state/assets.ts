@@ -11,7 +11,7 @@ import {
 } from "@kata-sh/code-client-runtime/state/assets";
 import type { AssetResource, EnvironmentId } from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback } from "react";
 
 import { environmentCatalog } from "../connection/catalog";

@@ -3,7 +3,7 @@ import { useNavigation, type StaticScreenProps } from "@react-navigation/native"
 import type { EnvironmentId, ServerProvider } from "@kata-sh/code-contracts";
 import { squashAtomCommandFailure } from "@kata-sh/code-client-runtime/state/runtime";
 import { APP_BASE_NAME } from "@kata-sh/code-shared/branding";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useEffect, useRef, useState } from "react";
 import { Alert, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

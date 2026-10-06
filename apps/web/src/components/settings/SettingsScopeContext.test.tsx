@@ -5,7 +5,7 @@ import {
   type ProjectReadFileResult,
   T3_PROJECT_FILE_NAME,
 } from "@kata-sh/code-contracts";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 

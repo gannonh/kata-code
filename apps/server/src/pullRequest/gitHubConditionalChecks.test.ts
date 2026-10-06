@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Redacted from "effect/Redacted";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/process";
 import type { PullRequestCheck } from "@kata-sh/code-contracts";
 
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";

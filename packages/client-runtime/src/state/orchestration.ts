@@ -1,5 +1,5 @@
 import { ORCHESTRATION_V2_WS_METHODS } from "@kata-sh/code-contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import {
   createEnvironmentRpcCommand,

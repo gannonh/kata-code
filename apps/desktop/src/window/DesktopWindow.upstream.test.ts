@@ -34,6 +34,7 @@ import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
@@ -171,6 +172,10 @@ function makeTestLayer(input: {
   readonly mainWindow: Ref.Ref<Option.Option<Electron.BrowserWindow>>;
   readonly createdWindowOptions?: Electron.BrowserWindowConstructorOptions[];
   readonly desktopSettings?: DesktopAppSettings.DesktopSettings;
+  readonly rendererRegistrations?: Array<{
+    readonly webContents: Electron.WebContents;
+    readonly identity: DesktopRendererHistory.RendererIdentity;
+  }>;
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
   const desktopAppSettingsLayer = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
@@ -222,9 +227,23 @@ function makeTestLayer(input: {
     syncAllAppearance: (sync) => sync(input.window),
   } satisfies ElectronWindow.ElectronWindow["Service"]);
 
+  const rendererRegistrations = input.rendererRegistrations;
+  const rendererHistoryLayer =
+    rendererRegistrations === undefined
+      ? Layer.empty
+      : Layer.succeed(DesktopRendererHistory.DesktopRendererHistory, {
+          register: (webContents, identity) =>
+            Effect.sync(() => {
+              rendererRegistrations.push({ webContents, identity });
+            }),
+          recordMetrics: () => Effect.void,
+          shutdown: Effect.void,
+        } satisfies DesktopRendererHistory.DesktopRendererHistory["Service"]);
+
   return DesktopWindow.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        rendererHistoryLayer,
         desktopAssetsLayer,
         desktopEnvironmentLayer,
         desktopAppSettingsLayer,
@@ -345,6 +364,52 @@ describe("DesktopWindow upstream window-button and local-environment coverage", 
         onInput({}, { type: "gestureScrollEnd" });
         assert.include(sentChannels(), TRACKPAD_SCROLL_END_CHANNEL);
       }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("records the main renderer in renderer history when the service is present", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const rendererRegistrations: Array<{
+        readonly webContents: Electron.WebContents;
+        readonly identity: DesktopRendererHistory.RendererIdentity;
+      }> = [];
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        rendererRegistrations,
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+      }).pipe(Effect.provide(layer));
+
+      assert.equal(yield* Ref.get(createCount), 1);
+      assert.deepEqual(
+        rendererRegistrations.map(({ identity }) => identity),
+        [{ surface: "main" }],
+      );
+      assert.strictEqual(rendererRegistrations[0]?.webContents, fakeWindow.window.webContents);
+    }),
+  );
+
+  it.effect("creates the main window without renderer history when the service is absent", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const layer = makeTestLayer({ window: fakeWindow.window, createCount, mainWindow });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
+      }).pipe(Effect.provide(layer));
+
+      assert.equal(yield* Ref.get(createCount), 1);
     }),
   );
 });

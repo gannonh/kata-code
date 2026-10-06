@@ -6,7 +6,7 @@ import {
   type AtomCommandResult,
 } from "@kata-sh/code-client-runtime/state/runtime";
 import { scopeProjectRef, scopeThreadRef } from "@kata-sh/code-client-runtime/environment";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { type EnvironmentId, type ProjectIconOverride } from "@kata-sh/code-contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";

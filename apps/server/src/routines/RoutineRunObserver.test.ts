@@ -27,8 +27,8 @@ import * as Layer from "effect/Layer";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as EventStore from "../orchestration-v2/EventStore.ts";
-import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import {
   CANCELLED_DETAIL,
   FAILED_DETAIL,
@@ -237,9 +237,9 @@ it("reports a pending approval only while its latest state is pending", () => {
 });
 
 const makeLayer = () => {
-  const database = SqlitePersistenceMemory;
+  const database = SqlitePersistence.layerMemory;
   const store = RoutineStoreLive.pipe(Layer.provide(database));
-  const applicationEvents = OrchestrationEventStoreLive.pipe(Layer.provide(database));
+  const applicationEvents = OrchestrationEventStore.layer.pipe(Layer.provide(database));
   const observer = RoutineRunObserverLive.pipe(
     Layer.provide(Layer.mergeAll(store, applicationEvents)),
   );

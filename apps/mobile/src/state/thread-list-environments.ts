@@ -5,7 +5,7 @@ import {
   type ServerConfig,
   type ServerProvider,
 } from "@kata-sh/code-contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 export type ThreadListProvider = Pick<
   ServerProvider,

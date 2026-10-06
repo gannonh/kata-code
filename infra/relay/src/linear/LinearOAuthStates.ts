@@ -2,7 +2,8 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64Url from "effect/encoding/Base64Url";
+import * as Hex from "effect/encoding/Hex";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { and, eq, isNull, lt } from "drizzle-orm";
@@ -97,12 +98,12 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   const hashState = (state: string) =>
-    crypto.digest("SHA-256", new TextEncoder().encode(state)).pipe(Effect.map(Encoding.encodeHex));
+    crypto.digest("SHA-256", new TextEncoder().encode(state)).pipe(Effect.map(Hex.encode));
 
   return LinearOAuthStates.of({
     create: Effect.fn("relay.linear_oauth_states.create")(function* (input) {
       const state = yield* crypto.randomBytes(32).pipe(
-        Effect.map(Encoding.encodeBase64Url),
+        Effect.map(Base64Url.encode),
         Effect.mapError(
           (cause) => new LinearOAuthStateCreatePersistenceError({ stage: "generate-state", cause }),
         ),

@@ -6,7 +6,7 @@ import type {
   ScopedProjectRef,
 } from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import { environmentServerConfigsAtom } from "./server";
 import { sourceControlEnvironment } from "./sourceControl";

@@ -40,21 +40,22 @@ import {
   HttpClientResponse,
   HttpRouter,
   HttpServerResponse,
-} from "effect/unstable/http";
-import * as HttpApi from "effect/unstable/httpapi/HttpApi";
-import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
+} from "effect/http";
+import * as HttpApi from "effect/http-api/HttpApi";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
-import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
+import * as AuthHttp from "./auth/http.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { requiredScopeForRpcMethod } from "./auth/RpcAuthorization.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
-import { connectHttpApiLayer } from "./cloud/http.ts";
+import * as CloudHttp from "./cloud/http.ts";
+import * as CloudLink from "./cloud/CloudLink.ts";
 import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
 import * as ServerConfig from "./config.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
-import { serverEnvironmentHttpApiLayer } from "./http.ts";
-import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
+import * as ServerHttp from "./http.ts";
+import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as RoutineStore from "./routines/RoutineStore.ts";
 import {
@@ -63,7 +64,7 @@ import {
   routineWebhookRouteLayer,
   signGitHubWebhookBody,
 } from "./routines/RoutineWebhooks.ts";
-import { commandReadinessLayer } from "./server.ts";
+import { layerCommandReadiness } from "./server.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 
 const desktopBootstrapToken = "kata-test-desktop-bootstrap-token";
@@ -157,6 +158,7 @@ const buildServer = (options: HarnessOptions = {}) =>
           applyConfig: () => Effect.succeed({ status: "disabled" }),
           getStatus: Effect.succeed({ status: "disabled" }),
           recoveryRequests: Stream.empty,
+          tunnelConnected: Stream.empty,
           requestRecovery: () => Effect.void,
           withLinkStateLock: (effect) => effect,
           ...options.endpointRuntime,
@@ -173,10 +175,12 @@ const buildServer = (options: HarnessOptions = {}) =>
       }),
     );
     const apiLayer = HttpApiBuilder.layer(KataServerTestApi).pipe(
-      Layer.provide(authHttpApiLayer),
-      Layer.provide(connectHttpApiLayer),
-      Layer.provide(serverEnvironmentHttpApiLayer),
-      Layer.provide(environmentAuthenticatedAuthLayer),
+      Layer.provide(AuthHttp.layer),
+      Layer.provide(CloudHttp.layer),
+      // The Connect routes run on the one CloudLink instance, as in server.ts.
+      Layer.provide(CloudLink.layer),
+      Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),
+      Layer.provide(AuthHttp.layerAuthenticatedAuth),
       // The relay calls made by Connect handlers, not the test's own client.
       Layer.provide(
         Layer.succeed(
@@ -194,7 +198,7 @@ const buildServer = (options: HarnessOptions = {}) =>
       apiLayer,
       routineWebhookRouteLayer,
       HttpRouter.add("GET", "/", Effect.succeed(HttpServerResponse.text("ready"))),
-    ).pipe(Layer.provide(commandReadinessLayer));
+    ).pipe(Layer.provide(layerCommandReadiness));
     const context = yield* Layer.build(
       HttpRouter.serve(routes, { disableListenLog: true, disableLogger: true }).pipe(
         Layer.provide(cloudServices),
@@ -357,7 +361,7 @@ it.layer(NodeServices.layer)("Kata server routes", (it) => {
     }).pipe(
       Effect.provide(
         Layer.mergeAll(
-          RoutineStore.RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+          RoutineStore.RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
           NodeHttpServer.layerTest,
         ),
       ),
@@ -372,7 +376,9 @@ it.layer(NodeServices.layer)("Kata server routes", (it) => {
       assert.equal(response.status, 200);
       assert.equal(body.environmentId, environmentId);
       assert.equal((yield* send("GET", "/.well-known/t3/environment")).status, 404);
-    }).pipe(Effect.provide(Layer.mergeAll(SqlitePersistenceMemory, NodeHttpServer.layerTest))),
+    }).pipe(
+      Effect.provide(Layer.mergeAll(SqlitePersistence.layerMemory, NodeHttpServer.layerTest)),
+    ),
   );
 
   it.effect("reports link state from a relay config that names the manual endpoint", () =>
@@ -391,7 +397,9 @@ it.layer(NodeServices.layer)("Kata server routes", (it) => {
       assert.equal(state.cloudUserId, "user_123");
       assert.equal(state.managedTunnelActive, false);
       assert.equal(state.managedCallbackReady, false);
-    }).pipe(Effect.provide(Layer.mergeAll(SqlitePersistenceMemory, NodeHttpServer.layerTest))),
+    }).pipe(
+      Effect.provide(Layer.mergeAll(SqlitePersistence.layerMemory, NodeHttpServer.layerTest)),
+    ),
   );
 
   it.effect("reports a stored managed runtime without a callback URL as not ready", () =>
@@ -409,7 +417,9 @@ it.layer(NodeServices.layer)("Kata server routes", (it) => {
       const state = yield* readLinkState(yield* ownerCookie);
       assert.equal(state.managedTunnelActive, true);
       assert.equal(state.managedCallbackReady, false);
-    }).pipe(Effect.provide(Layer.mergeAll(SqlitePersistenceMemory, NodeHttpServer.layerTest))),
+    }).pipe(
+      Effect.provide(Layer.mergeAll(SqlitePersistence.layerMemory, NodeHttpServer.layerTest)),
+    ),
   );
 
   it.effect(
@@ -494,7 +504,9 @@ it.layer(NodeServices.layer)("Kata server routes", (it) => {
         const publishOnly = yield* readLinkState(cookie);
         assert.equal(publishOnly.managedTunnelActive, false);
         assert.equal(publishOnly.managedCallbackReady, false);
-      }).pipe(Effect.provide(Layer.mergeAll(SqlitePersistenceMemory, NodeHttpServer.layerTest))),
+      }).pipe(
+        Effect.provide(Layer.mergeAll(SqlitePersistence.layerMemory, NodeHttpServer.layerTest)),
+      ),
   );
 
   it.effect("rejects an insecure managed callback URL before starting the runtime", () =>
@@ -529,7 +541,9 @@ it.layer(NodeServices.layer)("Kata server routes", (it) => {
       const state = yield* readLinkState(cookie);
       assert.equal(state.managedTunnelActive, false);
       assert.equal(state.managedCallbackReady, false);
-    }).pipe(Effect.provide(Layer.mergeAll(SqlitePersistenceMemory, NodeHttpServer.layerTest))),
+    }).pipe(
+      Effect.provide(Layer.mergeAll(SqlitePersistence.layerMemory, NodeHttpServer.layerTest)),
+    ),
   );
 
   it.effect("serves signed Kata Code Connect mint credential and health requests", () =>
@@ -601,7 +615,9 @@ it.layer(NodeServices.layer)("Kata server routes", (it) => {
       assert.equal(status.status, "online");
       assert.equal(status.descriptor?.environmentId, environmentId);
       assert.equal(proofNonce(status.proof ?? ""), "kata-health-nonce");
-    }).pipe(Effect.provide(Layer.mergeAll(SqlitePersistenceMemory, NodeHttpServer.layerTest))),
+    }).pipe(
+      Effect.provide(Layer.mergeAll(SqlitePersistence.layerMemory, NodeHttpServer.layerTest)),
+    ),
   );
 });
 

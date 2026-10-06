@@ -12,9 +12,9 @@ import { HostProcessEnvironment } from "@kata-sh/code-shared/hostProcess";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as CliError from "effect/unstable/cli/CliError";
+import * as CliError from "effect/cli/CliError";
 import * as TestConsole from "effect/testing/TestConsole";
-import { Command } from "effect/unstable/cli";
+import { Command } from "effect/cli";
 
 import { cli, makeCli } from "./binCli.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";

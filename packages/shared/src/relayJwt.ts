@@ -24,6 +24,18 @@ export const RELAY_HEALTH_RESPONSE_TYP = WIRE_RELAY_ENV_HEALTH_RESPONSE_JWT_TYP;
 export const RELAY_ACTIVITY_PUBLISH_TYP = WIRE_RELAY_ENV_ACTIVITY_JWT_TYP;
 export const RELAY_MANAGED_TUNNEL_RECOVERY_TYP = WIRE_RELAY_ENV_MANAGED_TUNNEL_RECOVERY_JWT_TYP;
 export const RELAY_ENVIRONMENT_CREDENTIAL_REFRESH_TYP = WIRE_RELAY_ENV_CREDENTIAL_REFRESH_JWT_TYP;
+// Webhook forwarding had no deployed peers before Kata took it, so it uses Kata
+// names from the start. The relay and the environment must agree on the proof
+// type and all four headers, or relay deliveries are treated as direct.
+export const RELAY_HOOK_DELIVERY_TYP = "kata-relay-hook-delivery+jwt";
+/** Header carrying the signed proof that a webhook request came from the relay. */
+export const RELAY_HOOK_DELIVERY_HEADER = "x-kata-relay-delivery";
+/** The relay's id for one forwarded webhook delivery, trusted only with a verified proof. */
+export const RELAY_HOOK_DELIVERY_ID_HEADER = "x-kata-relay-delivery-id";
+/** When the relay received the forwarded webhook, trusted only with a verified proof. */
+export const RELAY_HOOK_RECEIVED_AT_HEADER = "x-kata-relay-received-at";
+/** What the environment did with a forwarded webhook, reported back to the relay. */
+export const RELAY_HOOK_OUTCOME_HEADER = "x-kata-hook-outcome";
 
 export class RelayJwtError extends Schema.TaggedError<RelayJwtError>()("RelayJwtError", {
   operation: Schema.Literals(["sign", "verify"]),

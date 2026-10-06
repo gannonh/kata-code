@@ -7,7 +7,7 @@ import {
 } from "@kata-sh/code-contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { HttpClient, HttpClientResponse } from "effect/http";
 import { bench, describe } from "vite-plus/test";
 
 import { issueRemoteWebSocketTicket } from "./authorization/remote.ts";

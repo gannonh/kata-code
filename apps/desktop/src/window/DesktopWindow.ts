@@ -29,6 +29,7 @@ import * as PreviewManager from "../preview/Manager.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as ElectronApp from "../electron/ElectronApp.ts";
+import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import { makeQuitShortcutHandler } from "./QuitHold.ts";
 
 const TITLEBAR_HEIGHT = 40;
@@ -325,6 +326,20 @@ export const make = Effect.gen(function* () {
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const clientSettings = yield* DesktopClientSettings.DesktopClientSettings;
   const electronApp = yield* ElectronApp.ElectronApp;
+  // Optional so window layers built without renderer history (including the
+  // frozen DesktopWindow.test.ts) still construct; main.ts provides it in
+  // production through the desktop foundation layer.
+  const rendererHistory = yield* Effect.serviceOption(
+    DesktopRendererHistory.DesktopRendererHistory,
+  );
+  const registerRenderer = (
+    webContents: Electron.WebContents,
+    identity: DesktopRendererHistory.RendererIdentity,
+  ) =>
+    Option.match(rendererHistory, {
+      onNone: () => Effect.void,
+      onSome: (history) => history.register(webContents, identity),
+    });
   // Window-side latch for the primary backend's readiness. Set by
   // handleBackendReady (driven by the pool's onReady callback), cleared
   // by handleBackendNotReady (driven by onShutdown). Only consumed by
@@ -423,6 +438,7 @@ export const make = Effect.gen(function* () {
       },
     });
 
+    yield* registerRenderer(window.webContents, { surface: "main" });
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);
     }
@@ -918,6 +934,7 @@ export const make = Effect.gen(function* () {
         sandbox: true,
       },
     });
+    yield* registerRenderer(splash.webContents, { surface: "splash" });
     yield* Ref.set(splashWindowRef, Option.some(splash));
     splash.once("closed", () => {
       void runPromise(Ref.set(splashWindowRef, Option.none()));

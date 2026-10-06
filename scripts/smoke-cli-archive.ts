@@ -18,13 +18,13 @@ import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { Command, Flag } from "effect/unstable/cli";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { Command, Flag } from "effect/cli";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as NetService from "@kata-sh/code-shared/Net";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { windowsSystemTar } from "./build-cli-archive.ts";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
 export class CliArchiveSmokeError extends Schema.TaggedError<CliArchiveSmokeError>()(
   "CliArchiveSmokeError",

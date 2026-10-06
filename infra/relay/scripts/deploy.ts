@@ -29,8 +29,8 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import { Command, Flag, Prompt } from "effect/unstable/cli";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import { Command, Flag, Prompt } from "effect/cli";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
 import { loadRepoEnv } from "../../../scripts/lib/public-config.ts";
 import RelayStack from "../alchemy.run.ts";

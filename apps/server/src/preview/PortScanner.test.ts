@@ -20,7 +20,7 @@ import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
 import * as Tracer from "effect/Tracer";
 import { expect } from "vite-plus/test";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient } from "effect/http";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as PortScanner from "./PortScanner.ts";
@@ -39,13 +39,13 @@ const processProbeFailure: ProcessRunner.ProcessRunner["Service"]["run"] = (inpu
     }),
   );
 
-const TestProcessRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
+const layerTestProcessRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
   run: processProbeFailure,
 });
 
 let integrationListeningPort: number | null = null;
 
-const TestIntegrationNet = Layer.succeed(Net.NetService, {
+const layerTestIntegrationNet = Layer.succeed(Net.NetService, {
   canListenOnHost: () => Effect.succeed(true),
   isPortAvailableOnLoopback: (port) => Effect.sync(() => port !== integrationListeningPort),
   hasListenerOnHost: (port) => Effect.sync(() => port === integrationListeningPort),
@@ -53,7 +53,7 @@ const TestIntegrationNet = Layer.succeed(Net.NetService, {
   findAvailablePort: (preferred) => Effect.succeed(preferred),
 });
 
-const makeProbeFailureLayer = (
+const layerProbeFailure = (
   run: ProcessRunner.ProcessRunner["Service"]["run"],
   fetch: typeof globalThis.fetch = globalThis.fetch,
 ) =>
@@ -76,11 +76,11 @@ const makeProbeFailureLayer = (
     ),
   );
 
-const TestPortDiscoveryLive = PortScanner.layer.pipe(
+const layerTestPortDiscovery = PortScanner.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
-      TestProcessRunner,
-      TestIntegrationNet,
+      layerTestProcessRunner,
+      layerTestIntegrationNet,
       Layer.succeed(HostProcessPlatform, "win32"),
       FetchHttpClient.layer,
     ),
@@ -89,7 +89,7 @@ const TestPortDiscoveryLive = PortScanner.layer.pipe(
 
 const LSOF_TEST_PORT = 43_123;
 
-const makeLsofScannerLayer = (input: {
+const layerLsofScanner = (input: {
   readonly pid: () => number;
   readonly fetch: typeof globalThis.fetch;
 }) =>
@@ -207,7 +207,7 @@ const commonNonHttpServer = Effect.acquireRelease(
  * platform so the tests exercise the TCP-probe fallback without depending on
  * `lsof` being installed.
  */
-effectIt.layer(TestPortDiscoveryLive)("PortDiscovery integration (TCP probe fallback)", (it) => {
+effectIt.layer(layerTestPortDiscovery)("PortDiscovery integration (TCP probe fallback)", (it) => {
   it.effect(
     "scan() returns an HTTP server we just opened on a curated dev port",
     Effect.fn("PortScannerTest.scanFindsCommonDevServer")(function* () {
@@ -256,7 +256,7 @@ effectIt.effect("revalidates a successful HTML probe after its cache entry expir
       ? Promise.resolve(new Response("hello", { headers: { "content-type": "text/html" } }))
       : Promise.reject(new TypeError("not HTTP"));
   }) as typeof globalThis.fetch;
-  const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+  const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -290,7 +290,7 @@ effectIt.effect("keeps a full configured URL when the discovered server root fai
           }),
     );
   }) as typeof globalThis.fetch;
-  const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+  const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -310,7 +310,7 @@ effectIt.effect("probes configured custom ports through a canonical loopback hos
     requests.push(String(input));
     return Promise.resolve(new Response("docs", { headers: { "content-type": "text/html" } }));
   }) as typeof globalThis.fetch;
-  const layer = makeProbeFailureLayer(processProbeFailure, fetchFn);
+  const layer = layerProbeFailure(processProbeFailure, fetchFn);
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -335,7 +335,7 @@ effectIt.effect("preserves explicit loopback hosts and bounds wildcard rewrites"
     requests.push(String(input));
     return Promise.resolve(new Response("docs", { headers: { "content-type": "text/html" } }));
   }) as typeof globalThis.fetch;
-  const layer = makeProbeFailureLayer(processProbeFailure, fetchFn);
+  const layer = layerProbeFailure(processProbeFailure, fetchFn);
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -356,7 +356,7 @@ effectIt.effect("projects configured paths independently for simultaneous subscr
         : new Response("not found", { status: 404 }),
     );
   }) as typeof globalThis.fetch;
-  const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+  const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -389,7 +389,7 @@ effectIt.effect(
           ? new Response("app", { headers: { "content-type": "text/html" } })
           : new Response("not found", { status: 404 }),
       )) as typeof globalThis.fetch;
-    const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+    const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
     return Effect.gen(function* () {
       const scanner = yield* PortScanner.PortDiscovery;
@@ -422,7 +422,7 @@ effectIt.effect("stops probing a subscriber's configured paths after its scope c
         : new Response("not found", { status: 404 }),
     );
   }) as typeof globalThis.fetch;
-  const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+  const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -452,7 +452,7 @@ effectIt.effect("writes no poll span while no client retains the scanner", () =>
       return new Tracer.NativeSpan(options);
     },
   });
-  const layer = makeProbeFailureLayer(processProbeFailure);
+  const layer = layerProbeFailure(processProbeFailure);
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -470,7 +470,7 @@ effectIt.effect("uses the current configured fragment when readiness comes from 
     requests.push(String(input));
     return Promise.resolve(new Response("docs", { headers: { "content-type": "text/html" } }));
   }) as typeof globalThis.fetch;
-  const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+  const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
   const oldUrl = `http://localhost:${LSOF_TEST_PORT}/docs#old`;
   const newUrl = `http://localhost:${LSOF_TEST_PORT}/docs#new`;
 
@@ -490,7 +490,7 @@ effectIt.effect("shares a configured root probe with discovered-root classificat
     requests.push(String(input));
     return Promise.resolve(new Response("app", { headers: { "content-type": "text/html" } }));
   }) as typeof globalThis.fetch;
-  const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+  const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -519,7 +519,7 @@ effectIt.effect("starts fresh cache entries after the probing batch completes", 
       requests.push(String(input));
       return Promise.resolve(new Response("app", { headers: { "content-type": "text/html" } }));
     }) as typeof globalThis.fetch;
-    const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+    const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
     yield* Effect.gen(function* () {
       const scanner = yield* PortScanner.PortDiscovery;
@@ -539,7 +539,7 @@ effectIt.effect("caches a failed web probe until its bounded cache entry expires
       ? Promise.resolve(new Response("hello", { headers: { "content-type": "text/html" } }))
       : Promise.reject(new TypeError("not HTTP"));
   }) as typeof globalThis.fetch;
-  const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+  const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -564,7 +564,7 @@ effectIt.effect("falls back to HTTPS and does not follow redirects while probing
     if (String(input).startsWith("http:")) throw new TypeError("TLS listener");
     return new Response(null, { status: 302, headers: { location: "https://example.com" } });
   }) as typeof globalThis.fetch;
-  const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+  const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -583,7 +583,7 @@ effectIt.effect(
       new Response("not found", { status: 404, headers: { "content-type": "text/html" } });
     const fetchFn = ((_input: Parameters<typeof globalThis.fetch>[0]) =>
       Promise.resolve(makeResponse())) as typeof globalThis.fetch;
-    const layer = makeLsofScannerLayer({ pid: () => pid, fetch: fetchFn });
+    const layer = layerLsofScanner({ pid: () => pid, fetch: fetchFn });
 
     return Effect.gen(function* () {
       const scanner = yield* PortScanner.PortDiscovery;
@@ -641,7 +641,7 @@ effectIt.effect("aborts HTTP and HTTPS probes when they time out", () => {
         signal?.addEventListener("abort", onAbort, { once: true });
       }
     })) as typeof globalThis.fetch;
-  const layer = makeLsofScannerLayer({ pid: () => 1234, fetch: fetchFn });
+  const layer = layerLsofScanner({ pid: () => 1234, fetch: fetchFn });
 
   return Effect.gen(function* () {
     const scanner = yield* PortScanner.PortDiscovery;
@@ -658,7 +658,7 @@ effectIt.effect("aborts HTTP and HTTPS probes when they time out", () => {
 effectIt.effect("does not swallow process probe defects", () =>
   Effect.gen(function* () {
     const defect = new Error("unexpected process probe defect");
-    const layer = makeProbeFailureLayer(() => Effect.die(defect));
+    const layer = layerProbeFailure(() => Effect.die(defect));
 
     const exit = yield* Effect.flatMap(PortScanner.PortDiscovery, (scanner) => scanner.scan()).pipe(
       Effect.provide(layer),
@@ -675,7 +675,7 @@ effectIt.effect("does not swallow process probe defects", () =>
 
 effectIt.effect("does not swallow process probe interruption", () =>
   Effect.gen(function* () {
-    const layer = makeProbeFailureLayer(() => Effect.interrupt);
+    const layer = layerProbeFailure(() => Effect.interrupt);
 
     const exit = yield* Effect.flatMap(PortScanner.PortDiscovery, (scanner) => scanner.scan()).pipe(
       Effect.provide(layer),

@@ -7,7 +7,7 @@ import {
 } from "@kata-sh/code-client-runtime/state/assets";
 import { squashAtomCommandFailure } from "@kata-sh/code-client-runtime/state/runtime";
 import type { AssetResource, EnvironmentId } from "@kata-sh/code-contracts";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
 
 import { assetEnvironment } from "~/state/assets";

@@ -1,7 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeSqliteClient from "@kata-sh/code-shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
 
@@ -14,7 +14,7 @@ it.layer(NodeSqliteClient.layer({ filename: ":memory:" }))("Kata upstream upgrad
       const executed = yield* runMigrations();
       assert.deepEqual(
         executed.map(([id]) => id),
-        [43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61],
+        [43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63],
       );
 
       const authColumns = yield* sql<{ readonly name: string }>`PRAGMA table_info(auth_sessions)`;

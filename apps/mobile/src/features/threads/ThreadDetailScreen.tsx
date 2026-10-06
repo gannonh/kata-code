@@ -31,7 +31,10 @@ import {
   type CodexArtifactTemplate,
 } from "@kata-sh/code-client-runtime/codex-artifact-templates";
 import type { ThreadUserInputQuestion } from "@kata-sh/code-client-runtime/state/thread-requests";
-import { presentPendingBackgroundWork } from "@kata-sh/code-client-runtime/state/thread-execution";
+import {
+  presentPendingBackgroundWork,
+  presentProviderGoal,
+} from "@kata-sh/code-client-runtime/state/thread-execution";
 import { resolveSubagentPillSegment } from "@kata-sh/code-client-runtime/state/thread-subagents";
 import {
   formatModelSelectionEffort,
@@ -489,6 +492,14 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
           .map((item) => item.label)
           .join(", ")}`,
         waiting: pendingBackgroundWork.waiting,
+      };
+    }
+    if (props.selectedThread.goal !== null && contentPresentationKind === "ready") {
+      const goal = presentProviderGoal(props.selectedThread.goal, false);
+      return {
+        kind: "goal",
+        label: goal.title,
+        accessibilityLabel: `${goal.title}: ${goal.objective}`,
       };
     }
     return null;

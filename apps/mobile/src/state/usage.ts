@@ -23,7 +23,7 @@ import {
   type MergedUsage,
 } from "@kata-sh/code-shared/usageMerge";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useCallback, useMemo } from "react";
 
 import { appAtomRegistry } from "./atom-registry";

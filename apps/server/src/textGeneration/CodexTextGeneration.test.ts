@@ -35,7 +35,7 @@ const ROUTINE_DRAFT_OUTPUT = {
   assistantMessage: "I drafted a weekday brief.",
 };
 
-const CodexTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+const layerCodexTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-codex-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -190,7 +190,7 @@ function withFakeCodexEnv<A, E, R>(
   }).pipe(Effect.scoped);
 }
 
-it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
+it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
   it.effect("generates a strict routine draft with all tools disabled", () =>
     withFakeCodexEnv(
       {

@@ -8,7 +8,7 @@ import type { EnvironmentCatalogState } from "@kata-sh/code-client-runtime/state
 import type { EnvironmentShellSummary } from "@kata-sh/code-client-runtime/state/shell";
 import { EnvironmentId, type ServerConfig } from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 
 import { createWorkspaceConnectionAtoms } from "./workspace-connection-atoms";
 import { projectWorkspaceEnvironment, projectWorkspaceState } from "./workspaceModel";

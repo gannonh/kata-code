@@ -4,10 +4,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpServer from "effect/unstable/http/HttpServer";
-import * as HttpApi from "effect/unstable/httpapi/HttpApi";
-import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
+import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpServer from "effect/http/HttpServer";
+import * as HttpApi from "effect/http-api/HttpApi";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { EnvironmentId } from "@kata-sh/code-contracts";
 import {
   RelayApi,
@@ -225,6 +225,8 @@ function makeLinearTestServices(options?: {
           : linkedEnvironmentRecord,
       ),
     revokeForUser: () => Effect.die("unused revokeForUser"),
+    findActiveManagedForEnvironment: () => Effect.die("unused findActiveManagedForEnvironment"),
+    setHoldWebhooksWhileOffline: () => Effect.die("unused setHoldWebhooksWhileOffline"),
   });
 
   const connectorService = EnvironmentConnector.EnvironmentConnector.of({

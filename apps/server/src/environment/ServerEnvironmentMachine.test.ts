@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { HostProcessPlatform } from "@kata-sh/code-shared/hostProcess";
 import { vi } from "vite-plus/test";
 
@@ -16,7 +16,7 @@ import {
 
 const runMock = vi.fn<ProcessRunner.ProcessRunner["Service"]["run"]>();
 
-const ProcessRunnerTest = Layer.succeed(
+const layerProcessRunnerTest = Layer.succeed(
   ProcessRunner.ProcessRunner,
   ProcessRunner.ProcessRunner.of({
     run: (input) => runMock(input),
@@ -35,7 +35,7 @@ const processOutput = (stdout: string, code = 0) =>
     stderrInvalidUtf8: false,
   });
 
-const dmiFileSystem = (files: Readonly<Record<string, string>>) =>
+const layerDmiFileSystem = (files: Readonly<Record<string, string>>) =>
   FileSystem.layerNoop({
     readFileString: (path) => {
       const name = path.slice(path.lastIndexOf("/") + 1);
@@ -54,7 +54,7 @@ const dmiFileSystem = (files: Readonly<Record<string, string>>) =>
   });
 
 const withPlatform = (platform: NodeJS.Platform, fileSystem = FileSystem.layerNoop({})) =>
-  Layer.mergeAll(ProcessRunnerTest, fileSystem, Layer.succeed(HostProcessPlatform, platform));
+  Layer.mergeAll(layerProcessRunnerTest, fileSystem, Layer.succeed(HostProcessPlatform, platform));
 
 afterEach(() => {
   runMock.mockReset();
@@ -190,7 +190,7 @@ describe("detectServerEnvironmentMachineKind", () => {
         Effect.provide(
           withPlatform(
             "linux",
-            dmiFileSystem({
+            layerDmiFileSystem({
               chassis_type: "3\n",
               sys_vendor: "GMKtec\n",
               product_name: "NucBox K8 Plus\n",
@@ -210,7 +210,7 @@ describe("detectServerEnvironmentMachineKind", () => {
         Effect.provide(
           withPlatform(
             "linux",
-            dmiFileSystem({
+            layerDmiFileSystem({
               osrelease: "5.15.153.1-microsoft-standard-WSL2\n",
               chassis_type: "3\n",
               sys_vendor: "Microsoft Corporation\n",
@@ -227,7 +227,7 @@ describe("detectServerEnvironmentMachineKind", () => {
   it.effect("returns null on Linux without DMI (containers, ARM boards)", () =>
     Effect.gen(function* () {
       const result = yield* detectServerEnvironmentMachineKind().pipe(
-        Effect.provide(withPlatform("linux", dmiFileSystem({}))),
+        Effect.provide(withPlatform("linux", layerDmiFileSystem({}))),
       );
 
       expect(result).toBeNull();

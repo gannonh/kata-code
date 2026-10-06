@@ -12,10 +12,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as ServerConfig from "./config.ts";
-import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as ServerSettingsModule from "./serverSettings.ts";
 
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
@@ -23,7 +23,7 @@ const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
 const makeServerSettingsLayer = () =>
   ServerSettingsModule.layer.pipe(
     Layer.provide(ServerSecretStore.layer),
-    Layer.provideMerge(Layer.fresh(SqlitePersistenceMemory)),
+    Layer.provideMerge(Layer.fresh(SqlitePersistence.layerMemory)),
     Layer.provideMerge(
       Layer.fresh(
         ServerConfig.layerTest(process.cwd(), {
