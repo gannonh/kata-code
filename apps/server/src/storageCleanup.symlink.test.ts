@@ -22,8 +22,8 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "./config.ts";
 import * as GitManager from "./git/GitManager.ts";
@@ -31,7 +31,7 @@ import { CodexProviderCapabilitiesV2 } from "./orchestration-v2/Adapters/CodexAd
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
-import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as Settings from "./serverSettings.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
@@ -312,7 +312,7 @@ const provideCase = (protection: Case) => (effect: ReturnType<typeof runCase>) =
         protection === "plain"
           ? ServerConfig.layerTest(process.cwd(), { prefix: "kata-storage-cleanup-" })
           : symlinkedBaseDirConfig,
-        SqlitePersistenceMemory,
+        SqlitePersistence.layerMemory,
       ).pipe(Layer.provideMerge(NodeServices.layer)),
     ),
     Effect.scoped,

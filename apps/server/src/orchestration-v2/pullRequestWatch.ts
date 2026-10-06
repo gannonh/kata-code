@@ -48,10 +48,23 @@ export function pullRequestWatchTargets<
   );
 }
 
+/**
+ * Why a thread cannot keep its pull request watches: settling ends them, and a subagent cannot
+ * start one. The sweep ends such a watch without a host read, and the Sprite activity lease does
+ * not count it as work, so both agree on which watches are live.
+ */
+export function pullRequestWatchThreadEndReason(
+  thread: Pick<OrchestrationV2AppThread, "settledOverride" | "settledAt" | "lineage">,
+): "settled" | "subagent" | undefined {
+  if (thread.settledOverride === "settled" || thread.settledAt !== null) return "settled";
+  if (thread.lineage.relationshipToParent === "subagent") return "subagent";
+  return undefined;
+}
+
 export function isPullRequestWatchPaused(
-  thread: Pick<OrchestrationV2AppThread, "settledOverride" | "settledAt">,
+  thread: Pick<OrchestrationV2AppThread, "settledOverride" | "settledAt" | "lineage">,
 ): boolean {
-  return thread.settledOverride === "settled" || thread.settledAt !== null;
+  return pullRequestWatchThreadEndReason(thread) !== undefined;
 }
 
 // "action-required" is a finished check that needs someone, so the agent hears about it.
@@ -78,6 +91,7 @@ export function evaluatePullRequestWatch(
   // An empty list keeps the last state: a host can answer with one when its check read fails.
   let failedChecks = headMoved ? [] : watch.failedChecks;
   let passed = headMoved ? false : watch.passed;
+  let passedChecks = headMoved ? [] : watch.passedChecks;
   if (detail.checks.length > 0) {
     const failed = detail.checks.filter(isFailedCheck);
     const newlyFailed = failed.filter((check) => !failedChecks.includes(check.name));
@@ -88,26 +102,35 @@ export function evaluatePullRequestWatch(
     const required = detail.checks.filter((check) => check.required === true);
     const gate = required.length > 0 ? required : detail.checks;
     const passedNow = gate.every((check) => check.status !== "pending" && !isFailedCheck(check));
-    if (passedNow && !passed) {
+    const gateNames = gate.map((check) => check.name);
+    // A watch saved before passedChecks existed takes the current names, so it does not wake.
+    const told = passed && passedChecks.length === 0 ? gateNames : passedChecks;
+    // A required job created and finished between two passes is never seen pending. Without
+    // required checks, any check counts, and advisory bots keep adding passed ones: no wake.
+    const gateGrew = required.length > 0 && gateNames.some((name) => !told.includes(name));
+    if (passedNow && (!passed || gateGrew)) {
       changes.push({ kind: "checks-passed", count: gate.length, required: required.length > 0 });
     }
     passed = passedNow;
+    passedChecks = passedNow ? gateNames : [];
   }
 
   const own = (detail.viewer ?? detail.author?.login)?.toLowerCase();
   const through = Date.parse(watch.remarksThrough);
+  // An edit counts as new activity, so bots that rewrite one summary comment still wake the agent.
+  const activeAt = (remark: PullRequestComment) => remark.editedAt ?? remark.createdAt;
   // GitHub times are per second, so remarks at the boundary time are told apart by ID.
   const fresh = (remarks ?? []).filter((remark) => {
-    const at = Date.parse(remark.createdAt);
+    const at = Date.parse(activeAt(remark));
     return (
       (at > through || (at === through && !watch.remarkIds.includes(remark.id))) &&
       remark.author?.login.toLowerCase() !== own
     );
   });
   if (fresh.length > 0) changes.push({ kind: "remarks", remarks: fresh });
-  const latest = Math.max(through, ...fresh.map((remark) => Date.parse(remark.createdAt)));
-  const atLatest = fresh.filter((remark) => Date.parse(remark.createdAt) === latest);
-  const remarksThrough = latest === through ? watch.remarksThrough : atLatest[0]!.createdAt;
+  const latest = Math.max(through, ...fresh.map((remark) => Date.parse(activeAt(remark))));
+  const atLatest = fresh.filter((remark) => Date.parse(activeAt(remark)) === latest);
+  const remarksThrough = latest === through ? watch.remarksThrough : activeAt(atLatest[0]!);
   const remarkIds = [
     ...(latest === through ? watch.remarkIds : []),
     ...atLatest.map((remark) => remark.id),
@@ -130,6 +153,7 @@ export function evaluatePullRequestWatch(
       headSha,
       failedChecks,
       passed,
+      passedChecks,
       remarksThrough,
       remarkIds,
       conflicting,
@@ -212,7 +236,7 @@ export function pullRequestWatchMessage(input: {
     "",
     exhausted
       ? `Kata Code stopped watching after ${PULL_REQUEST_WATCH_WAKE_LIMIT} comment-only updates in a row. Call watch_pull_request to watch it again.`
-      : "Look into each item and act on it as your task requires. Kata Code keeps watching and wakes you on the next change, so end your turn when you are done. Call unwatch_pull_request when you no longer need updates.",
+      : "Look into each item and act on it as your task requires. Kata Code keeps watching and wakes you on the next change, so end your turn when you are done. When you hand the work back to the user, call unwatch_pull_request first so the thread returns to their inbox.",
   ].join("\n");
   const failed = changes.some(
     (change) => change.kind === "checks-failed" || change.kind === "conflicting",

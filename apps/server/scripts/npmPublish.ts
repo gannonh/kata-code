@@ -4,7 +4,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { resolveSpawnCommand } from "@kata-sh/code-shared/shell";
 import { ServerCliBuildAssetMissingError } from "./cliErrors.ts";

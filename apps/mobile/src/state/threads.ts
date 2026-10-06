@@ -9,7 +9,7 @@ import {
 } from "@kata-sh/code-client-runtime/state/threads";
 import type { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";

@@ -6,7 +6,7 @@ import type { EnvironmentCatalogState } from "@kata-sh/code-client-runtime/state
 import type { EnvironmentShellState } from "@kata-sh/code-client-runtime/state/shell";
 import { EnvironmentId } from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
-import { Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createAllEnvironmentProjectSnapshotsReadyAtom } from "./shell";

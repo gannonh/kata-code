@@ -10,14 +10,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http";
-import * as Etag from "effect/unstable/http/Etag";
-import * as HttpPlatform from "effect/unstable/http/HttpPlatform";
-import * as HttpApi from "effect/unstable/httpapi/HttpApi";
-import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
+import * as Etag from "effect/http/Etag";
+import * as HttpPlatform from "effect/http/HttpPlatform";
+import * as HttpApi from "effect/http-api/HttpApi";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
-import { environmentAuthenticatedAuthLayer } from "../auth/http.ts";
+import * as AuthHttp from "../auth/http.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
@@ -25,7 +25,8 @@ import * as AgentAwarenessRelay from "../relay/AgentAwarenessRelay.ts";
 import { readLinearAccessToken, routineLinearOAuthSecretName } from "../routines/LinearOAuth.ts";
 import * as CliTokenManager from "./CliTokenManager.ts";
 import { CLOUD_LINKED_USER_ID, CLOUD_MINT_PUBLIC_KEY, RELAY_ISSUER_SECRET } from "./config.ts";
-import { connectHttpApiLayer } from "./http.ts";
+import * as CloudLink from "./CloudLink.ts";
+import * as ConnectHttp from "./http.ts";
 import * as ManagedEndpointRuntime from "./ManagedEndpointRuntime.ts";
 
 const environmentId = EnvironmentId.make("environment-linear-oauth");
@@ -37,8 +38,9 @@ const scope = "read issues:create";
 class ConnectTestApi extends HttpApi.make("environment").add(EnvironmentHttpApi.groups.connect) {}
 
 const routesLayer = HttpApiBuilder.layer(ConnectTestApi).pipe(
-  Layer.provide(connectHttpApiLayer),
-  Layer.provide(environmentAuthenticatedAuthLayer),
+  Layer.provide(ConnectHttp.layer),
+  Layer.provide(CloudLink.layer),
+  Layer.provide(AuthHttp.layerAuthenticatedAuth),
 );
 
 const appLayer = HttpRouter.serve(routesLayer, {
@@ -47,7 +49,9 @@ const appLayer = HttpRouter.serve(routesLayer, {
 }).pipe(
   Layer.provideMerge(
     ServerSecretStore.layer.pipe(
-      Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-linear-oauth-delivery-" })),
+      Layer.provideMerge(
+        ServerConfig.layerTest(process.cwd(), { prefix: "t3-linear-oauth-delivery-" }),
+      ),
       Layer.provide(NodeServices.layer),
     ),
   ),

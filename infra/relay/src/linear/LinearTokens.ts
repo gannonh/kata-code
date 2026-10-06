@@ -2,7 +2,7 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64 from "effect/encoding/Base64";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
@@ -117,9 +117,7 @@ const rowBinding = (row: { readonly environmentId: string; readonly connectionId
   new TextEncoder().encode(JSON.stringify([row.environmentId, row.connectionId]));
 
 const decodeBase64 = (value: string) =>
-  Effect.fromResult(Encoding.decodeBase64(value)).pipe(
-    Effect.map((bytes) => Uint8Array.from(bytes)),
-  );
+  Effect.fromResult(Base64.decode(value)).pipe(Effect.map((bytes) => Uint8Array.from(bytes)));
 
 const make = Effect.gen(function* () {
   const db = yield* RelayDb.RelayDb;
@@ -153,8 +151,8 @@ const make = Effect.gen(function* () {
       ),
     );
     return {
-      tokenCiphertext: Encoding.encodeBase64(new Uint8Array(ciphertext)),
-      tokenNonce: Encoding.encodeBase64(nonce),
+      tokenCiphertext: Base64.encode(new Uint8Array(ciphertext)),
+      tokenNonce: Base64.encode(nonce),
       keyVersion: KEY_VERSION,
     };
   });

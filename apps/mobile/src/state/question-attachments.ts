@@ -1,5 +1,5 @@
 import type { EnvironmentId, ThreadId } from "@kata-sh/code-contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { appAtomRegistry } from "./atom-registry";
 
 export function questionAttachmentDraftPrefix(

@@ -6,7 +6,7 @@ import type {
   OrchestrationV2ThreadProjection,
   ThreadId,
 } from "@kata-sh/code-contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import { environmentThreadDetails, useEnvironmentThread } from "./threads";
 import { useThreadSelection } from "./use-thread-selection";

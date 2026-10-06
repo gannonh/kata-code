@@ -16,12 +16,12 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest, HttpRouter } from "effect/unstable/http";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { HttpClient, HttpClientRequest, HttpRouter } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { RoutineScheduler } from "./RoutineScheduler.ts";
 import {
   REJECTED_DELIVERY_CHANGE_INTERVAL_MS,
@@ -187,7 +187,7 @@ const linearIssue = (input: {
     return { status: response.status, json };
   });
 
-const storeLayer = RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory));
+const storeLayer = RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistence.layerMemory));
 const wakeCount = Ref.makeUnsafe(0);
 const schedulerLayer = Layer.mock(RoutineScheduler)({
   owner: "routine-webhook-test",

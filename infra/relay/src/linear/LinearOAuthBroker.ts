@@ -3,7 +3,7 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64Url from "effect/encoding/Base64Url";
 import * as Layer from "effect/Layer";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
@@ -138,8 +138,8 @@ const make = Effect.gen(function* () {
       if (link === null) {
         return yield* new LinearOAuthEnvironmentNotLinked({ environmentId: input.environmentId });
       }
-      const codeVerifier = Encoding.encodeBase64Url(yield* crypto.randomBytes(32));
-      const codeChallenge = Encoding.encodeBase64Url(
+      const codeVerifier = Base64Url.encode(yield* crypto.randomBytes(32));
+      const codeChallenge = Base64Url.encode(
         yield* crypto.digest("SHA-256", new TextEncoder().encode(codeVerifier)),
       );
       const { state } = yield* states.create({

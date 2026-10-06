@@ -27,7 +27,7 @@ const GROK_ROUTINE_INPUT = {
   modelSelection: createModelSelection(ProviderInstanceId.make("grok"), "grok-build"),
 };
 
-const GrokTextGenerationTestLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+const layerGrokTextGenerationTest = ServerConfig.ServerConfig.layerTest(process.cwd(), {
   prefix: "t3code-grok-text-generation-test-",
 }).pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -71,7 +71,7 @@ function readJsonRpcRequests(
     .map((line) => JSON.parse(line) as { method?: string; params?: Record<string, unknown> });
 }
 
-it.layer(GrokTextGenerationTestLayer)("GrokTextGeneration", (it) => {
+it.layer(layerGrokTextGenerationTest)("GrokTextGeneration", (it) => {
   it.effect("rejects routine drafts before spawning the unsupported Grok ACP", () => {
     const requestLogDir = NodeFS.mkdtempSync(
       NodePath.join(NodeOS.tmpdir(), "t3code-grok-routine-log-"),

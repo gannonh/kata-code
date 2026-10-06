@@ -173,10 +173,12 @@ describe("relay migration snapshot chain", () => {
   const heads = snapshots.filter(({ snapshot }) => !referenced.has(snapshot.id));
 
   it("has exactly one snapshot head", () => {
-    expect(heads.map(({ dir }) => dir)).toEqual(["20260926004121_linear_oauth_token_encryption"]);
+    expect(heads.map(({ dir }) => dir)).toEqual([
+      "20261006080000_merge_upstream_kata_webhook_heads",
+    ]);
   });
 
-  it("includes both the Linear OAuth tables and managed endpoint recovery in the head", () => {
+  it("includes the Linear OAuth tables, managed endpoint recovery and webhook holds in the head", () => {
     const ddl = heads[0]?.snapshot.ddl ?? [];
     const tables = ddl.filter((entity) => entity.entityType === "tables").map(({ name }) => name);
     expect(tables).toContain("relay_linear_oauth_states");
@@ -189,6 +191,11 @@ describe("relay migration snapshot chain", () => {
           entity.name === "recovery_enabled_at",
       ),
     ).toBe(true);
+    const columns = ddl
+      .filter((entity) => entity.entityType === "columns")
+      .map((entity) => `${entity.table}.${entity.name}`);
+    expect(columns).toContain("relay_environment_links.hold_webhooks_while_offline");
+    expect(columns).toContain("relay_managed_endpoint_allocations.tunnel_released_at");
   });
 
   it("matches the schema source with no drift, as Alchemy's deploy check computes it", async () => {

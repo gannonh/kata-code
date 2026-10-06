@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@kata-sh/code-contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useEffect, useRef } from "react";
 
 import { prepareTurnAttachments } from "../lib/attachmentUpload";

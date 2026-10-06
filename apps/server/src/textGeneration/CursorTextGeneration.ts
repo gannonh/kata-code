@@ -9,38 +9,17 @@ import * as Schema from "effect/Schema";
 
 import {
   type CursorSettings,
-  type ModelSelection,
   type ProviderSetupError,
-  RoutineDraftProviderOutput,
+  TextGenerationError,
 } from "@kata-sh/code-contracts";
-import { formatGeneratedBranchName, sanitizeFeatureBranchName } from "@kata-sh/code-shared/git";
-import { extractJsonObject } from "@kata-sh/code-shared/schemaJson";
 
-import { TextGenerationError } from "@kata-sh/code-contracts";
-import * as TextGeneration from "./TextGeneration.ts";
-import {
-  buildBranchNamePrompt,
-  buildCommitMessagePrompt,
-  buildPrContentPrompt,
-  buildThreadTitlePrompt,
-} from "./TextGenerationPrompts.ts";
-import {
-  sanitizeCommitSubject,
-  sanitizePrTitle,
-  sanitizeThreadTitle,
-} from "./TextGenerationUtils.ts";
+import * as TextGenerationOperations from "./TextGenerationOperations.ts";
 import { cursorSdkModelSelection } from "../provider/cursorSdkModel.ts";
 import type { CursorAuth } from "../provider/CursorAuth.ts";
 
 const CURSOR_TIMEOUT_MS = 180_000;
 
 const isTextGenerationError = Schema.is(TextGenerationError);
-type CursorTextGenerationOperation =
-  | "generateCommitMessage"
-  | "generatePrContent"
-  | "generateBranchName"
-  | "generateThreadTitle"
-  | "generateRoutineDraft";
 
 /** Routine drafting is text only. Any tool call means the model left that contract. */
 function isCursorToolUpdate(update: InteractionUpdate): boolean {
@@ -93,7 +72,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
   const fs = yield* FileSystem.FileSystem;
   const resolvedEnvironment = environment ?? process.env;
 
-  const resolveCursorApiKey = (operation: CursorTextGenerationOperation) =>
+  const resolveCursorApiKey = (operation: TextGenerationOperations.Operation) =>
     Effect.gen(function* () {
       if (!cursorSettings.enabled) {
         return yield* new TextGenerationError({
@@ -115,21 +94,10 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       return apiKey;
     });
 
-  const runCursorJson = <S extends Schema.Top>({
-    operation,
-    prompt,
-    outputSchemaJson,
-    modelSelection,
-    strictRoutineOutput = false,
-  }: {
-    operation: CursorTextGenerationOperation;
-    prompt: string;
-    outputSchemaJson: S;
-    modelSelection: ModelSelection;
-    /** Fail on any tool call and on fields the schema does not declare. */
-    strictRoutineOutput?: boolean;
-  }): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> =>
-    Effect.gen(function* () {
+  // Ignores `cwd`: the agent runs in an empty temp directory, away from the project.
+  const runCursorJson: TextGenerationOperations.Runner = (input) => {
+    const { operation, prompt, modelSelection } = input;
+    return Effect.gen(function* () {
       const apiKey = yield* resolveCursorApiKey(operation);
       // The SDK loads sandbox.json independently of settingSources and lets it
       // expand the writable paths. Its public API cannot override that policy.
@@ -171,19 +139,22 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
           }),
         );
 
+      // A routine draft fails on any tool call (and, in decoding, on fields the
+      // schema does not declare).
       let toolAttempted = false;
       let activeRun: Run | undefined;
       const cancelForToolWork = () => {
         toolAttempted = true;
         void activeRun?.cancel().catch(() => undefined);
       };
-      const sendOptions = strictRoutineOutput
-        ? {
-            onDelta: ({ update }: { readonly update: InteractionUpdate }) => {
-              if (isCursorToolUpdate(update)) cancelForToolWork();
-            },
-          }
-        : undefined;
+      const sendOptions =
+        operation === "generateRoutineDraft"
+          ? {
+              onDelta: ({ update }: { readonly update: InteractionUpdate }) => {
+                if (isCursorToolUpdate(update)) cancelForToolWork();
+              },
+            }
+          : undefined;
 
       const request = Effect.gen(function* () {
         // Prefer the sandbox. When the SDK refuses it, the empty temp directory
@@ -247,22 +218,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
         });
       }
 
-      const decodeOutput = Schema.decodeEffect(
-        Schema.fromJsonString(outputSchemaJson),
-        strictRoutineOutput ? { onExcessProperty: "error" } : undefined,
-      );
-      return yield* decodeOutput(extractJsonObject(rawResult)).pipe(
-        Effect.catchTags({
-          SchemaError: (cause) =>
-            Effect.fail(
-              new TextGenerationError({
-                operation,
-                detail: "Cursor SDK returned invalid structured output.",
-                cause,
-              }),
-            ),
-        }),
-      );
+      return yield* TextGenerationOperations.decodeJsonReply(input, "Cursor SDK", rawResult);
     }).pipe(
       (effect) => (withAccess ? withAccess(effect) : effect),
       Effect.scoped,
@@ -276,116 +232,7 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
             }),
       ),
     );
+  };
 
-  const generateCommitMessage: TextGeneration.TextGeneration["Service"]["generateCommitMessage"] =
-    Effect.fn("CursorTextGeneration.generateCommitMessage")(function* (input) {
-      const { prompt, outputSchema } = buildCommitMessagePrompt({
-        branch: input.branch,
-        stagedSummary: input.stagedSummary,
-        stagedPatch: input.stagedPatch,
-        includeBranch: input.includeBranch === true,
-        policy: input.policy,
-      });
-
-      const generated = yield* runCursorJson({
-        operation: "generateCommitMessage",
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        subject: sanitizeCommitSubject(generated.subject),
-        body: generated.body.trim(),
-        ...("branch" in generated && typeof generated.branch === "string"
-          ? { branch: sanitizeFeatureBranchName(generated.branch) }
-          : {}),
-      };
-    });
-
-  const generatePrContent: TextGeneration.TextGeneration["Service"]["generatePrContent"] =
-    Effect.fn("CursorTextGeneration.generatePrContent")(function* (input) {
-      const { prompt, outputSchema } = buildPrContentPrompt({
-        baseBranch: input.baseBranch,
-        headBranch: input.headBranch,
-        commitSummary: input.commitSummary,
-        diffSummary: input.diffSummary,
-        diffPatch: input.diffPatch,
-        policy: input.policy,
-        changeRequestTemplate: input.changeRequestTemplate,
-      });
-
-      const generated = yield* runCursorJson({
-        operation: "generatePrContent",
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizePrTitle(generated.title),
-        body: generated.body.trim(),
-      };
-    });
-
-  const generateBranchName: TextGeneration.TextGeneration["Service"]["generateBranchName"] =
-    Effect.fn("CursorTextGeneration.generateBranchName")(function* (input) {
-      const { prompt, outputSchema } = buildBranchNamePrompt({
-        message: input.message,
-        attachments: input.attachments,
-        naming: input.naming,
-      });
-
-      const generated = yield* runCursorJson({
-        operation: "generateBranchName",
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        branch: formatGeneratedBranchName(generated.branch, input.naming),
-      };
-    });
-
-  const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
-    Effect.fn("CursorTextGeneration.generateThreadTitle")(function* (input) {
-      const { prompt, outputSchema } = buildThreadTitlePrompt({
-        message: input.message,
-        previousTitle: input.previousTitle,
-        linkedContext: input.linkedContext,
-        attachments: input.attachments,
-      });
-
-      const generated = yield* runCursorJson({
-        operation: "generateThreadTitle",
-        prompt,
-        outputSchemaJson: outputSchema,
-        modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizeThreadTitle(generated.title),
-        ...(generated.needsRefinement ? { needsRefinement: true } : {}),
-      } satisfies TextGeneration.ThreadTitleGenerationResult;
-    });
-
-  const generateRoutineDraft: TextGeneration.TextGeneration["Service"]["generateRoutineDraft"] =
-    Effect.fn("CursorTextGeneration.generateRoutineDraft")(function* (input) {
-      return yield* runCursorJson({
-        operation: "generateRoutineDraft",
-        prompt: input.prompt,
-        outputSchemaJson: RoutineDraftProviderOutput,
-        modelSelection: input.modelSelection,
-        strictRoutineOutput: true,
-      });
-    });
-
-  return {
-    generateCommitMessage,
-    generatePrContent,
-    generateBranchName,
-    generateThreadTitle,
-    generateRoutineDraft,
-  } satisfies TextGeneration.TextGeneration["Service"];
+  return TextGenerationOperations.fromRunner("CursorTextGeneration", runCursorJson);
 });

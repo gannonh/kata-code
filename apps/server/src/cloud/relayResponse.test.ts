@@ -1,9 +1,14 @@
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
-import * as HttpClientError from "effect/unstable/http/HttpClientError";
+import { HttpClientRequest, HttpClientResponse } from "effect/http";
+import * as HttpClientError from "effect/http/HttpClientError";
 
-import { filterRelayResponse, relayRequestError, shouldRetryCloudLink } from "./relayResponse.ts";
+import {
+  filterRelayResponse,
+  isRelayBearerRejected,
+  relayRequestError,
+  shouldRetryRelayRequest,
+} from "./relayResponse.ts";
 
 const response = (
   status: number,
@@ -28,12 +33,12 @@ it("reports a transport failure category without exposing request or cause detai
     }),
   );
 
-  expect(error._tag).toBe("EnvironmentHttpInternalServerError");
+  expect(error).toMatchObject({ _tag: "RelayRequestError", rejection: "unavailable" });
   expect(error.message).toContain("TransportError");
   expect(error.message).toContain("network connection");
   expect(error.message).not.toContain("relay.example.test");
   expect(error.message).not.toContain("private");
-  expect(shouldRetryCloudLink(error)).toBe(true);
+  expect(shouldRetryRelayRequest(error)).toBe(true);
 });
 
 it.effect("reports the tunnel limit and relay trace instead of a generic 403", () =>
@@ -47,7 +52,7 @@ it.effect("reports the tunnel limit and relay trace instead of a generic 403", (
       }),
     ).pipe(Effect.mapError(relayRequestError), Effect.flip);
 
-    expect(error._tag).toBe("EnvironmentHttpForbiddenError");
+    expect(error).toMatchObject({ _tag: "RelayRequestError", rejection: "forbidden" });
     expect(error.message).toContain("at most 10 tunnels");
     expect(error.message).toContain("Unlink an unused environment");
     expect(error.message).toContain("Trace ID: trace-limit");
@@ -65,10 +70,31 @@ it.effect("makes revoked authorization actionable and non-retryable", () =>
       }),
     ).pipe(Effect.mapError(relayRequestError), Effect.flip);
 
-    expect(error._tag).toBe("EnvironmentHttpUnauthorizedError");
+    expect(error).toMatchObject({
+      _tag: "RelayRequestError",
+      rejection: "unauthorized",
+      bearerRejected: true,
+    });
+    expect(isRelayBearerRejected(error)).toBe(true);
     expect(error.message).toContain("invalid_bearer");
     expect(error.message).toContain("katacode connect login");
     expect(error.message).toContain("Trace ID: trace-auth");
+  }),
+);
+
+it.effect("does not report a 401 for an authenticated request as a rejected bearer", () =>
+  Effect.gen(function* () {
+    const error = yield* filterRelayResponse(
+      response(401, {
+        _tag: "RelayAuthInvalidError",
+        code: "auth_invalid",
+        reason: "not_authorized",
+        traceId: "trace-proof",
+      }),
+    ).pipe(Effect.flip);
+
+    expect(error).toMatchObject({ _tag: "RelayRequestError", rejection: "unauthorized" });
+    expect(isRelayBearerRejected(error)).toBe(false);
   }),
 );
 
@@ -81,7 +107,7 @@ it.effect("reports an unrecognized access denial without printing its response b
       }),
     ).pipe(Effect.flip);
 
-    expect(error._tag).toBe("EnvironmentHttpForbiddenError");
+    expect(error).toMatchObject({ _tag: "RelayRequestError", rejection: "forbidden" });
     expect(error.message).toContain("HTTP 403");
     expect(error.message).toContain("proxy or firewall");
     expect(error.message).toContain("Cloudflare Ray ID: abcdef1234-IAD");
@@ -94,7 +120,7 @@ it.effect.each([408, 429, 500, 502, 503, 504])(
   (status) =>
     Effect.gen(function* () {
       const error = yield* filterRelayResponse(response(status, "unavailable")).pipe(Effect.flip);
-      expect(error._tag).toBe("EnvironmentHttpInternalServerError");
+      expect(error).toMatchObject({ _tag: "RelayRequestError", rejection: "unavailable" });
       expect(error.message).toContain(`HTTP ${status}`);
     }),
 );
@@ -112,7 +138,7 @@ it.effect.each([
       return filterRelayResponse(response(requests === 1 ? status : 200, "{}"));
     }).pipe(
       Effect.mapError(relayRequestError),
-      Effect.retry({ while: shouldRetryCloudLink, times: 1 }),
+      Effect.retry({ while: shouldRetryRelayRequest, times: 1 }),
       Effect.result,
     );
     expect(requests).toBe(attempts);
@@ -131,7 +157,7 @@ it.effect("keeps the relay failure reason and trace when tunnel cleanup fails", 
       }),
     ).pipe(Effect.flip);
 
-    expect(error._tag).toBe("EnvironmentHttpInternalServerError");
+    expect(error).toMatchObject({ _tag: "RelayRequestError", rejection: "unavailable" });
     expect(error.message).toContain("upstream_unavailable");
     expect(error.message).toContain("Trace ID: trace-cleanup");
   }),

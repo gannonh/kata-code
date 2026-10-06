@@ -84,8 +84,8 @@ import {
   resolveComposerDispatchMode,
   type ActiveTurnComposerAction,
 } from "@kata-sh/code-client-runtime/state/composer-dispatch";
-import { Atom } from "effect/unstable/reactivity";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { prepareTurnAttachments } from "../lib/attachmentUpload";
 import { DEFAULT_FOLLOW_UP_BEHAVIOR } from "../lib/followUpBehavior";
 import { mobilePreferencesAtom } from "./preferences";

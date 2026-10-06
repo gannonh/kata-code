@@ -11,7 +11,7 @@ import {
   type ScopedThreadRef,
 } from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import { v2Projection, v2Now } from "./orchestrationV2TestFixtures.ts";

@@ -5,7 +5,7 @@ import type {
 import { connectionCatalogDisplayUrl } from "@kata-sh/code-client-runtime/connection";
 import type { EnvironmentId, ServerConfig } from "@kata-sh/code-contracts";
 import * as Option from "effect/Option";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import type { SavedRemoteConnection } from "../lib/connection";
 import type { EnvironmentRuntimeState } from "./remote-runtime-types";

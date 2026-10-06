@@ -19,8 +19,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { Command, Flag } from "effect/unstable/cli";
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { Command, Flag } from "effect/cli";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
 import { isDesktopPreviewVersion, resolveDesktopUpdateChannel } from "./build-desktop-artifact.ts";
 import { compareNightlyVersions, parseNightlyTag } from "./resolve-previous-release-tag.ts";

@@ -6,7 +6,7 @@ import {
   PreviewTabId,
 } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 import * as PreviewManager from "../../../preview/Manager.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 

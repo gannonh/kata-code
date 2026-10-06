@@ -5,7 +5,7 @@ import type {
 import type { EnvironmentCatalogState } from "@kata-sh/code-client-runtime/state/connections";
 import type { EnvironmentId } from "@kata-sh/code-contracts";
 import { createEnvironmentSummaryAtoms } from "@kata-sh/code-client-runtime/state/presentation";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import { projectWorkspaceConnectionState } from "./workspaceModel";
 

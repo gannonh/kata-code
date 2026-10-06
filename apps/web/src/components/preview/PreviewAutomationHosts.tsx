@@ -22,7 +22,7 @@ import {
 } from "@kata-sh/code-contracts";
 import { resolvePreviewViewport } from "@kata-sh/code-shared/previewViewport";
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useShallow } from "zustand/react/shallow";
 
 import {

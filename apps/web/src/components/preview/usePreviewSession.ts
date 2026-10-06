@@ -4,7 +4,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { parseScopedThreadKey, scopedThreadKey } from "@kata-sh/code-client-runtime/environment";
 import type { ScopedThreadRef } from "@kata-sh/code-contracts";
 import * as Schema from "effect/Schema";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import {
   applyPreviewServerEvent,

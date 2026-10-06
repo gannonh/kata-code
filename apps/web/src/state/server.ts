@@ -14,7 +14,7 @@ import { createOutdatedServerUpdateCommand } from "@kata-sh/code-client-runtime/
 import { createEnvironmentServerConfigsAtom } from "@kata-sh/code-client-runtime/state/shell";
 import { mergeWithDefaultKeybindings } from "@kata-sh/code-shared/keybindings";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";

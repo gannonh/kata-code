@@ -31,14 +31,16 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import {
   buildTemporaryWorktreeBranchName,
+  flattenTemporaryWorktreeBranchName,
   isTemporaryWorktreeBranch,
+  WORKTREE_BRANCH_PREFIX,
 } from "@kata-sh/code-shared/git";
 
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
-import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
+import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
@@ -372,6 +374,18 @@ const make = Effect.gen(function* () {
           }
         }
         if (startFromOrigin) yield* setupTracker.stageStatus(threadId, "fetch", "done");
+        if (
+          branch !== null &&
+          isTemporaryWorktreeBranch(branch) &&
+          (yield* git
+            .hasCommit({
+              cwd: project.workspaceRoot,
+              refName: `refs/heads/${WORKTREE_BRANCH_PREFIX}`,
+            })
+            .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId))))
+        ) {
+          branch = flattenTemporaryWorktreeBranchName(branch);
+        }
         yield* setupTracker.stageStatus(threadId, "checkout", "running");
         // Project setting > environment setting (KAT-3442); null lets the new
         // checkout's t3.json decide. Settings that fail to load fall through the same way.

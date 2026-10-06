@@ -17,8 +17,8 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { ChildProcessSpawner } from "effect/unstable/process";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { ChildProcessSpawner } from "effect/process";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
@@ -29,7 +29,7 @@ import {
 import { CLOUD_MANAGED_ENDPOINT_URL } from "../cloud/config.ts";
 import * as CloudManagedEndpointRuntime from "../cloud/ManagedEndpointRuntime.ts";
 import * as ServerConfig from "../config.ts";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import type * as VcsProcess from "../vcs/VcsProcess.ts";
 import {
@@ -169,6 +169,7 @@ const endpointRuntimeLayer = Layer.succeed(
       Effect.succeed({ status: "running", providerKind: "cloudflare_tunnel", pid: 1 }),
     getStatus: Effect.succeed({ status: "running", providerKind: "cloudflare_tunnel", pid: 1 }),
     recoveryRequests: Stream.empty,
+    tunnelConnected: Stream.empty,
     requestRecovery: () => Effect.void,
     withLinkStateLock: (effect) => effect,
   }),
@@ -249,7 +250,7 @@ const linearWebhookAdminLayer = Layer.mock(LinearWebhookAdmin)({
     }),
 });
 const layer = RoutineConnectionsLive.pipe(
-  Layer.provideMerge(RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistenceMemory))),
+  Layer.provideMerge(RoutineStoreLive.pipe(Layer.provideMerge(SqlitePersistence.layerMemory))),
   Layer.provideMerge(secretsLayer),
   Layer.provide(githubLayer),
   Layer.provide(endpointRuntimeLayer),

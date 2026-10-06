@@ -1,7 +1,7 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { chooseLoadBalancedEnvironment } from "@kata-sh/code-client-runtime/load-balancing";
 import type { EnvironmentId } from "@kata-sh/code-contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 import { useCallback, useContext, useMemo } from "react";
 
 import { serverEnvironment } from "../state/server";

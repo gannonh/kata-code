@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 /** Shown on routine runs that were in flight when the server moved to orchestration V2. */
 export const UPGRADE_IN_FLIGHT_DETAIL =

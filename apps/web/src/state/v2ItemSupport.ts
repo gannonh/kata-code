@@ -7,7 +7,7 @@ import {
 } from "@kata-sh/code-client-runtime/state/item-support";
 import type { EnvironmentId, ThreadId, TurnItemId } from "@kata-sh/code-contracts";
 import { scopeThreadRef } from "@kata-sh/code-client-runtime/environment";
-import { Atom } from "effect/unstable/reactivity";
+import { Atom } from "effect/reactivity";
 
 import { environmentThreadDetails } from "./threads";
 

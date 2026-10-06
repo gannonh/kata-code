@@ -1,7 +1,7 @@
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64 from "effect/encoding/Base64";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
@@ -16,13 +16,38 @@ export const ManagedEndpointCleanupMode = Schema.Literals(["off", "dry-run", "en
 export type ManagedEndpointCleanupMode = typeof ManagedEndpointCleanupMode.Type;
 const decodeManagedEndpointCleanupMode = Schema.decodeUnknownEffect(ManagedEndpointCleanupMode);
 
-export const managedEndpointCleanupModeConfig = Config.String("RELAY_TUNNEL_CLEANUP_MODE").pipe(
-  Config.withDefault("off"),
-  Config.map((value) => value.trim() || "off"),
-  Config.mapEffect((value) =>
-    decodeManagedEndpointCleanupMode(value).pipe(
-      Effect.mapError((error) => new Config.ConfigError(error)),
+const RELAY_TUNNEL_CLEANUP_MODE = "RELAY_TUNNEL_CLEANUP_MODE";
+/** Separate switch for tunnels whose host never registered recovery. */
+const RELAY_LEGACY_TUNNEL_CLEANUP_MODE = "RELAY_LEGACY_TUNNEL_CLEANUP_MODE";
+
+const cleanupModeConfig = (name: string) =>
+  Config.String(name).pipe(
+    Config.withDefault("off"),
+    Config.map((value) => value.trim() || "off"),
+    Config.mapEffect((value) =>
+      decodeManagedEndpointCleanupMode(value).pipe(
+        Effect.mapError((error) => new Config.ConfigError(error)),
+      ),
     ),
+  );
+
+export const managedEndpointCleanupModeConfig = cleanupModeConfig(RELAY_TUNNEL_CLEANUP_MODE);
+export const legacyManagedEndpointCleanupModeConfig = cleanupModeConfig(
+  RELAY_LEGACY_TUNNEL_CLEANUP_MODE,
+);
+
+/**
+ * Overrides the 7-day legacy grace period, in minutes, so the disposable
+ * canary stage can exercise legacy cleanup. Ignored on the prod stage.
+ */
+const RELAY_LEGACY_TUNNEL_GRACE_MINUTES = "RELAY_LEGACY_TUNNEL_GRACE_MINUTES";
+
+// A zero or negative override would be ignored at runtime, silently leaving
+// the canary on the 7-day grace period, so reject it when the deploy reads it.
+export const legacyTunnelGraceMinutesConfig = Config.option(
+  Config.schema(
+    Schema.NumberFromString.pipe(Schema.check(Schema.isInt(), Schema.isGreaterThan(0))),
+    RELAY_LEGACY_TUNNEL_GRACE_MINUTES,
   ),
 );
 
@@ -38,7 +63,7 @@ const LINEAR_OAUTH_TOKEN_ENCRYPTION_KEY_BYTES = 32;
 const isNonBlank = (value: string) => value.trim().length > 0;
 
 const isLinearOAuthTokenEncryptionKey = (value: string) =>
-  Result.match(Encoding.decodeBase64(value), {
+  Result.match(Base64.decode(value), {
     onFailure: () => false,
     onSuccess: (bytes) => bytes.length === LINEAR_OAUTH_TOKEN_ENCRYPTION_KEY_BYTES,
   });
@@ -110,6 +135,9 @@ export class RelayConfiguration extends Context.Service<
     readonly managedEndpointNamespace: string | undefined;
     readonly linearOAuth: LinearOAuthConfiguration | null;
     readonly managedEndpointCleanupMode?: ManagedEndpointCleanupMode;
+    readonly legacyManagedEndpointCleanupMode?: ManagedEndpointCleanupMode;
+    /** Canary-only override of the legacy grace period; ignored on prod. */
+    readonly legacyTunnelGraceMinutes?: number;
   }
 >()("kata-code-relay/Config/RelayConfiguration") {}
 

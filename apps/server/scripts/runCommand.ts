@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { ServerCliCommandExitError } from "./cliErrors.ts";
 

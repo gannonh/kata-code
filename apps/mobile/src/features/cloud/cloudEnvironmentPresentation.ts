@@ -3,6 +3,7 @@ import {
   orchestrationProtocolCompatibilityError,
   type EnvironmentConnectionPhase,
 } from "@kata-sh/code-client-runtime/connection";
+import { relayOfflineReasonMessage } from "@kata-sh/code-client-runtime/relay";
 
 export interface AvailableCloudEnvironmentPresentation {
   readonly connectionError: string | null;
@@ -39,7 +40,8 @@ export function availableCloudEnvironmentPresentation(input: {
   }
 
   if (input.status?.status === "offline") {
-    const connectionError = input.status.error ?? "Relay is offline.";
+    const connectionError =
+      relayOfflineReasonMessage(input.status) ?? input.status.error ?? "Relay is offline.";
     return {
       connectionError,
       connectionErrorTraceId: input.status.traceId ?? null,
