@@ -6,10 +6,10 @@ Raise replica count on the retained production database without Alchemy replacin
 
 ## Target
 
-`infra/relay/src/db.ts` sets the prod shared database to:
+`infra/relay/src/db.ts` sets the prod shared database to the non-HA PS-5 plan:
 
-- `clusterSize: "PS_20"`
-- `replicas: 2`
+- `clusterSize: "PS_5"`
+- `replicas: 0`
 - `arch: "arm"`
 - `region: { slug: "us-west" }`
 
@@ -47,5 +47,5 @@ Confirm the restored identity is `katacoderelay` / `s5mpblbu2m4s`. Then dry-run 
 Production apply is a separate authorized step. Do not apply from a scale-path PR unless that issue
 says to apply.
 
-After an authorized apply, inspect state again. Desired `replicas` must be `2`. The physical
+After an authorized apply, inspect state again. Desired `replicas` must match `db.ts`. The physical
 database id must stay `s5mpblbu2m4s`.
